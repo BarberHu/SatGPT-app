@@ -17,6 +17,7 @@ import socket
 import json
 import re
 from flask import Blueprint, request, jsonify
+from flask_cors import CORS
 import openai
 
 """GOOGLE DRIVE START"""
@@ -68,6 +69,8 @@ Tiles      = ee.FeatureCollection("projects/servir-mekong/SWMT/Tiles")
 # STD_NAMES   = ['blue2', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2']
 
 app = Flask(__name__)
+# Enable CORS for React frontend
+CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}})
 
 @app.route('/flask-health-check', methods=['GET'])
 def health_check():

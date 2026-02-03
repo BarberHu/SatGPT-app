@@ -1,0 +1,149 @@
+# AGENTS.md
+
+## Scope
+Applies to the entire repository: `E:\GMS\Wei\SatGPT-app`.
+
+## Project Overview
+- Backend: Python Flask app in `app.py`.
+- Frontend: Jinja2 template `templates/index.html` + static JS/CSS in `static/`.
+- Mapping/UI: Mapbox GL JS, jQuery, Bootstrap.
+- Data/AI: Google Earth Engine (EE) + OpenAI API.
+- Deployment artifacts: `Dockerfile`, `app.yaml`.
+
+## Important Files
+- `app.py`: Flask routes, EE initialization, API endpoints.
+- `config.py`: Loads required environment variables and EE credentials.
+- `wsgi.py`: Entry point for WSGI servers.
+- `templates/index.html`: Frontend HTML template.
+- `static/script.js`: Main UI logic (global `water` namespace).
+- `static/main.css`: Styles.
+- `requirements.txt`: Python dependencies.
+- `.env.example`: Environment variable template.
+- `Dockerfile`: Container build (runs `python app.py`).
+- `app.yaml`: App Engine config (legacy runtime).
+
+## Repository Layout
+- `templates/`: Jinja2 HTML templates rendered by Flask.
+- `static/`: Browser assets (JS, CSS, images, geojson).
+- Root files: Flask app, config, runtime configs.
+
+## Build / Run / Test Commands
+### Python Environment Setup
+- Create venv: `python3 -m venv satgpt-venv`
+- Activate (Unix): `source satgpt-venv/bin/activate`
+- Install deps: `pip install -r requirements.txt`
+
+### Run (Development)
+- Start server: `python app.py`
+- Health check: `GET /flask-health-check`
+- Template entrypoint: `/` renders `templates/index.html`.
+
+### Docker
+- `Dockerfile` runs `python app.py` and exposes `5000`.
+- No docker-compose configuration detected.
+
+### Tests
+- No test framework or test directory detected.
+- Single-test command: **not available** (no tests configured).
+
+### Lint / Format
+- No linter/formatter configuration detected (`.flake8`, `pyproject.toml`, etc.).
+- Do not introduce new lint tools without explicit request.
+- If adding linting later, document commands in this file.
+
+## Environment & Secrets
+- Copy `.env.example` to `.env` and fill values.
+- Required vars (see `config.py`):
+  - `EE_ACCOUNT`
+  - `EE_PRIVATE_KEY_FILE`
+  - `GOOGLE_MAPS_API_KEY`
+  - `MAPBOX_ACCESS_KEY`
+  - `CHATGPT_API_KEY`
+- **Never commit**: `.env`, `.env.*`, or `satgpt-*.json` keys.
+- Keep service account JSON outside version control.
+- Update `.env.example` if new required vars are introduced.
+
+## Code Style Guidelines
+
+### Python (Flask)
+- Keep imports grouped: stdlib → third-party → local.
+- Use snake_case for functions/variables; ALL_CAPS for constants.
+- Routes live in `app.py` and use `@app.route`.
+- Prefer `request.args.get(...)` for query params.
+- JSON responses:
+  - Use `Response()` and set `Content-Type` to `application/json`.
+  - Serialize with `json.dumps` (existing pattern).
+- For new endpoints, keep response keys stable and predictable.
+- Avoid global side effects outside initialization blocks.
+- Prefer explicit error handling:
+  - Return JSON error with HTTP status codes.
+  - Do not silently swallow exceptions.
+- Type hints are not used currently; keep consistent unless adding them broadly.
+- Keep long EE workflows in helper functions when possible.
+
+### JavaScript (static/script.js)
+- Use the global namespace object `water` for new app logic.
+- Follow the constructor/prototype pattern (`water.App`, `water.App.prototype.*`).
+- DOM and AJAX use jQuery (`$`, `$.ajax`); keep consistent.
+- Mapbox GL JS is accessed via global `mapboxgl`.
+- Prefer existing variable style (`var`/`let`) and camelCase names.
+- Avoid introducing new global variables outside `water` unless required.
+- Handle errors in async calls; avoid empty `catch` blocks.
+- Use existing UI hooks (sliders, buttons) before adding new ones.
+- Keep map layer IDs consistent to avoid duplicate sources/layers.
+
+### HTML / Templates (templates/index.html)
+- Jinja2 templating is used for API keys (`{{ MAPBOX_ACCESS_KEY }}`).
+- Keep third-party script/style includes in `<head>`.
+- UI layout uses Bootstrap classes and custom CSS.
+- Inline scripts exist; follow local patterns when modifying UI behaviors.
+- If adding new scripts, prefer loading from `static/`.
+
+### CSS (static/main.css)
+- Keep selectors consistent with existing DOM structure.
+- Prefer class-based selectors; avoid unnecessary inline styles.
+- Preserve existing panel/legend layout conventions.
+
+## Data / Assets
+- Static assets (images, geojson) live under `static/`.
+- If adding assets, reference them via `/static/...` paths.
+- Large binary assets should not be committed without approval.
+
+## API / Backend Conventions
+- Endpoints generally return JSON with EE map IDs and URLs.
+- Client expects keys like `eeMapId`, `eeToken`, `eeMapURL`.
+- Keep response shapes stable to avoid frontend regressions.
+- Do not change endpoint URLs without updating `static/script.js`.
+
+## Verification Checklist
+- Ensure `.env` is populated with valid keys.
+- Run `python app.py` and load `/` in browser.
+- Validate `/flask-health-check` returns `healthy`.
+- Exercise key UI flows:
+  - Load default map layer.
+  - Trigger an AJAX call and confirm map updates.
+- If EE calls fail, verify service account credentials first.
+
+## Logging / Debugging
+- Prefer `app.logger` (Flask) for server logs when adding new logging.
+- Avoid leaving verbose debug prints in committed code.
+- In JS, keep `console.log` usage minimal and purposeful.
+- For EE failures, surface clear error messages to the client.
+
+## Documentation
+- Update `README.md` if commands or setup steps change.
+- Keep `.env.example` in sync with required environment variables.
+
+## Tooling / Rules
+- Cursor rules: none found (`.cursor/rules/`, `.cursorrules`).
+- Copilot rules: none found (`.github/copilot-instructions.md`).
+
+## Dependency Changes
+- Keep `requirements.txt` sorted if adding new dependencies.
+- Avoid major version bumps without explicit request.
+
+## Change Discipline
+- Keep changes minimal and consistent with existing patterns.
+- Do not add new dependencies without explicit request.
+- Avoid large refactors unless explicitly requested.
+- Prefer small, reviewable commits (if asked to commit).
