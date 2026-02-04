@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
+import AgentPanel from './AgentPanel';
 
 function ControlPanel() {
   const {
@@ -26,6 +27,8 @@ function ControlPanel() {
     selectedGridCords,
     setSelectedGridCords,
     updateLayerData,
+    appMode,
+    setAppMode,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -129,9 +132,16 @@ function ControlPanel() {
       
       <hr style={{ margin: '10px 0px 20px 0px' }} />
 
-      {/* Layer Control Section */}
-      <div className="slect-c">
-        <h2>Layer Control</h2>
+      {/* Content based on mode - synced with ChatBox toggle */}
+      {appMode === 'agent' ? (
+        <div className="agent-mode-content">
+          <AgentPanel />
+        </div>
+      ) : (
+        <>
+          {/* Layer Control Section */}
+          <div className="slect-c">
+            <h2>Layer Control</h2>
         
         <div style={{ paddingLeft: '10px' }}>
           <div>
@@ -339,6 +349,8 @@ function ControlPanel() {
           <p>Help</p>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

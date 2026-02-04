@@ -25,6 +25,18 @@ function MapContainer() {
     is3DEnabled,
     isBuildingsEnabled,
     setActiveModal,
+    appMode,
+    agentImagery,
+    agentImageryLoading,
+    floodAgentState,
+    // Agent control states
+    agentSelectedPeriod,
+    agentSelectedType,
+    agentShowFloodDetection,
+    agentShowPopulationLayer,
+    agentShowUrbanLayer,
+    agentShowLandcoverLayer,
+    agentImpactData,
   } = useAppContext();
 
   // Track if map is initialized
@@ -285,6 +297,181 @@ function MapContainer() {
       }
     }
   }, [isBuildingsEnabled]);
+
+  // ========== FloodAgent Imagery Layer Processing ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+
+    // Clean up old agent layers
+    const agentLayers = [
+      'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
+      'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
+      'agent-flood-detection',
+      'agent-population', 'agent-urban', 'agent-landcover'
+    ];
+    const agentSources = [
+      'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
+      'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
+      'agent-flood-detection',
+      'agent-population', 'agent-urban', 'agent-landcover'
+    ];
+
+    agentLayers.forEach(id => {
+      if (map.getLayer(id)) map.removeLayer(id);
+    });
+    agentSources.forEach(id => {
+      if (map.getSource(id)) map.removeSource(id);
+    });
+
+    if (!agentImagery) return;
+
+    // Determine which period and type to show based on control state
+    const periodKey = agentSelectedPeriod; // 'pre_date', 'peek_date', 'after_date'
+    const typeKey = agentSelectedType; // 'sentinel2', 'sentinel1'
+
+    // Debug: Log which imagery is being loaded
+    // console.log('🗺️ Loading imagery:', {
+    //   periodKey,
+    //   typeKey,
+    //   tileUrl: agentImagery[periodKey]?.[typeKey]?.tile_url?.substring(0, 80) + '...',
+    //   allPeriods: {
+    //     pre_date: agentImagery.pre_date?.[typeKey]?.tile_url ? '✅' : '❌',
+    //     peek_date: agentImagery.peek_date?.[typeKey]?.tile_url ? '✅' : '❌',
+    //     after_date: agentImagery.after_date?.[typeKey]?.tile_url ? '✅' : '❌',
+    //   }
+    // });
+
+    // Add selected Sentinel imagery layer
+    const periodData = agentImagery[periodKey];
+    if (periodData?.[typeKey]?.tile_url) {
+      const sourceId = `agent-${typeKey === 'sentinel2' ? 's2' : 's1'}-${periodKey.replace('_date', '')}`;
+      map.addSource(sourceId, {
+        type: 'raster',
+        tiles: [periodData[typeKey].tile_url],
+        tileSize: 256,
+      });
+      map.addLayer({
+        id: sourceId,
+        type: 'raster',
+        source: sourceId,
+        paint: {
+          'raster-opacity': 1,
+        },
+      });
+    }
+
+    // Add flood detection layer if enabled
+    if (agentShowFloodDetection && agentImagery.flood_detection?.tile_url) {
+      map.addSource('agent-flood-detection', {
+        type: 'raster',
+        tiles: [agentImagery.flood_detection.tile_url],
+        tileSize: 256,
+      });
+      map.addLayer({
+        id: 'agent-flood-detection',
+        type: 'raster',
+        source: 'agent-flood-detection',
+        paint: {
+          'raster-opacity': 0.7,
+        },
+      });
+    }
+
+    // Add impact assessment layers if available and enabled
+    if (agentImpactData?.layers) {
+      if (agentShowPopulationLayer && agentImpactData.layers.population?.tile_url) {
+        map.addSource('agent-population', {
+          type: 'raster',
+          tiles: [agentImpactData.layers.population.tile_url],
+          tileSize: 256,
+        });
+        map.addLayer({
+          id: 'agent-population',
+          type: 'raster',
+          source: 'agent-population',
+          paint: { 'raster-opacity': 0.7 },
+        });
+      }
+      
+      if (agentShowUrbanLayer && agentImpactData.layers.urban?.tile_url) {
+        map.addSource('agent-urban', {
+          type: 'raster',
+          tiles: [agentImpactData.layers.urban.tile_url],
+          tileSize: 256,
+        });
+        map.addLayer({
+          id: 'agent-urban',
+          type: 'raster',
+          source: 'agent-urban',
+          paint: { 'raster-opacity': 0.7 },
+        });
+      }
+      
+      if (agentShowLandcoverLayer && agentImpactData.layers.landcover?.tile_url) {
+        map.addSource('agent-landcover', {
+          type: 'raster',
+          tiles: [agentImpactData.layers.landcover.tile_url],
+          tileSize: 256,
+        });
+        map.addLayer({
+          id: 'agent-landcover',
+          type: 'raster',
+          source: 'agent-landcover',
+          paint: { 'raster-opacity': 0.7 },
+        });
+      }
+    }
+
+  }, [agentImagery, appMode, agentSelectedPeriod, agentSelectedType, agentShowFloodDetection, agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData]);
+
+  // FloodAgent GeoJSON 边界处理
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+    if (!floodAgentState?.geojson) return;
+
+    const sourceId = 'agent-geojson';
+    const layerId = 'agent-geojson-layer';
+    const outlineLayerId = 'agent-geojson-outline';
+
+    // 移除已存在的图层和源
+    if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId);
+    if (map.getLayer(layerId)) map.removeLayer(layerId);
+    if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+    // 添加新的源和图层
+    map.addSource(sourceId, {
+      type: 'geojson',
+      data: floodAgentState.geojson,
+    });
+
+    map.addLayer({
+      id: layerId,
+      type: 'fill',
+      source: sourceId,
+      paint: {
+        'fill-color': '#3b82f6',
+        'fill-opacity': 0.1,
+      },
+    });
+
+    map.addLayer({
+      id: outlineLayerId,
+      type: 'line',
+      source: sourceId,
+      paint: {
+        'line-color': '#3b82f6',
+        'line-width': 2,
+      },
+    });
+
+    // 适配边界
+    if (floodAgentState.bounds) {
+      const { west, south, east, north } = floodAgentState.bounds;
+      map.fitBounds([[west, south], [east, north]], { padding: 50 });
+    }
+  }, [floodAgentState?.geojson, floodAgentState?.bounds, appMode]);
 
   // Zoom to country
   const zoomToCountry = useCallback((bounds) => {

@@ -1,0 +1,48 @@
+export * from "./types-anthropic.js";
+export const GoogleAISafetyCategory = {
+    Harassment: "HARM_CATEGORY_HARASSMENT",
+    HARASSMENT: "HARM_CATEGORY_HARASSMENT",
+    HARM_CATEGORY_HARASSMENT: "HARM_CATEGORY_HARASSMENT",
+    HateSpeech: "HARM_CATEGORY_HATE_SPEECH",
+    HATE_SPEECH: "HARM_CATEGORY_HATE_SPEECH",
+    HARM_CATEGORY_HATE_SPEECH: "HARM_CATEGORY_HATE_SPEECH",
+    SexuallyExplicit: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    SEXUALLY_EXPLICIT: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    HARM_CATEGORY_SEXUALLY_EXPLICIT: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    Dangerous: "HARM_CATEGORY_DANGEROUS",
+    DANGEROUS: "HARM_CATEGORY_DANGEROUS",
+    HARM_CATEGORY_DANGEROUS: "HARM_CATEGORY_DANGEROUS",
+    CivicIntegrity: "HARM_CATEGORY_CIVIC_INTEGRITY",
+    CIVIC_INTEGRITY: "HARM_CATEGORY_CIVIC_INTEGRITY",
+    HARM_CATEGORY_CIVIC_INTEGRITY: "HARM_CATEGORY_CIVIC_INTEGRITY",
+};
+export const GoogleAISafetyThreshold = {
+    None: "BLOCK_NONE",
+    NONE: "BLOCK_NONE",
+    BLOCK_NONE: "BLOCK_NONE",
+    Few: "BLOCK_ONLY_HIGH",
+    FEW: "BLOCK_ONLY_HIGH",
+    BLOCK_ONLY_HIGH: "BLOCK_ONLY_HIGH",
+    Some: "BLOCK_MEDIUM_AND_ABOVE",
+    SOME: "BLOCK_MEDIUM_AND_ABOVE",
+    BLOCK_MEDIUM_AND_ABOVE: "BLOCK_MEDIUM_AND_ABOVE",
+    Most: "BLOCK_LOW_AND_ABOVE",
+    MOST: "BLOCK_LOW_AND_ABOVE",
+    BLOCK_LOW_AND_ABOVE: "BLOCK_LOW_AND_ABOVE",
+    Off: "OFF",
+    OFF: "OFF",
+    BLOCK_OFF: "OFF",
+};
+export const GoogleAISafetyMethod = {
+    Severity: "SEVERITY",
+    Probability: "PROBABILITY",
+};
+export const GeminiSearchToolAttributes = [
+    "googleSearchRetrieval",
+    "googleSearch",
+];
+export const GeminiToolAttributes = [
+    "functionDeclaration",
+    "retrieval",
+    ...GeminiSearchToolAttributes,
+];
