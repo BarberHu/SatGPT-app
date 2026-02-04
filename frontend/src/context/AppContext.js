@@ -10,11 +10,34 @@ export const useAppContext = () => {
   return context;
 };
 
+// FloodAgent 默认状态
+const defaultFloodAgentState = {
+  event: null,
+  event_description: null,
+  flood_report: null,
+  report_document: null,
+  pre_date: null,
+  after_date: null,
+  peek_date: null,
+  location: null,
+  coordinates: null,
+  bounds: null,
+  geojson: null,
+  search_sources: null,
+  is_valid_flood_query: false,
+};
+
 export const AppProvider = ({ children }) => {
   // UI State
   const [isPanelVisible, setIsPanelVisible] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [warning, setWarning] = useState('');
+  
+  // 模式切换: 'ask' 或 'agent'
+  const [appMode, setAppMode] = useState('ask');
+  
+  // ChatBox 模式切换 (与 appMode 同步)
+  const [chatMode, setChatMode] = useState('ask');
   
   // Modal State
   const [activeModal, setActiveModal] = useState('welcome'); // 'welcome', 'prompt', '3d', 'error', 'contact', 'help', null
@@ -68,6 +91,37 @@ export const AppProvider = ({ children }) => {
   
   // GEE Code Download
   const [geeCodeUrl, setGeeCodeUrl] = useState(null);
+  
+  // ========== FloodAgent 状态 (智能体模式) ==========
+  const [floodAgentState, setFloodAgentState] = useState(defaultFloodAgentState);
+  
+  // FloodAgent 影像图层数据
+  const [agentImagery, setAgentImagery] = useState(null);
+  const [agentImageryLoading, setAgentImageryLoading] = useState(false);
+  
+  // ========== Agent Mode Control States ==========
+  const [agentSelectedPeriod, setAgentSelectedPeriod] = useState('peek_date'); // 'pre_date' | 'peek_date' | 'after_date'
+  const [agentSelectedType, setAgentSelectedType] = useState('sentinel2'); // 'sentinel2' | 'sentinel1'
+  const [agentShowFloodDetection, setAgentShowFloodDetection] = useState(true);
+  const [agentShowPopulationLayer, setAgentShowPopulationLayer] = useState(false);
+  const [agentShowUrbanLayer, setAgentShowUrbanLayer] = useState(false);
+  const [agentShowLandcoverLayer, setAgentShowLandcoverLayer] = useState(false);
+  const [agentImpactData, setAgentImpactData] = useState(null);
+  const [agentImpactLoading, setAgentImpactLoading] = useState(false);
+  
+  // 更新 FloodAgent 单个字段
+  const updateFloodAgentField = useCallback((field, value) => {
+    setFloodAgentState(prev => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+  
+  // 重置 FloodAgent 状态
+  const resetFloodAgentState = useCallback(() => {
+    setFloodAgentState(defaultFloodAgentState);
+    setAgentImagery(null);
+  }, []);
   
   // Toggle layer visibility
   const toggleLayerVisibility = useCallback((layerName) => {
@@ -189,6 +243,40 @@ export const AppProvider = ({ children }) => {
     // GEE Code
     geeCodeUrl,
     setGeeCodeUrl,
+    
+    // App Mode (ask/agent)
+    appMode,
+    setAppMode,
+    chatMode,
+    setChatMode,
+    
+    // FloodAgent State
+    floodAgentState,
+    setFloodAgentState,
+    updateFloodAgentField,
+    resetFloodAgentState,
+    agentImagery,
+    setAgentImagery,
+    agentImageryLoading,
+    setAgentImageryLoading,
+    
+    // Agent Mode Controls
+    agentSelectedPeriod,
+    setAgentSelectedPeriod,
+    agentSelectedType,
+    setAgentSelectedType,
+    agentShowFloodDetection,
+    setAgentShowFloodDetection,
+    agentShowPopulationLayer,
+    setAgentShowPopulationLayer,
+    agentShowUrbanLayer,
+    setAgentShowUrbanLayer,
+    agentShowLandcoverLayer,
+    setAgentShowLandcoverLayer,
+    agentImpactData,
+    setAgentImpactData,
+    agentImpactLoading,
+    setAgentImpactLoading,
   };
 
   return (

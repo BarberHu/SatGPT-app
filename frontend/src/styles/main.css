@@ -870,3 +870,51 @@ a.mapboxgl-ctrl-logo {
     left: 30%;
   }
 }
+
+/*****************************/
+/* Mode Tabs (传统模式/智能体模式) */
+/*****************************/
+
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.mode-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-tab:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.mode-tab.active {
+  background: white;
+  color: #1f2937;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.agent-mode-content {
+  margin: -15px;
+  margin-top: 0;
+  height: calc(100vh - 180px);
+  overflow: hidden;
+}
+
+.agent-mode-content .agent-panel {
+  height: 100%;
+}
+
