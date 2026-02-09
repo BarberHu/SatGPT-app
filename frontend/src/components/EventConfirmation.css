@@ -1,82 +1,129 @@
 /**
- * 事件确认组件样式
+ * 事件确认组件样式 - 模态弹窗版本
  */
+
+/* 模态弹窗遮罩层 */
+.event-confirmation-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 模态弹窗容器 */
+.event-confirmation-modal {
+  max-width: 480px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 
 .event-confirmation {
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  margin: 12px;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   overflow: hidden;
 }
 
 .confirmation-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border-bottom: 1px solid #fcd34d;
+  gap: 10px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-bottom: none;
 }
 
-.confirmation-header .warning-icon {
-  color: #d97706;
+.confirmation-header .header-icon {
+  color: white;
 }
 
 .confirmation-header span {
   flex: 1;
-  font-weight: 500;
-  color: #92400e;
-  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  font-size: 15px;
 }
 
 .edit-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border: none;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.7);
-  color: #92400e;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .edit-toggle:hover {
-  background: white;
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .confirmation-content {
-  padding: 16px;
+  padding: 20px;
 }
 
 .field-group {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .field-group label {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 12px;
   font-weight: 600;
   color: #6b7280;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .field-value {
   display: block;
-  font-size: 14px;
+  font-size: 15px;
   color: #1f2937;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border-radius: 8px;
 }
 
 .field-value.description {
-  font-size: 12px;
+  font-size: 13px;
   color: #4b5563;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .field-group input,
@@ -99,51 +146,52 @@
 .dates-group {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 16px;
+  gap: 16px;
+  margin-top: 20px;
+  padding-top: 20px;
   border-top: 1px solid #e5e7eb;
 }
 
 .date-field label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 11px;
   font-weight: 600;
   color: #6b7280;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .date-value {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: #1f2937;
-  padding: 6px 8px;
+  padding: 10px 12px;
   background: #f3f4f6;
-  border-radius: 4px;
+  border-radius: 8px;
   text-align: center;
 }
 
 .date-value.peek {
-  background: #fee2e2;
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
   color: #dc2626;
+  border: 1px solid #fecaca;
 }
 
 .date-field input {
   width: 100%;
-  padding: 6px 8px;
+  padding: 10px 12px;
   border: 1px solid #d1d5db;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
 .confirmation-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 16px 20px;
   background: #f9fafb;
   border-top: 1px solid #e5e7eb;
 }
@@ -152,11 +200,11 @@
 .btn-confirm {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 8px;
+  padding: 10px 20px;
   border: none;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: 8px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
@@ -174,8 +222,11 @@
 .btn-confirm {
   background: #3b82f6;
   color: white;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 .btn-confirm:hover {
   background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }

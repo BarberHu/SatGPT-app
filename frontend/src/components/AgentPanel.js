@@ -78,11 +78,11 @@ function AgentPanel() {
   const [sourcesDrawerOpen, setSourcesDrawerOpen] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     event: true,
-    dates: true,
+    dates: false,
     imagery: false,
     layers: false,
-    impact: true,
-    chatHistory: true,
+    impact: false,
+    chatHistory: false,
   });
 
   // Use CopilotKit's useCoAgent for state sync

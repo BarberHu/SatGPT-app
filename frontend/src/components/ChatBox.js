@@ -47,6 +47,7 @@ function ChatBox() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [agentExpanded, setAgentExpanded] = useState(true);
 
   const suggestions = dataType === 'floodHotspot' ? SUGGESTIONS_HOTSPOT : SUGGESTIONS;
 
@@ -163,169 +164,183 @@ function ChatBox() {
     setError('');
   };
 
-  // Agent mode - show CopilotKit chat
+  // Agent mode - show CopilotKit chat (Gemini-style layout)
   if (chatMode === 'agent') {
     return (
-      <div className="chat-box chat-box-with-toggle">
-        {/* Left side: vertical toggle switch */}
-        <div className="mode-toggle-container">
-          <div className="mode-toggle-switch">
-            <div 
-              className={`toggle-slider ${chatMode === 'agent' ? 'agent-active' : ''}`}
-            ></div>
-            <button 
-              className={`toggle-option ${chatMode === 'ask' ? 'active' : ''}`}
-              onClick={() => handleModeToggle('ask')}
-            >
-              Ask
-            </button>
-            <button 
-              className={`toggle-option ${chatMode === 'agent' ? 'active' : ''}`}
-              onClick={() => handleModeToggle('agent')}
-            >
-              Agent
+      <div className="chat-box chat-box-gemini">
+        {/* Collapse/Expand handle at top center */}
+        <div 
+          className="expand-handle"
+          onClick={() => setAgentExpanded(!agentExpanded)}
+          title={agentExpanded ? 'Collapse' : 'Expand'}
+        >
+          <div className="handle-bar"></div>
+          <i className={`fa fa-chevron-${agentExpanded ? 'down' : 'up'}`}></i>
+        </div>
+
+        {/* Agent chat interface - expandable */}
+        {agentExpanded && (
+          <div className="chat-main-area">
+            <CopilotChat
+              labels={{
+                title: "Flood Analysis Agent",
+                initial: "Hello! I'm the flood event analysis assistant. Which flood event would you like to analyze?",
+                placeholder: "Enter flood event information...",
+              }}
+              suggestions={[
+                {
+                  title: "2024 Chiang Mai Flood",
+                  message: "Please analyze the 2024 Chiang Mai flood event in Thailand",
+                },
+                {
+                  title: "2021 Zhengzhou Flood",
+                  message: "Please analyze the July 2021 Zhengzhou extreme rainfall event",
+                },
+                {
+                  title: "2020 Jakarta Flood",
+                  message: "Please analyze the January 2020 Jakarta flood event",
+                },
+              ]}
+              className="copilot-chat-full"
+              onError={(error) => {
+                if (error?.message?.includes('aborted') || error?.message?.includes('Aborted')) {
+                  console.log('ℹ️ Chat operation cancelled');
+                  return;
+                }
+                console.error('Chat error:', error);
+              }}
+            />
+          </div>
+        )}
+
+        {/* Bottom toolbar */}
+        <div className="chat-bottom-toolbar">
+          <div className="toolbar-left">
+            <button className="toolbar-icon-btn" title="Download report">
+              <i className="fa fa-arrow-down"></i>
             </button>
           </div>
-        </div>
-        
-        {/* Right side: Agent chat interface */}
-        <div className="chat-content agent-mode">
-          <CopilotChat
-            labels={{
-              title: "Flood Analysis Agent",
-              initial: "Hello! I'm the flood event analysis assistant. Which flood event would you like to analyze?",
-              placeholder: "Enter flood event information...",
-            }}
-            suggestions={[
-              {
-                title: "2024 Chiang Mai Flood",
-                message: "Please analyze the 2024 Chiang Mai flood event in Thailand",
-              },
-              {
-                title: "2021 Zhengzhou Flood",
-                message: "Please analyze the July 2021 Zhengzhou extreme rainfall event",
-              },
-              {
-                title: "2020 Jakarta Flood",
-                message: "Please analyze the January 2020 Jakarta flood event",
-              },
-            ]}
-            className="copilot-chat-inline"
-            onError={(error) => {
-              // Silently ignore abort errors (user cancelled)
-              if (error?.message?.includes('aborted') || error?.message?.includes('Aborted')) {
-                console.log('ℹ️ Chat operation cancelled');
-                return;
-              }
-              console.error('Chat error:', error);
-            }}
-          />
+          <div className="toolbar-right">
+            <div className="mode-dropdown" onClick={() => handleModeToggle('ask')}>
+              <span className="mode-label">Agent</span>
+              <i className="fa fa-chevron-down"></i>
+            </div>
+          </div>
         </div>
 
         <style jsx="true">{`
-          .chat-box-with-toggle {
-            display: flex;
-            flex-direction: row;
-            gap: 0;
-            align-items: stretch;
-          }
-          .mode-toggle-container {
-            display: flex;
-            align-items: center;
-            padding: 8px;
-            background: #f5f5f5;
-            border-radius: 12px 0 0 12px;
-          }
-          .mode-toggle-switch {
-            position: relative;
+          .chat-box-gemini {
             display: flex;
             flex-direction: column;
-            background: #e0e0e0;
-            border-radius: 20px;
-            padding: 3px;
+            background: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+          }
+          .chat-main-area {
+            flex: 1;
+            min-height: 0;
+          }
+          .copilot-chat-full {
+            height: 100%;
+            min-height: 180px;
+            max-height: 480px;
+            background: #fafafa;
+          }
+          .expand-handle {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 0;
+            cursor: pointer;
+            background: #f8f8f8;
+            transition: background 0.2s;
             gap: 2px;
           }
-          .toggle-slider {
-            position: absolute;
-            width: calc(100% - 6px);
-            height: calc(50% - 4px);
-            background: white;
-            border-radius: 16px;
-            top: 3px;
-            left: 3px;
-            transition: top 0.25s ease;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+          .expand-handle:hover {
+            background: #f0f0f0;
           }
-          .toggle-slider.agent-active {
-            top: calc(50% + 1px);
+          .handle-bar {
+            width: 32px;
+            height: 4px;
+            background: #d0d0d0;
+            border-radius: 2px;
+            transition: background 0.2s;
           }
-          .toggle-option {
-            position: relative;
-            z-index: 1;
-            padding: 8px 12px;
+          .expand-handle:hover .handle-bar {
+            background: #bbb;
+          }
+          .expand-handle i {
+            color: #999;
+            font-size: 10px;
+            line-height: 1;
+          }
+          .chat-bottom-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            margin: 0 8px 6px 8px;
+            background: #f5f5f5;
+            border-radius: 20px;
+          }
+          .toolbar-left, .toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+          }
+          .toolbar-icon-btn {
+            width: 28px;
+            height: 28px;
             border: none;
             background: transparent;
-            color: #888;
+            color: #666;
             cursor: pointer;
-            font-size: 11px;
-            font-weight: 600;
-            border-radius: 16px;
-            transition: color 0.2s;
-            white-space: nowrap;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            transition: all 0.2s;
           }
-          .toggle-option.active {
+          .toolbar-icon-btn:hover {
+            background: #e8e8e8;
             color: #333;
           }
-          .toggle-option:hover {
-            color: #555;
+          .mode-dropdown {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: #e8e8e8;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
           }
-          .chat-content {
-            flex: 1;
-            min-width: 0;
+          .mode-dropdown:hover {
+            background: #ddd;
           }
-          .chat-content.agent-mode {
-            background: #fafafa;
-            border-radius: 0 12px 12px 0;
-            overflow: hidden;
-            border: 1px solid #e8e8e8;
-            border-left: none;
+          .mode-label {
+            color: #333;
+            font-size: 12px;
+            font-weight: 500;
           }
-          .copilot-chat-inline {
-            height: 100%;
-            min-height: 200px;
-            max-height: 300px;
+          .mode-dropdown i {
+            color: #666;
+            font-size: 9px;
           }
         `}</style>
       </div>
     );
   }
 
-  // Ask mode
+  // Ask mode (Gemini-style layout)
   return (
-    <div className="chat-box chat-box-with-toggle">
-      {/* Left side: vertical toggle switch */}
-      <div className="mode-toggle-container">
-        <div className="mode-toggle-switch">
-          <div 
-            className={`toggle-slider ${chatMode === 'agent' ? 'agent-active' : ''}`}
-          ></div>
-          <button 
-            className={`toggle-option ${chatMode === 'ask' ? 'active' : ''}`}
-            onClick={() => handleModeToggle('ask')}
-          >
-            Ask
-          </button>
-          <button 
-            className={`toggle-option ${chatMode === 'agent' ? 'active' : ''}`}
-            onClick={() => handleModeToggle('agent')}
-          >
-            Agent
-          </button>
-        </div>
-      </div>
-
-      {/* Right side: Ask chat interface */}
-      <div className="chat-content ask-mode">
+    <div className="chat-box chat-box-gemini">
+      {/* Main input area */}
+      <div className="chat-main-area ask-area">
         {showSuggestions && (
           <div id="suggestionsBox">
             <h5>Try any of these...</h5>
@@ -341,10 +356,10 @@ function ChatBox() {
           </div>
         )}
 
-        <div className="chat-msg">
+        <div className="chat-input-wrapper">
           <input
             type="text"
-            className="chat-input"
+            className="chat-input-gemini"
             placeholder="Type your prompt here"
             value={chatInput}
             onChange={handleInputChange}
@@ -353,7 +368,7 @@ function ChatBox() {
             onKeyDown={handleKeyDown}
             disabled={isSubmitting}
           />
-          <button className="send-btn" onClick={handleSubmit} disabled={isSubmitting}>
+          <button className="send-btn-gemini" onClick={handleSubmit} disabled={isSubmitting}>
             {isSubmitting ? (
               <i className="fa fa-spinner fa-spin"></i>
             ) : (
@@ -365,70 +380,152 @@ function ChatBox() {
         {error && <p className="error">{error}</p>}
       </div>
 
+      {/* Bottom toolbar */}
+      <div className="chat-bottom-toolbar">
+        <div className="toolbar-left">
+          <button className="toolbar-icon-btn" title="Download code">
+            <i className="fa fa-arrow-down"></i>
+          </button>
+        </div>
+        <div className="toolbar-right">
+          <div className="mode-dropdown" onClick={() => handleModeToggle('agent')}>
+            <span className="mode-label">Ask</span>
+            <i className="fa fa-chevron-down"></i>
+          </div>
+        </div>
+      </div>
+
       <style jsx="true">{`
-        .chat-box-with-toggle {
+        .chat-box-gemini {
           display: flex;
-          flex-direction: row;
-          gap: 0;
-          align-items: stretch;
+          flex-direction: column;
+          background: #ffffff;
+          border-radius: 16px;
+          overflow: hidden;
+          border: 1px solid #e0e0e0;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
-        .mode-toggle-container {
+        .chat-main-area {
+          flex: 1;
+          min-height: 0;
+        }
+        .chat-main-area.ask-area {
+          display: flex;
+          flex-direction: column;
+          padding: 0;
+        }
+        .chat-input-wrapper {
           display: flex;
           align-items: center;
-          padding: 8px;
-          background: #f5f5f5;
-          border-radius: 12px 0 0 12px;
+          padding: 12px 16px;
+          gap: 12px;
         }
-        .mode-toggle-switch {
-          position: relative;
+        .chat-input-gemini {
+          flex: 1;
+          background: transparent;
+          border: none;
+          outline: none;
+          color: #333;
+          font-size: 15px;
+          padding: 8px 0;
+        }
+        .chat-input-gemini::placeholder {
+          color: #999;
+        }
+        .send-btn-gemini {
+          width: 36px;
+          height: 36px;
+          border: none;
+          background: #4a90d9;
+          color: white;
+          border-radius: 50%;
+          cursor: pointer;
           display: flex;
-          flex-direction: column;
-          background: #e0e0e0;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+          transition: all 0.2s;
+        }
+        .send-btn-gemini:hover {
+          background: #5a9fe9;
+          transform: scale(1.05);
+        }
+        .send-btn-gemini:disabled {
+          background: #ccc;
+          cursor: not-allowed;
+        }
+        .chat-bottom-toolbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 4px 8px;
+          margin: 0 8px 6px 8px;
+          background: #f5f5f5;
           border-radius: 20px;
-          padding: 3px;
-          gap: 2px;
         }
-        .toggle-slider {
-          position: absolute;
-          width: calc(100% - 6px);
-          height: calc(50% - 4px);
-          background: white;
-          border-radius: 16px;
-          top: 3px;
-          left: 3px;
-          transition: top 0.25s ease;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        .toolbar-left, .toolbar-right {
+          display: flex;
+          align-items: center;
+          gap: 4px;
         }
-        .toggle-slider.agent-active {
-          top: calc(50% + 1px);
-        }
-        .toggle-option {
-          position: relative;
-          z-index: 1;
-          padding: 8px 12px;
+        .toolbar-icon-btn {
+          width: 28px;
+          height: 28px;
           border: none;
           background: transparent;
-          color: #888;
+          color: #666;
           cursor: pointer;
-          font-size: 11px;
-          font-weight: 600;
-          border-radius: 16px;
-          transition: color 0.2s;
-          white-space: nowrap;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          transition: all 0.2s;
         }
-        .toggle-option.active {
+        .toolbar-icon-btn:hover {
+          background: #e8e8e8;
           color: #333;
         }
-        .toggle-option:hover {
-          color: #555;
-        }
-        .chat-content {
-          flex: 1;
-          min-width: 0;
-        }
-        .chat-content.ask-mode {
+        .mode-dropdown {
           display: flex;
-          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          padding: 4px 10px;
+          background: #e8e8e8;
+          border-radius: 16px;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .mode-dropdown:hover {
+          background: #ddd;
+        }
+        .mode-label {
+          color: #333;
+          font-size: 12px;
+          font-weight: 500;
+        }
+        .mode-dropdown i {
+          color: #666;
+          font-size: 9px;
+        }
+        #suggestionsBox {
+          background: #fafafa;
+          border-bottom: 1px solid #e8e8e8;
+        }
+        #suggestionsBox h5 {
+          color: #666;
+        }
+        #suggestionsBox .chat-message {
+          color: #333;
+        }
+        #suggestionsBox .chat-message:hover {
+          background: #f0f0f0;
+        }
+        .error {
+          color: #e74c3c;
+          padding: 0 16px 8px;
+          margin: 0;
+          font-size: 12px;
         }
       `}</style>
     </div>
