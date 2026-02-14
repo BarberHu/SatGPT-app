@@ -7,6 +7,10 @@ echo     SatGPT + FloodAgent Startup Script
 echo ==========================================
 echo.
 
+REM Set proxy for Google Earth Engine connection
+set HTTP_PROXY=http://127.0.0.1:7890
+set HTTPS_PROXY=http://127.0.0.1:7890
+
 REM Check ports
 echo [1/4] Checking port usage...
 netstat -ano | findstr :5001 >nul 2>&1

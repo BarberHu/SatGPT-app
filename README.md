@@ -1,70 +1,139 @@
-# About SatGPT
+# 🌊 SatGPT - Flood Analysis Platform
 
-SATGPT, an innovative solution that leverages the current capabilities of LLMs and integrates
-them with cloud computing platforms and Earth Observation data. SATGPT represents a fully
-functional, next-generation spatial decision support system designed for rapid deployment,
-particularly in resource-limited contexts.
+An intelligent flood event analysis platform integrating AI-powered chatbot, satellite remote sensing imagery, and interactive mapping capabilities.
 
+> **Forked from [sas-unescap/SatGPT-app](https://github.com/sas-unescap/SatGPT-app)** and extended with LangGraph AI Agent, CopilotKit integration, and advanced flood detection.
 
-### Setup Instructions
+## 📋 Overview
 
-1. **(Recommended) Set up a Python virtual environment:**
-   ```sh
-   python3 -m venv satgpt-venv
-   source satgpt-venv/bin/activate
-   ```
-   This keeps your dependencies isolated and avoids conflicts with other projects.
+- **🤖 AI Agent**: Conversational flood queries powered by LangGraph + CopilotKit
+- **🛰️ Satellite Imagery**: Sentinel-1/2 data via Google Earth Engine
+- **🗺️ Interactive Maps**: Multi-layer visualization with Mapbox
+- **📊 Impact Assessment**: Population, urban area, and land cover analysis
 
-2. **Copy the example environment file:**
-   ```sh
-   cp .env.example .env
-   ```
-3. **Edit `.env`** and fill in your own credentials:
+## 🏗️ Project Structure
 
-   ```env
-   EE_ACCOUNT=your_service_account_email
-   EE_PRIVATE_KEY_FILE=./satgpt-<your-project-id>-<unique>.json
-   GOOGLE_MAPS_API_KEY=your_google_maps_api_key
-   MAPBOX_ACCESS_KEY=your_mapbox_access_key
-   CHATGPT_API_KEY=your_openai_api_key
-   ```
+```
+SatGPT-app/
+├── app.py                 # Flask backend (port 5001)
+├── agent/                 # AI Agent backend (FastAPI + LangGraph)
+│   ├── server.py          # FastAPI server (port 8000)
+│   ├── flood_agent.py     # LangGraph agent
+│   ├── gee_service.py     # Google Earth Engine service
+│   ├── tools.py           # Agent tools (Tavily search)
+│   ├── prompts.py         # System prompts
+│   └── state.py           # State definitions
+├── frontend/              # React frontend (port 3000)
+│   └── src/
+│       ├── components/    # UI components
+│       ├── context/       # React context
+│       ├── hooks/         # Custom hooks
+│       └── services/      # API services
+├── runtime/               # CopilotKit runtime (port 5000)
+│   └── server.ts          # Express + CopilotKit
+├── static/                # Static assets
+├── templates/             # HTML templates
+├── start_all.bat          # One-click startup (Windows)
+└── stop_all.bat           # Stop all services
+```
 
-4. **Download your Google service account key** and place it in the project root (or wherever you specify in `EE_PRIVATE_KEY_FILE`). The file should be named with the pattern `satgpt-<your-project-id>-<unique>.json`.
+## 🚀 Quick Start
 
-5. **Install dependencies:**
-   ```sh
-   pip install -r requirements.txt
-   ```
+### Prerequisites
 
-5. **Run the Flask application:**
+- Node.js ≥ 18
+- Python ≥ 3.10
+- API Keys: OpenAI, Tavily, Mapbox, GEE Service Account
 
-   - **If using a virtual environment:**
-     ```sh
-     source satgpt-venv/bin/activate
-     ```
-   - **Development server (not for production):**
-     ```sh
-     python app.py
-     ```
+### Installation
 
-### Security Notes
-- All files matching `satgpt-*.json`, `.env`, and `.env.*` are ignored by git and should never be committed.
-- The `.env.example` is safe to commit and provides a template for others to configure their own environment.
+```bash
+# 1. Python environment
+python -m venv flood-venv
+.\flood-venv\Scripts\activate        # Windows
+pip install -r requirements.txt
+pip install -r agent/requirements.txt
 
-### Why this approach?
-This ensures:
-- No sensitive credentials are ever exposed in the public repository.
-- Each user can bring their own API keys and service accounts.
+# 2. Frontend dependencies
+cd frontend && npm install && cd ..
+
+# 3. Runtime dependencies
+cd runtime && npm install && cd ..
+```
+
+### Configuration
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in your credentials:
+
+```env
+OPENAI_API_KEY=your-openai-key
+TAVILY_API_KEY=your-tavily-key
+GOOGLE_APPLICATION_CREDENTIALS=./your-service-account.json
+GEE_PROJECT_ID=your-gcp-project
+REACT_APP_MAPBOX_ACCESS_KEY=your-mapbox-token
+```
+
+### Start Services
+
+```bash
+# One-click start (Windows)
+.\start_all.bat
+
+# Or start individually:
+# Terminal 1: Flask Backend (port 5001)
+python app.py
+
+# Terminal 2: FastAPI Agent (port 8000)
+cd agent && python server.py
+
+# Terminal 3: CopilotKit Runtime (port 5000)
+cd runtime && npm run dev
+
+# Terminal 4: React Frontend (port 3000)
+cd frontend && npm start
+```
+
+Open http://localhost:3000
+
+## 🎯 Usage
+
+1. Open the app and switch to **"Agent"** mode
+2. Enter a flood query, e.g., *"Analyze the 2024 Chiang Mai flood event"*
+3. Confirm the AI-extracted date information
+4. View satellite imagery and flood detection results on the map
+5. Download the analysis report
+
+## 📡 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/copilotkit` | POST | CopilotKit agent entry |
+| `/api/flood-images` | POST | Get Sentinel flood imagery |
+| `/api/flood-impact` | POST | Get impact assessment |
+| `/api/gee-status` | GET | GEE service status |
+| `/api/geocode` | GET | Geocode location |
+
+## 🔧 Architecture
+
+```
+React Frontend (3000) → CopilotKit Runtime (5000) → FastAPI Agent (8000)
+                                                         ├── LangGraph Agent
+                                                         ├── GEE Service
+                                                         └── Tavily Search
+```
+
+## 📄 License
+
+MIT License
+
+## 👤 Author
+
+**Wang Yang**
 
 ---
 
-## Quick Start
-
-1. Copy `.env.example` to `.env`
-2. Fill in your credentials
-3. Place your service account key as described above
-4. Install dependencies and run the app
-
----
-
-For more details, see comments in `config.py` and `.env.example`.
+*Built with React, CopilotKit, LangGraph, Google Earth Engine, and Mapbox*
