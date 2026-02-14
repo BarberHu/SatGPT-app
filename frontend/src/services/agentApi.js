@@ -24,7 +24,7 @@ export const getFloodImages = async (params) => {
     const response = await axios.post(`${AGENT_API_BASE}/api/flood-images`, params);
     return response.data;
   } catch (error) {
-    console.error('获取洪水影像失败:', error);
+    console.error('Failed to fetch flood imagery:', error);
     throw error;
   }
 };
@@ -42,7 +42,7 @@ export const getFloodImpact = async (params) => {
     const response = await axios.post(`${AGENT_API_BASE}/api/flood-impact`, params);
     return response.data;
   } catch (error) {
-    console.error('获取洪水损失评估失败:', error);
+    console.error('Failed to fetch flood impact assessment:', error);
     throw error;
   }
 };
@@ -55,7 +55,7 @@ export const checkGEEStatus = async () => {
     const response = await axios.get(`${AGENT_API_BASE}/api/gee-status`);
     return response.data;
   } catch (error) {
-    console.error('检查 GEE 状态失败:', error);
+    console.error('Failed to check GEE status:', error);
     throw error;
   }
 };

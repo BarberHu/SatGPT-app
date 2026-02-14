@@ -16,7 +16,7 @@ function SourcesDrawer({ sources, isOpen, onClose }) {
         <div className="drawer-header">
           <div className="header-title">
             <Globe size={18} />
-            <h3>信息来源</h3>
+            <h3>Sources</h3>
           </div>
           <button className="close-btn" onClick={onClose}>
             <X size={18} />
@@ -47,7 +47,7 @@ function SourcesDrawer({ sources, isOpen, onClose }) {
           ) : (
             <div className="no-sources">
               <Globe size={32} />
-              <p>暂无来源信息</p>
+              <p>No sources available</p>
             </div>
           )}
         </div>

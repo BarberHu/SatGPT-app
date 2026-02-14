@@ -52,23 +52,23 @@ def _classify_location_type(location_name: str) -> dict:
     try:
         model = _get_model()
         
-        prompt = f"""请判断以下地名的类型：
+        prompt = f"""Please determine the type of the following place name:
 
-地名: {location_name}
+Place name: {location_name}
 
-判断标准:
-1. "administrative" - 独立的行政区域，如：国家、省/州、市、县、区等有明确行政边界的地区
-   例如：北京市、德国、加利福尼亚州、东京都、巴黎
+Criteria:
+1. "administrative" - An independent administrative region, such as: country, province/state, city, county, district, etc., with clearly defined administrative boundaries
+   Examples: Beijing, Germany, California, Tokyo, Paris
 
-2. "composite" - 组合地名、地理区位或自然区域，包括：
-   - 多个行政区域的组合：京津冀、长三角、珠三角、欧盟
-   - 地理区位概念：华北地区、东南亚、中东
-   - 自然地理区域：黄河流域、亚马逊盆地、阿尔卑斯山区
-   - 跨行政区域的地理单元：密西西比河流域、多瑙河平原
+2. "composite" - A composite place name, geographic location, or natural region, including:
+   - Combinations of multiple administrative regions: Jing-Jin-Ji, Yangtze River Delta, Pearl River Delta, EU
+   - Geographic location concepts: North China, Southeast Asia, Middle East
+   - Natural geographic regions: Yellow River Basin, Amazon Basin, Alpine Region
+   - Trans-administrative geographic units: Mississippi River Basin, Danube Plain
 
-请严格按以下JSON格式返回，不要包含其他文字：
+Please return strictly in the following JSON format, do not include any other text:
 ```json
-{{"type": "administrative或composite", "reason": "简短说明"}}
+{{"type": "administrative or composite", "reason": "brief explanation"}}
 ```"""
 
         response = model.invoke([HumanMessage(content=prompt)])
@@ -102,30 +102,30 @@ def _generate_geojson_with_llm(location_name: str) -> Optional[Dict[str, Any]]:
     try:
         model = _get_model()
         
-        prompt = f"""请为以下地理区域生成一个大致的GeoJSON边界数据。
+        prompt = f"""Please generate an approximate GeoJSON boundary for the following geographic region.
 
-地理区域名称: {location_name}
+Geographic region name: {location_name}
 
-要求:
-1. 生成一个简化的多边形(Polygon)边界，用4-8个顶点即可表示大致范围
-2. 坐标格式为 [经度, 纬度]，使用WGS84坐标系
-3. 多边形必须闭合（首尾坐标相同）
-4. 同时提供中心点坐标和边界框
+Requirements:
+1. Generate a simplified Polygon boundary with 4-8 vertices to represent the approximate extent
+2. Coordinates should be in [longitude, latitude] format using WGS84 coordinate system
+3. The polygon must be closed (first and last coordinates must be the same)
+4. Also provide the center point coordinates and bounding box
 
-请严格按照以下JSON格式返回，不要包含任何其他文字：
+Please return strictly in the following JSON format, do not include any other text:
 
 ```json
 {{
-    "center": [经度, 纬度],
+    "center": [longitude, latitude],
     "bounds": {{
-        "west": 最西经度,
-        "south": 最南纬度,
-        "east": 最东经度,
-        "north": 最北纬度
+        "west": westernmost_longitude,
+        "south": southernmost_latitude,
+        "east": easternmost_longitude,
+        "north": northernmost_latitude
     }},
     "geometry": {{
         "type": "Polygon",
-        "coordinates": [[[经度1, 纬度1], [经度2, 纬度2], ..., [经度1, 纬度1]]]
+        "coordinates": [[[lon1, lat1], [lon2, lat2], ..., [lon1, lat1]]]
     }}
 }}
 ```"""
@@ -145,7 +145,7 @@ def _generate_geojson_with_llm(location_name: str) -> Optional[Dict[str, Any]]:
         
         # 验证数据结构
         if not all(k in data for k in ['center', 'bounds', 'geometry']):
-            raise ValueError("缺少必要字段")
+            raise ValueError("Missing required fields")
         
         # 构建GeoJSON Feature
         geojson_feature = {
@@ -188,7 +188,7 @@ def _get_location_from_nominatim(location_name: str) -> Optional[Dict[str, Any]]
             'format': 'geojson',
             'polygon_geojson': 1,
             'limit': 1,
-            'accept-language': 'zh-CN,en'  # 优先中文，其次英文
+            'accept-language': 'en,zh-CN'  # Prefer English, then Chinese
         }
         
         headers = {
@@ -318,7 +318,7 @@ def _get_location_coordinates_internal(location_name: str) -> Optional[Dict[str,
         "coordinates": [0.0, 0.0],
         "bounds": {"south": -90, "north": 90, "west": -180, "east": 180},
         "geojson": None,
-        "error": f"无法获取 '{location_name}' 的地理信息"
+        "error": f"Unable to retrieve geographic information for '{location_name}'"
     }
 
 
@@ -381,20 +381,20 @@ def _extract_flood_info_from_content(content: str) -> dict:
 def _format_sources_text(sources: list) -> str:
     """格式化来源信息为 Markdown 文本"""
     if not sources:
-        return "*本报告信息综合自网络公开资料*"
+        return "*This report is compiled from publicly available online sources*"
     
     lines = []
     # 显示所有来源
     for i, source in enumerate(sources, 1):
-        title = source.get("title", "未知来源")
+        title = source.get("title", "Unknown source")
         url = source.get("url", "#")
         lines.append(f"{i}. [{title}]({url})")
     
-    result = "\n".join(lines) if lines else "*本报告信息综合自网络公开资料*"
+    result = "\n".join(lines) if lines else "*This report is compiled from publicly available online sources*"
     
     # 如果来源不足10条，添加说明
     if len(sources) < 10:
-        result = f"**说明**: 由于该洪水事件公开报道数量有限，本次事件相关信息源较少（共 {len(sources)} 条），以下分析基于现有可获取的权威资料进行整理。\n\n" + result
+        result = f"**Note**: Due to limited public reporting on this flood event, the number of available sources is relatively small ({len(sources)} in total). The following analysis is based on the currently available authoritative sources.\n\n" + result
     
     return result
 
@@ -438,7 +438,7 @@ def search_flood_event(query: str) -> str:
         seen_urls = set()
         
         # 搜索策略1：基本搜索
-        enhanced_query = f"{query} 洪水 灾害 时间 日期"
+        enhanced_query = f"{query} flood disaster timeline date"
         response = tavily_client.search(
             query=enhanced_query,
             search_depth="advanced",
@@ -448,7 +448,7 @@ def search_flood_event(query: str) -> str:
         
         results = []
         if response.get("answer"):
-            results.append(f"综合答案: {response['answer']}")
+            results.append(f"Summary: {response['answer']}")
         
         for result in response.get("results", []):
             url = result.get("url", "")
@@ -456,12 +456,12 @@ def search_flood_event(query: str) -> str:
                 seen_urls.add(url)
                 title = result.get("title", "")
                 content = result.get("content", "")
-                results.append(f"标题: {title}\n内容: {content}\n来源: {url}\n")
+                results.append(f"Title: {title}\nContent: {content}\nSource: {url}\n")
                 if title and url:
                     all_sources.append({"title": title, "url": url, "content": content})
         
-        # 搜索策略2：搜索影响和损失
-        impact_query = f"{query} 影响 损失 伤亡 受灾"
+        # Search strategy 2: impact and losses
+        impact_query = f"{query} impact damage casualties affected"
         try:
             response2 = tavily_client.search(
                 query=impact_query,
@@ -475,14 +475,14 @@ def search_flood_event(query: str) -> str:
                     seen_urls.add(url)
                     title = result.get("title", "")
                     content = result.get("content", "")
-                    results.append(f"标题: {title}\n内容: {content}\n来源: {url}\n")
+                    results.append(f"Title: {title}\nContent: {content}\nSource: {url}\n")
                     if title and url:
                         all_sources.append({"title": title, "url": url, "content": content})
         except:
             pass
         
-        # 搜索策略3：搜索应急响应
-        rescue_query = f"{query} 救援 应急 响应 转移"
+        # Search strategy 3: emergency response
+        rescue_query = f"{query} rescue emergency response evacuation"
         try:
             response3 = tavily_client.search(
                 query=rescue_query,
@@ -496,23 +496,23 @@ def search_flood_event(query: str) -> str:
                     seen_urls.add(url)
                     title = result.get("title", "")
                     content = result.get("content", "")
-                    results.append(f"标题: {title}\n内容: {content}\n来源: {url}\n")
+                    results.append(f"Title: {title}\nContent: {content}\nSource: {url}\n")
                     if title and url:
                         all_sources.append({"title": title, "url": url, "content": content})
         except:
             pass
         
         _pending_search_sources = [{"title": s["title"], "url": s["url"]} for s in all_sources]
-        _pending_search_contents = all_sources  # 存储完整内容用于报告生成
+        _pending_search_contents = all_sources  # Store full content for report generation
         
         print(f"📚 搜索完成，获取到 {len(all_sources)} 条信息来源")
         
-        return "\n---\n".join(results) if results else "未找到相关洪水事件信息"
+        return "\n---\n".join(results) if results else "No relevant flood event information found"
         
     except Exception as e:
         _pending_search_sources = []
         _pending_search_contents = []
-        return f"搜索出错: {str(e)}"
+        return f"Search error: {str(e)}"
 
 
 # 工具列表
@@ -576,9 +576,9 @@ async def chat_node(
     system_message = SystemMessage(
         content=f"""{SYSTEM_PROMPT}
 
-【当前阶段】: {current_stage}
-用户询问洪水事件时，使用 search_flood_event 工具搜索信息。
-搜索后在回复末尾附加 JSON 格式的事件信息。
+[Current Stage]: {current_stage}
+When a user asks about a flood event, use the search_flood_event tool to search for information.
+After searching, append JSON-formatted event information at the end of the response.
 """
     )
     
@@ -697,7 +697,7 @@ async def confirmation_node(
     # 使用 interrupt 暂停执行，等待用户确认
     confirmed_data_raw = interrupt({
         "type": "confirm_flood_event",
-        "message": "请确认或修改以下洪水事件信息：",
+        "message": "Please confirm or modify the following flood event information:",
         "data": {
             "event": event,
             "event_description": event_description,
@@ -720,7 +720,7 @@ async def confirmation_node(
     
     # 用户取消
     if not confirmed_data or confirmed_data.get("cancelled"):
-        cancel_message = AIMessage(content="已取消。如需重新查询，请告诉我您想了解的洪水事件。")
+        cancel_message = AIMessage(content="Cancelled. If you'd like to query again, please tell me which flood event you'd like to learn about.")
         return Command(
             goto="__end__",
             update={
@@ -790,20 +790,20 @@ async def processing_node(
             title = item.get("title", "")
             content = item.get("content", "")
             url = item.get("url", "")
-            search_contents_text += f"### 来源 {i}: {title}\n{content}\n来源链接: {url}\n\n"
+            search_contents_text += f"### Source {i}: {title}\n{content}\nSource URL: {url}\n\n"
     else:
-        search_contents_text = "暂无搜索资料，请基于事件描述进行分析。"
+        search_contents_text = "No search materials available. Please analyze based on the event description."
     
     # 使用 LLM 生成详细报告
     print(f"📝 正在使用 LLM 生成详细报告...")
     model = _get_model()
     
     report_prompt = REPORT_GENERATION_PROMPT.format(
-        event=event or "未知事件",
-        location=location or "待确定",
-        pre_date=pre_date or "待确定",
-        peek_date=peek_date or "待确定",
-        after_date=after_date or "待确定",
+        event=event or "Unknown event",
+        location=location or "To be determined",
+        pre_date=pre_date or "To be determined",
+        peek_date=peek_date or "To be determined",
+        after_date=after_date or "To be determined",
         search_contents=search_contents_text
     )
     
@@ -813,34 +813,34 @@ async def processing_node(
         print(f"✅ LLM 生成报告成功，字数: {len(detailed_report)}")
     except Exception as e:
         print(f"⚠️ LLM 生成报告失败: {e}，使用默认内容")
-        detailed_report = f"""### 1. 事件概述
-{event_description or '暂无详细描述'}
+        detailed_report = f"""### 1. Event Overview
+{event_description or 'No detailed description available'}
 
-### 2. 成因分析
-相关资料有限，暂无具体成因分析。
+### 2. Cause Analysis
+Limited information available; no specific cause analysis at this time.
 
-### 3. 影响与损失评估
-相关资料有限，暂无具体损失数据。
+### 3. Impact and Loss Assessment
+Limited information available; no specific loss data at this time.
 
-### 4. 应急响应与救援行动
-相关资料有限，暂无具体救援信息。
+### 4. Emergency Response and Rescue Operations
+Limited information available; no specific rescue information at this time.
 
-### 5. 灾后恢复与问题反思
-相关资料有限，暂无恢复进展信息。
+### 5. Post-disaster Recovery and Lessons Learned
+Limited information available; no recovery progress information at this time.
 
-### 6. 综合总结
-本次洪水事件造成了一定影响，具体情况有待进一步信息收集。"""
+### 6. Comprehensive Summary
+This flood event has caused certain impacts. Further information collection is needed for a complete assessment."""
     
     # 格式化来源信息
     sources_text = _format_sources_text(_pending_search_sources)
     
     # 组装最终报告
     flood_report = FLOOD_REPORT_TEMPLATE.format(
-        event=event or "未知事件",
-        pre_date=pre_date or "待确定",
-        peek_date=peek_date or "待确定",
-        after_date=after_date or "待确定",
-        location=location or "待确定",
+        event=event or "Unknown event",
+        pre_date=pre_date or "To be determined",
+        peek_date=peek_date or "To be determined",
+        after_date=after_date or "To be determined",
+        location=location or "To be determined",
         detailed_report=detailed_report,
         sources=sources_text
     )
@@ -849,7 +849,7 @@ async def processing_node(
     search_sources = _pending_search_sources.copy() if _pending_search_sources else []
     
     # 创建报告完成消息
-    report_message = AIMessage(content=f"✅ 信息已确认，报告生成完成！\n\n{flood_report}")
+    report_message = AIMessage(content=f"✅ Information confirmed, report generated!\n\n{flood_report}")
     
     print(f"✅ 报告生成完成，共 {len(search_sources)} 条参考来源")
     
