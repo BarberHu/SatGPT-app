@@ -4,6 +4,10 @@ An intelligent flood event analysis platform integrating AI-powered chatbot, sat
 
 > **Forked from [sas-unescap/SatGPT-app](https://github.com/sas-unescap/SatGPT-app)** and extended with LangGraph AI Agent, CopilotKit integration, and advanced flood detection.
 
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/ad1d281f-39ff-4202-bfe2-ebb5150994da
+
 ## 📋 Overview
 
 - **🤖 AI Agent**: Conversational flood queries powered by LangGraph + CopilotKit
