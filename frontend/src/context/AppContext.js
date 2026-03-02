@@ -108,6 +108,10 @@ export const AppProvider = ({ children }) => {
   const [agentShowLandcoverLayer, setAgentShowLandcoverLayer] = useState(false);
   const [agentImpactData, setAgentImpactData] = useState(null);
   const [agentImpactLoading, setAgentImpactLoading] = useState(false);
+  const [agentTileLoading, setAgentTileLoading] = useState(false);
+  // Per-layer loading tracking: { 'base-imagery': bool, 'flood-detection': bool, 'population': bool, 'urban': bool, 'landcover': bool }
+  const [agentLayerLoading, setAgentLayerLoading] = useState({});
+  const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
   
   // 更新 FloodAgent 单个字段
   const updateFloodAgentField = useCallback((field, value) => {
@@ -277,6 +281,12 @@ export const AppProvider = ({ children }) => {
     setAgentImpactData,
     agentImpactLoading,
     setAgentImpactLoading,
+    agentTileLoading,
+    setAgentTileLoading,
+    agentLayerLoading,
+    setAgentLayerLoading,
+    agentTileError,
+    setAgentTileError,
   };
 
   return (

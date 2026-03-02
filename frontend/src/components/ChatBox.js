@@ -221,9 +221,19 @@ function ChatBox() {
             </button>
           </div>
           <div className="toolbar-right">
-            <div className="mode-dropdown" onClick={() => handleModeToggle('ask')}>
-              <span className="mode-label">Agent</span>
-              <i className="fa fa-chevron-down"></i>
+            <div className="mode-toggle">
+              <button
+                className={`mode-toggle-btn ${chatMode === 'ask' ? 'active' : ''}`}
+                onClick={() => handleModeToggle('ask')}
+              >
+                Ask
+              </button>
+              <button
+                className={`mode-toggle-btn ${chatMode === 'agent' ? 'active' : ''}`}
+                onClick={() => handleModeToggle('agent')}
+              >
+                Agent
+              </button>
             </div>
           </div>
         </div>
@@ -309,27 +319,33 @@ function ChatBox() {
             background: #e8e8e8;
             color: #333;
           }
-          .mode-dropdown {
+          .mode-toggle {
             display: flex;
             align-items: center;
-            gap: 4px;
-            padding: 4px 10px;
             background: #e8e8e8;
             border-radius: 16px;
-            cursor: pointer;
-            transition: all 0.2s;
+            padding: 2px;
+            gap: 0;
           }
-          .mode-dropdown:hover {
-            background: #ddd;
-          }
-          .mode-label {
-            color: #333;
+          .mode-toggle-btn {
+            padding: 4px 14px;
+            border: none;
+            background: transparent;
+            color: #888;
             font-size: 12px;
             font-weight: 500;
+            cursor: pointer;
+            border-radius: 14px;
+            transition: all 0.25s ease;
+            line-height: 1.4;
           }
-          .mode-dropdown i {
-            color: #666;
-            font-size: 9px;
+          .mode-toggle-btn:hover {
+            color: #555;
+          }
+          .mode-toggle-btn.active {
+            background: #ffffff;
+            color: #333;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
           }
         `}</style>
       </div>
@@ -388,11 +404,21 @@ function ChatBox() {
           </button>
         </div>
         <div className="toolbar-right">
-          <div className="mode-dropdown" onClick={() => handleModeToggle('agent')}>
-            <span className="mode-label">Ask</span>
-            <i className="fa fa-chevron-down"></i>
+            <div className="mode-toggle">
+              <button
+                className={`mode-toggle-btn ${chatMode === 'ask' ? 'active' : ''}`}
+                onClick={() => handleModeToggle('ask')}
+              >
+                Ask
+              </button>
+              <button
+                className={`mode-toggle-btn ${chatMode === 'agent' ? 'active' : ''}`}
+                onClick={() => handleModeToggle('agent')}
+              >
+                Agent
+              </button>
+            </div>
           </div>
-        </div>
       </div>
 
       <style jsx="true">{`
@@ -486,27 +512,33 @@ function ChatBox() {
           background: #e8e8e8;
           color: #333;
         }
-        .mode-dropdown {
+        .mode-toggle {
           display: flex;
           align-items: center;
-          gap: 4px;
-          padding: 4px 10px;
           background: #e8e8e8;
           border-radius: 16px;
-          cursor: pointer;
-          transition: all 0.2s;
+          padding: 2px;
+          gap: 0;
         }
-        .mode-dropdown:hover {
-          background: #ddd;
-        }
-        .mode-label {
-          color: #333;
+        .mode-toggle-btn {
+          padding: 4px 14px;
+          border: none;
+          background: transparent;
+          color: #888;
           font-size: 12px;
           font-weight: 500;
+          cursor: pointer;
+          border-radius: 14px;
+          transition: all 0.25s ease;
+          line-height: 1.4;
         }
-        .mode-dropdown i {
-          color: #666;
-          font-size: 9px;
+        .mode-toggle-btn:hover {
+          color: #555;
+        }
+        .mode-toggle-btn.active {
+          background: #ffffff;
+          color: #333;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.12);
         }
         #suggestionsBox {
           background: #fafafa;

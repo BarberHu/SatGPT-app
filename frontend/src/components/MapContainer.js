@@ -37,6 +37,10 @@ function MapContainer() {
     agentShowUrbanLayer,
     agentShowLandcoverLayer,
     agentImpactData,
+    agentTileLoading,
+    setAgentTileLoading,
+    setAgentLayerLoading,
+    setAgentTileError,
   } = useAppContext();
 
   // Track if map is initialized
@@ -298,132 +302,214 @@ function MapContainer() {
     }
   }, [isBuildingsEnabled]);
 
-  // ========== FloodAgent Imagery Layer Processing ==========
+  // ========== Helper: per-layer tile loading lifecycle ==========
+  // Creates standard idle/timeout handlers for a single layer, managing its own loading key.
+  const createLayerTileLifecycle = (map, layerKey) => {
+    setAgentLayerLoading(prev => ({ ...prev, [layerKey]: true }));
+
+    let resolved = false;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      setAgentLayerLoading(prev => ({ ...prev, [layerKey]: false }));
+    };
+    map.once('idle', finish);
+    const timeout = setTimeout(finish, 15000);
+
+    return {
+      cleanup: () => {
+        resolved = true;
+        setAgentLayerLoading(prev => ({ ...prev, [layerKey]: false }));
+        map.off('idle', finish);
+        clearTimeout(timeout);
+      },
+    };
+  };
+
+  // ========== Effect A: Base Sentinel Imagery ==========
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
 
-    // Clean up old agent layers
-    const agentLayers = [
+    const sentinelIds = [
       'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
       'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
-      'agent-flood-detection',
-      'agent-population', 'agent-urban', 'agent-landcover'
     ];
-    const agentSources = [
-      'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
-      'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
-      'agent-flood-detection',
-      'agent-population', 'agent-urban', 'agent-landcover'
-    ];
-
-    agentLayers.forEach(id => {
+    sentinelIds.forEach(id => {
       if (map.getLayer(id)) map.removeLayer(id);
-    });
-    agentSources.forEach(id => {
       if (map.getSource(id)) map.removeSource(id);
     });
 
     if (!agentImagery) return;
 
-    // Determine which period and type to show based on control state
-    const periodKey = agentSelectedPeriod; // 'pre_date', 'peek_date', 'after_date'
-    const typeKey = agentSelectedType; // 'sentinel2', 'sentinel1'
+    setAgentTileError(null);
 
-    // Debug: Log which imagery is being loaded
-    // console.log('🗺️ Loading imagery:', {
-    //   periodKey,
-    //   typeKey,
-    //   tileUrl: agentImagery[periodKey]?.[typeKey]?.tile_url?.substring(0, 80) + '...',
-    //   allPeriods: {
-    //     pre_date: agentImagery.pre_date?.[typeKey]?.tile_url ? '✅' : '❌',
-    //     peek_date: agentImagery.peek_date?.[typeKey]?.tile_url ? '✅' : '❌',
-    //     after_date: agentImagery.after_date?.[typeKey]?.tile_url ? '✅' : '❌',
-    //   }
-    // });
-
-    // Add selected Sentinel imagery layer
+    const periodKey = agentSelectedPeriod;
+    const typeKey = agentSelectedType;
     const periodData = agentImagery[periodKey];
-    if (periodData?.[typeKey]?.tile_url) {
-      const sourceId = `agent-${typeKey === 'sentinel2' ? 's2' : 's1'}-${periodKey.replace('_date', '')}`;
-      map.addSource(sourceId, {
-        type: 'raster',
-        tiles: [periodData[typeKey].tile_url],
-        tileSize: 256,
-      });
-      map.addLayer({
-        id: sourceId,
-        type: 'raster',
-        source: sourceId,
-        paint: {
-          'raster-opacity': 1,
-        },
-      });
-    }
 
-    // Add flood detection layer if enabled
-    if (agentShowFloodDetection && agentImagery.flood_detection?.tile_url) {
-      map.addSource('agent-flood-detection', {
-        type: 'raster',
-        tiles: [agentImagery.flood_detection.tile_url],
-        tileSize: 256,
-      });
-      map.addLayer({
-        id: 'agent-flood-detection',
-        type: 'raster',
-        source: 'agent-flood-detection',
-        paint: {
-          'raster-opacity': 0.7,
-        },
-      });
-    }
+    if (!periodData?.[typeKey]?.tile_url) return;
 
-    // Add impact assessment layers if available and enabled
-    if (agentImpactData?.layers) {
-      if (agentShowPopulationLayer && agentImpactData.layers.population?.tile_url) {
-        map.addSource('agent-population', {
-          type: 'raster',
-          tiles: [agentImpactData.layers.population.tile_url],
-          tileSize: 256,
-        });
-        map.addLayer({
-          id: 'agent-population',
-          type: 'raster',
-          source: 'agent-population',
-          paint: { 'raster-opacity': 0.7 },
-        });
-      }
-      
-      if (agentShowUrbanLayer && agentImpactData.layers.urban?.tile_url) {
-        map.addSource('agent-urban', {
-          type: 'raster',
-          tiles: [agentImpactData.layers.urban.tile_url],
-          tileSize: 256,
-        });
-        map.addLayer({
-          id: 'agent-urban',
-          type: 'raster',
-          source: 'agent-urban',
-          paint: { 'raster-opacity': 0.7 },
-        });
-      }
-      
-      if (agentShowLandcoverLayer && agentImpactData.layers.landcover?.tile_url) {
-        map.addSource('agent-landcover', {
-          type: 'raster',
-          tiles: [agentImpactData.layers.landcover.tile_url],
-          tileSize: 256,
-        });
-        map.addLayer({
-          id: 'agent-landcover',
-          type: 'raster',
-          source: 'agent-landcover',
-          paint: { 'raster-opacity': 0.7 },
-        });
-      }
-    }
+    const sourceId = `agent-${typeKey === 'sentinel2' ? 's2' : 's1'}-${periodKey.replace('_date', '')}`;
+    map.addSource(sourceId, {
+      type: 'raster',
+      tiles: [periodData[typeKey].tile_url],
+      tileSize: 256,
+    });
+    map.addLayer({
+      id: sourceId,
+      type: 'raster',
+      source: sourceId,
+      paint: { 'raster-opacity': 1 },
+    });
 
-  }, [agentImagery, appMode, agentSelectedPeriod, agentSelectedType, agentShowFloodDetection, agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData]);
+    // Track tile errors (only on base imagery since it's the primary GEE layer)
+    let tileErrorCount = 0;
+    const onTileError = (e) => {
+      if (e?.error?.status >= 400 || e?.error?.message?.includes('HTTP') || e?.type === 'error') {
+        tileErrorCount++;
+        console.warn('⚠️ Tile load error:', e?.sourceId || 'unknown', e?.error?.message || '');
+      }
+    };
+    map.on('error', onTileError);
+
+    setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': true }));
+
+    let resolved = false;
+    const finish = (isTimeout) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
+      if (tileErrorCount > 0) {
+        console.warn(`⚠️ ${tileErrorCount} tile(s) failed to load.`);
+        setAgentTileError({
+          count: tileErrorCount,
+          message: isTimeout
+            ? 'Map tiles timed out. The GEE imagery URL may have expired — try re-running the analysis.'
+            : 'Some map tiles failed to load. The imagery URL may have expired — try re-running the analysis.',
+          timestamp: Date.now(),
+        });
+      } else {
+        setAgentTileError(null);
+      }
+    };
+    map.once('idle', () => finish(false));
+    const timeout = setTimeout(() => finish(true), 15000);
+
+    return () => {
+      resolved = true;
+      setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
+      map.off('error', onTileError);
+      map.off('idle', finish);
+      clearTimeout(timeout);
+    };
+  }, [agentImagery, appMode, agentSelectedPeriod, agentSelectedType, setAgentLayerLoading, setAgentTileError]);
+
+  // ========== Effect B: Flood Detection Overlay ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+
+    if (map.getLayer('agent-flood-detection')) map.removeLayer('agent-flood-detection');
+    if (map.getSource('agent-flood-detection')) map.removeSource('agent-flood-detection');
+
+    if (!agentShowFloodDetection || !agentImagery?.flood_detection?.tile_url) return;
+
+    map.addSource('agent-flood-detection', {
+      type: 'raster',
+      tiles: [agentImagery.flood_detection.tile_url],
+      tileSize: 256,
+    });
+    map.addLayer({
+      id: 'agent-flood-detection',
+      type: 'raster',
+      source: 'agent-flood-detection',
+      paint: { 'raster-opacity': 0.7 },
+    });
+
+    const lifecycle = createLayerTileLifecycle(map, 'flood-detection');
+    return lifecycle.cleanup;
+  }, [agentImagery, appMode, agentShowFloodDetection, setAgentLayerLoading]);
+
+  // ========== Effect C: Population Impact Overlay ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+
+    if (map.getLayer('agent-population')) map.removeLayer('agent-population');
+    if (map.getSource('agent-population')) map.removeSource('agent-population');
+
+    if (!agentShowPopulationLayer || !agentImpactData?.layers?.population?.tile_url) return;
+
+    map.addSource('agent-population', {
+      type: 'raster',
+      tiles: [agentImpactData.layers.population.tile_url],
+      tileSize: 256,
+    });
+    map.addLayer({
+      id: 'agent-population',
+      type: 'raster',
+      source: 'agent-population',
+      paint: { 'raster-opacity': 0.7 },
+    });
+
+    const lifecycle = createLayerTileLifecycle(map, 'population');
+    return lifecycle.cleanup;
+  }, [agentImpactData, appMode, agentShowPopulationLayer, setAgentLayerLoading]);
+
+  // ========== Effect D: Built-up Area Overlay ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+
+    if (map.getLayer('agent-urban')) map.removeLayer('agent-urban');
+    if (map.getSource('agent-urban')) map.removeSource('agent-urban');
+
+    if (!agentShowUrbanLayer || !agentImpactData?.layers?.urban?.tile_url) return;
+
+    map.addSource('agent-urban', {
+      type: 'raster',
+      tiles: [agentImpactData.layers.urban.tile_url],
+      tileSize: 256,
+    });
+    map.addLayer({
+      id: 'agent-urban',
+      type: 'raster',
+      source: 'agent-urban',
+      paint: { 'raster-opacity': 0.7 },
+    });
+
+    const lifecycle = createLayerTileLifecycle(map, 'urban');
+    return lifecycle.cleanup;
+  }, [agentImpactData, appMode, agentShowUrbanLayer, setAgentLayerLoading]);
+
+  // ========== Effect E: Land Cover Overlay ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+
+    if (map.getLayer('agent-landcover')) map.removeLayer('agent-landcover');
+    if (map.getSource('agent-landcover')) map.removeSource('agent-landcover');
+
+    if (!agentShowLandcoverLayer || !agentImpactData?.layers?.landcover?.tile_url) return;
+
+    map.addSource('agent-landcover', {
+      type: 'raster',
+      tiles: [agentImpactData.layers.landcover.tile_url],
+      tileSize: 256,
+    });
+    map.addLayer({
+      id: 'agent-landcover',
+      type: 'raster',
+      source: 'agent-landcover',
+      paint: { 'raster-opacity': 0.7 },
+    });
+
+    const lifecycle = createLayerTileLifecycle(map, 'landcover');
+    return lifecycle.cleanup;
+  }, [agentImpactData, appMode, agentShowLandcoverLayer, setAgentLayerLoading]);
 
   // FloodAgent GeoJSON 边界处理
   useEffect(() => {

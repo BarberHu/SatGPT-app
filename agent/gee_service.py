@@ -99,7 +99,7 @@ class GEEService:
             包含影像URL和元数据的字典
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             # 解析日期
@@ -123,7 +123,7 @@ class GEEService:
             # 检查是否有影像
             count = s2_collection.size().getInfo()
             if count == 0:
-                return {"error": f"未找到 {date} 附近的Sentinel-2影像"}
+                return {"error": f"No Sentinel-2 imagery found near {date}"}
             
             # 使用镜嵌合成解决跨幅问题
             # mosaic() 会将多幅影像合并，后面的影像覆盖前面的
@@ -165,13 +165,15 @@ class GEEService:
                 "tile_url": tile_url,
                 "date": image_date,
                 "cloud_cover": properties.get("CLOUDY_PIXEL_PERCENTAGE", 0),
+                "spacecraft": properties.get("SPACECRAFT_NAME", "unknown"),
+                "mgrs_tile": properties.get("MGRS_TILE", ""),
                 "id": info.get("id", "unknown"),
                 "mosaic": count > 1,  # 标识是否使用了镜嵌
                 "image_count": count
             }
             
         except Exception as e:
-            return {"error": f"获取Sentinel-2影像失败: {str(e)}"}
+            return {"error": f"Failed to retrieve Sentinel-2 imagery: {str(e)}"}
     
     def get_sentinel1_image(
         self,
@@ -193,7 +195,7 @@ class GEEService:
             包含影像URL和元数据的字典
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             # 解析日期
@@ -218,7 +220,7 @@ class GEEService:
             # 检查是否有影像
             count = s1_collection.size().getInfo()
             if count == 0:
-                return {"error": f"未找到 {date} 附近的Sentinel-1影像"}
+                return {"error": f"No Sentinel-1 imagery found near {date}"}
             
             # 使用镜嵌合成解决跨幅问题
             # 对于 SAR 影像，镜嵌是合适的方法
@@ -247,12 +249,15 @@ class GEEService:
                 "tile_url": tile_url,
                 "date": image_date,
                 "id": info.get("id", "unknown"),
+                "spacecraft": f"Sentinel-1{properties.get('platform_number', '')}",
+                "orbit_pass": properties.get("orbitProperties_pass", "unknown"),
+                "resolution": properties.get("resolution_meters", ""),
                 "mosaic": count > 1,  # 标识是否使用了镜嵌
                 "image_count": count
             }
             
         except Exception as e:
-            return {"error": f"获取Sentinel-1影像失败: {str(e)}"}
+            return {"error": f"Failed to retrieve Sentinel-1 imagery: {str(e)}"}
     
     def get_flood_imagery(
         self,
@@ -340,7 +345,7 @@ class GEEService:
             包含所有时期影像的字典
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             # 将 GeoJSON 转换为 EE Geometry
@@ -393,7 +398,7 @@ class GEEService:
             return result
             
         except Exception as e:
-            return {"error": f"GeoJSON 处理失败: {str(e)}"}
+            return {"error": f"GeoJSON processing failed: {str(e)}"}
     
     def _get_imagery_for_bounds(
         self,
@@ -451,7 +456,7 @@ class GEEService:
         与 test.ipynb 中的实现保持一致
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             # 创建区域
@@ -506,7 +511,7 @@ class GEEService:
             }
             
         except Exception as e:
-            return {"error": f"获取SAR变化检测图层失败: {str(e)}"}
+            return {"error": f"Failed to retrieve SAR change detection layer: {str(e)}"}
     
     def _get_sentinel2_by_region(
         self,
@@ -517,7 +522,7 @@ class GEEService:
     ) -> Optional[Dict[str, Any]]:
         """使用 EE Geometry 获取 Sentinel-2 影像"""
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d")
@@ -534,7 +539,7 @@ class GEEService:
             count = s2_collection.size().getInfo()
             if count == 0:
                 return {
-                    "error": f"未找到 {date} 附近的Sentinel-2影像",
+                    "error": f"No Sentinel-2 imagery found near {date}",
                     "type": "Sentinel-2",
                     "requested_date": date,
                     "search_range": f"{start_date} ~ {end_date}",
@@ -581,13 +586,15 @@ class GEEService:
                 "search_range": f"{start_date} ~ {end_date}",
                 "actual_date_range": dates_info.get("date_range"),
                 "cloud_cover": properties.get("CLOUDY_PIXEL_PERCENTAGE", 0),
+                "spacecraft": properties.get("SPACECRAFT_NAME", "unknown"),
+                "mgrs_tile": properties.get("MGRS_TILE", ""),
                 "id": info.get("id", "unknown"),
                 "mosaic": count > 1,
                 "image_count": count
             }
             
         except Exception as e:
-            return {"error": f"获取Sentinel-2影像失败: {str(e)}"}
+            return {"error": f"Failed to retrieve Sentinel-2 imagery: {str(e)}"}
     
     def _get_sentinel1_by_region(
         self,
@@ -598,7 +605,7 @@ class GEEService:
     ) -> Optional[Dict[str, Any]]:
         """使用 EE Geometry 获取 Sentinel-1 影像"""
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d")
@@ -616,7 +623,7 @@ class GEEService:
             count = s1_collection.size().getInfo()
             if count == 0:
                 return {
-                    "error": f"未找到 {date} 附近的Sentinel-1影像",
+                    "error": f"No Sentinel-1 imagery found near {date}",
                     "type": "Sentinel-1",
                     "requested_date": date,
                     "search_range": f"{start_date} ~ {end_date}",
@@ -654,12 +661,15 @@ class GEEService:
                 "search_range": f"{start_date} ~ {end_date}",
                 "actual_date_range": dates_info.get("date_range"),
                 "id": info.get("id", "unknown"),
+                "spacecraft": f"Sentinel-1{properties.get('platform_number', '')}",
+                "orbit_pass": properties.get("orbitProperties_pass", "unknown"),
+                "resolution": properties.get("resolution_meters", ""),
                 "mosaic": count > 1,
                 "image_count": count
             }
             
         except Exception as e:
-            return {"error": f"获取Sentinel-1影像失败: {str(e)}"}
+            return {"error": f"Failed to retrieve Sentinel-1 imagery: {str(e)}"}
     
     def get_flood_change_detection(
         self,
@@ -688,7 +698,7 @@ class GEEService:
             包含变化检测图层URL的字典
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             # 创建区域
@@ -704,7 +714,7 @@ class GEEService:
             peek_image = self._get_sar_composite(peek_date, region, days_range, search_direction="after")
             
             if pre_image is None or peek_image is None:
-                return {"error": "无法获取足够的SAR影像进行变化检测"}
+                return {"error": "Insufficient SAR imagery for change detection"}
             
             # === 标准Otsu变化检测方法 ===
             # 步骤1: 计算变化指数 (dB差值 = log(peek/pre))
@@ -762,9 +772,9 @@ class GEEService:
             }
             
         except Exception as e:
-            return {"error": f"洪水变化检测失败: {str(e)}"}
+            return {"error": f"Flood change detection failed: {str(e)}"}
     
-    def get_flood_change_detection_by_geojson(
+    def get_flood_change_detection_by_geojson( # 顶层函数
         self,
         pre_date: str,
         peek_date: str,
@@ -775,7 +785,7 @@ class GEEService:
         基于 GeoJSON 边界的洪水变化检测 (标准Otsu变化检测方法)
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             region = ee.Geometry(geojson)
@@ -795,7 +805,7 @@ class GEEService:
             peek_image = self._get_sar_composite(peek_date, region, days_range, search_direction="after")
             
             if pre_image is None or peek_image is None:
-                return {"error": "无法获取足够的SAR影像进行变化检测"}
+                return {"error": "Insufficient SAR imagery for change detection"}
             
             # === 标准Otsu变化检测方法 ===
             # 计算变化指数 (dB差值)
@@ -846,7 +856,7 @@ class GEEService:
             }
             
         except Exception as e:
-            return {"error": f"洪水变化检测失败: {str(e)}"}
+            return {"error": f"Flood change detection failed: {str(e)}"}
     
     def _get_sar_composite(
         self,
@@ -903,7 +913,7 @@ class GEEService:
             return composite
             
         except Exception as e:
-            print(f"获取SAR合成影像失败: {e}")
+            print(f"Failed to get SAR composite: {e}")
             return None
     
     def _otsu_water_detection(
@@ -1153,7 +1163,7 @@ class GEEService:
                 "unit": "km²"
             }
         except Exception as e:
-            print(f"计算洪水统计失败: {e}")
+            print(f"Failed to compute flood statistics: {e}")
             return {"error": str(e)}
 
     def get_flood_impact_assessment(
@@ -1182,12 +1192,12 @@ class GEEService:
             包含各类损失评估的字典
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             results: Dict[str, Any] = {
                 "assessment_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "analysis_period": f"{pre_date} 至 {peek_date}",
+                "analysis_period": f"{pre_date} to {peek_date}",
             }
             
             # 像素面积 (平方公里)
@@ -1235,7 +1245,7 @@ class GEEService:
             return results
             
         except Exception as e:
-            print(f"洪水损失评估失败: {e}")
+            print(f"Flood impact assessment failed: {e}")
             return {"error": str(e)}
     
     def _assess_population_impact(
@@ -1569,7 +1579,7 @@ class GEEService:
         3. 返回综合结果
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             # 处理不同的 GeoJSON 格式
@@ -1580,7 +1590,7 @@ class GEEService:
                 if features:
                     geometry_data = features[0].get("geometry", geojson)
                 else:
-                    return {"error": "FeatureCollection 中没有 features"}
+                    return {"error": "No features found in FeatureCollection"}
             elif geojson.get("type") == "Feature":
                 # 从 Feature 提取 geometry
                 geometry_data = geojson.get("geometry", geojson)
@@ -1593,7 +1603,7 @@ class GEEService:
             peek_image = self._get_sar_composite(peek_date, region, 15, search_direction="after")
             
             if pre_image is None or peek_image is None:
-                return {"error": "无法获取足够的SAR影像进行分析"}
+                return {"error": "Insufficient SAR imagery for analysis"}
             
             # 使用标准Otsu变化检测方法（与洪水检测面板保持一致）
             vv_pre = pre_image.select("VV")
@@ -1622,7 +1632,7 @@ class GEEService:
             return assessment
             
         except Exception as e:
-            return {"error": f"洪水损失评估失败: {str(e)}"}
+            return {"error": f"Flood impact assessment failed: {str(e)}"}
     
     def get_flood_impact_by_bounds(
         self,
@@ -1634,7 +1644,7 @@ class GEEService:
         基于边界框进行洪水损失评估
         """
         if not self.initialized:
-            return {"error": "GEE 服务未初始化"}
+            return {"error": "GEE service not initialized"}
         
         try:
             region = ee.Geometry.Rectangle([
@@ -1647,7 +1657,7 @@ class GEEService:
             return self.get_flood_impact_by_geojson(pre_date, peek_date, geojson)
             
         except Exception as e:
-            return {"error": f"洪水损失评估失败: {str(e)}"}
+            return {"error": f"Flood impact assessment failed: {str(e)}"}
 
 
 # 创建全局实例
