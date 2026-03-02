@@ -171,7 +171,14 @@
 /* Imagery Type Buttons */
 .imagery-type-buttons {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.imagery-type-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .type-btn {
@@ -197,6 +204,295 @@
   border-color: #3b82f6;
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+/* ========== Imagery Loading Spinner ========== */
+.imagery-spinner {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(59, 130, 246, 0.2);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: imagery-spin 0.8s linear infinite;
+}
+
+@keyframes imagery-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Date spinner (smaller, inline with date button) */
+.imagery-spinner.date-spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  margin-left: 6px;
+}
+
+/* Disabled buttons during tile loading */
+.type-btn:disabled,
+.date-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+/* ========== Imagery Info Icon ========== */
+.imagery-info-wrapper {
+  flex-shrink: 0;
+  position: relative;
+}
+
+.imagery-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  font-style: normal;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  line-height: 1;
+}
+
+.imagery-info-icon.ok {
+  background: #dbeafe;
+  color: #2563eb;
+  border: 1.5px solid #93c5fd;
+}
+
+.imagery-info-icon.ok:hover {
+  background: #bfdbfe;
+  border-color: #3b82f6;
+  transform: scale(1.1);
+}
+
+.imagery-info-icon.caution {
+  background: #fef3c7;
+  color: #d97706;
+  border: 1.5px solid #fcd34d;
+}
+
+.imagery-info-icon.caution:hover {
+  background: #fde68a;
+  border-color: #f59e0b;
+  transform: scale(1.1);
+}
+
+.imagery-info-icon.warning {
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1.5px solid #fca5a5;
+}
+
+.imagery-info-icon.warning:hover {
+  background: #fecaca;
+  border-color: #ef4444;
+  transform: scale(1.1);
+}
+
+/* ========== Imagery Info Popover (Portal to body) ========== */
+.imagery-info-popover {
+  position: fixed;
+  z-index: 10000;
+  width: 290px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  animation: popover-enter 0.15s ease-out;
+}
+
+@keyframes popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.popover-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.popover-close:hover {
+  color: #475569;
+}
+
+.popover-body {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+/* Period info blocks */
+.period-info-block {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border-left: 3px solid #e2e8f0;
+  transition: all 0.2s;
+}
+
+.period-info-block:last-child {
+  margin-bottom: 0;
+}
+
+.period-info-block.current {
+  background: #eff6ff;
+  border-left-color: #3b82f6;
+}
+
+.period-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.period-info-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.period-status-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.period-status-badge.success {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.period-status-badge.error {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* No imagery warning */
+.no-imagery-detail {
+  padding: 4px 0;
+}
+
+.no-imagery-msg {
+  font-size: 11px;
+  color: #dc2626;
+  font-weight: 500;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+/* Imagery metadata rows */
+.imagery-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.imagery-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.meta-label {
+  color: #94a3b8;
+  flex-shrink: 0;
+  min-width: 65px;
+  font-size: 10px;
+}
+
+.meta-value {
+  color: #334155;
+  word-break: break-word;
+}
+
+.meta-value.id-value {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 9px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+}
+
+.meta-value.id-value.clickable {
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 3px;
+  transition: all 0.2s;
+  background: #f1f5f9;
+}
+
+.meta-value.id-value.clickable:hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.meta-value.id-value.copied {
+  background: #dcfce7;
+  color: #16a34a;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Popover scrollbar */
+.popover-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.popover-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.popover-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
+}
+
+.popover-body::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 /* Loading Indicator */
@@ -238,6 +534,14 @@
   cursor: pointer;
   font-size: 12px;
   transition: background 0.2s;
+  flex: 1;
+  min-width: 0;
+}
+
+.layer-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .layer-toggle:hover {
@@ -252,6 +556,38 @@
 
 .layer-icon {
   font-size: 14px;
+}
+
+/* Layer loading spinner (smaller, inline with layer toggle) */
+.imagery-spinner.layer-spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  flex-shrink: 0;
+}
+
+/* Tile error warning banner */
+.tile-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #92400e;
+  line-height: 1.4;
+}
+
+.tile-error-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.tile-error-msg {
+  flex: 1;
 }
 
 /* Layer Legend */
@@ -534,3 +870,74 @@
 .chat-history-section::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* ===== Layer Info Icon & Popover ===== */
+.layer-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 19px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  background: #e0f2fe;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
+  transition: all 0.2s;
+  user-select: none;
+  line-height: 1;
+}
+
+.layer-info-icon:hover {
+  background: #bae6fd;
+  color: #0369a1;
+  transform: scale(1.1);
+}
+
+/* Layer info popover - reuses popover-header / popover-body / imagery-meta-row */
+.layer-info-popover {
+  position: fixed;
+  z-index: 10000;
+  width: 300px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  animation: popover-enter 0.15s ease-out;
+}
+
+.layer-meta-section {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.layer-meta-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.layer-meta-subtitle {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 5px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.layer-meta-description {
+  padding: 8px 10px 10px;
+  font-size: 10.5px;
+  color: #64748b;
+  line-height: 1.5;
+  border-top: 1px solid #f1f5f9;
+  margin-top: 4px;
+}
+
