@@ -35,7 +35,7 @@ echo [1/4] Starting Flask Backend (Port 5001)...
 start "Flask Backend" cmd /k "cd /d %~dp0 && call flood-venv\Scripts\activate.bat && python app.py"
 
 echo [2/4] Starting FastAPI Agent (Port 8000)...
-start "FastAPI Agent" cmd /k "cd /d %~dp0agent && call venv\Scripts\activate.bat && python -m uvicorn server:app --port 8000"
+start "FastAPI Agent" cmd /k "cd /d %~dp0agent && call venv\Scripts\activate.bat && python -m uvicorn server:app --host 0.0.0.0 --port 8000"
 
 timeout /t 3 /nobreak >nul
 

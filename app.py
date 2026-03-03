@@ -69,8 +69,8 @@ Tiles      = ee.FeatureCollection("projects/servir-mekong/SWMT/Tiles")
 # STD_NAMES   = ['blue2', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2']
 
 app = Flask(__name__)
-# Enable CORS for React frontend
-CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}})
+# Enable CORS for all origins (支持内网/局域网访问)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route('/flask-health-check', methods=['GET'])
 def health_check():
