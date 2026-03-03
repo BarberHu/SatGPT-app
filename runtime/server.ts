@@ -17,9 +17,9 @@ dotenv.config();
 
 const app = express();
 
-// CORS 配置 - 允许 React 前端访问
+// CORS 配置 - 允许所有来源访问（支持内网/局域网访问）
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  origin: true,
   credentials: true,
 }));
 
@@ -101,10 +101,10 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 // 启动服务器
 const PORT = parseInt(process.env.RUNTIME_PORT || "5000");
+const HOST = process.env.RUNTIME_HOST || "0.0.0.0";
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(`🚀 CopilotKit 运行时服务器已启动`);
-  console.log(`   - 运行时地址: http://localhost:${PORT}/copilotkit`);
+  console.log(`   - 运行时地址: http://${HOST}:${PORT}/copilotkit`);
   console.log(`   - LangGraph 后端: ${AGENT_URL}`);
-  console.log(`   - 前端地址: ${process.env.FRONTEND_URL || "http://localhost:3000"}`);
 });

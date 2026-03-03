@@ -27,6 +27,7 @@ const defaultAgentState = {
   bounds: null,
   geojson: null,
   search_sources: null,
+  gee_code: null,
   is_valid_flood_query: false,
 };
 
@@ -37,6 +38,19 @@ function downloadReport(report, eventName) {
   const link = document.createElement('a');
   link.href = url;
   link.download = `${eventName || 'flood_analysis_report'}_${new Date().toISOString().split('T')[0]}.md`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// Download GEE JavaScript code file
+function downloadGEECode(code, eventName) {
+  const blob = new Blob([code], { type: 'text/javascript;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${(eventName || 'flood_analysis').replace(/\s+/g, '_')}_GEE_${new Date().toISOString().split('T')[0]}.js`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -577,7 +591,7 @@ function AgentPanel() {
   const fetchAgentImagery = useCallback(async (agentState) => {
     setAgentImageryLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/flood-images', {
+      const response = await fetch(`http://${window.location.hostname}:8000/api/flood-images`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -612,7 +626,7 @@ function AgentPanel() {
     
     setAgentImpactLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/flood-impact', {
+      const response = await fetch(`http://${window.location.hostname}:8000/api/flood-impact`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -721,24 +735,39 @@ function AgentPanel() {
                     <span className="info-value">{currentState.event_description}</span>
                   </div>
                 )}
-                <div className="action-buttons">
-                  {currentState.search_sources?.length > 0 && (
+                {currentState.search_sources?.length > 0 && (
+                  <div className="action-buttons">
                     <button 
                       className="action-btn"
                       onClick={() => setSourcesDrawerOpen(true)}
                     >
                       🌐 Sources ({currentState.search_sources.length})
                     </button>
-                  )}
-                  {currentState.flood_report && (
-                    <button 
-                      className="action-btn primary"
-                      onClick={() => downloadReport(currentState.flood_report, currentState.event)}
-                    >
-                      📥 Download Report
-                    </button>
-                  )}
-                </div>
+                  </div>
+                )}
+                {(currentState.flood_report || currentState.gee_code) && (
+                  <div className="download-group">
+                    <span className="download-group-label">Downloads</span>
+                    <div className="download-buttons">
+                      {currentState.flood_report && (
+                        <button 
+                          className="download-btn report"
+                          onClick={() => downloadReport(currentState.flood_report, currentState.event)}
+                        >
+                          📥 Report
+                        </button>
+                      )}
+                      {currentState.gee_code && (
+                        <button 
+                          className="download-btn gee-code"
+                          onClick={() => downloadGEECode(currentState.gee_code, currentState.event)}
+                        >
+                          💻 GEE Code
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="no-data-hint">

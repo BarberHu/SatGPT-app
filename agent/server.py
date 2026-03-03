@@ -19,6 +19,7 @@ from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 # 本地模块
 from flood_agent import graph
 from gee_service import gee_service, get_flood_images
+from gee_code_generator import generate_flood_gee_code
 
 load_dotenv()
 
@@ -196,6 +197,48 @@ async def gee_status():
     }
 
 
+class GEECodeRequest(BaseModel):
+    """GEE 代码生成请求"""
+    event: str
+    pre_date: str
+    peek_date: str
+    location: Optional[str] = None
+    coordinates: Optional[list] = None
+    bounds: Optional[GeoBounds] = None
+    geojson: Optional[dict] = None
+    days_range: Optional[int] = 15
+
+
+@app.post("/api/gee-code")
+async def generate_gee_code(request: GEECodeRequest):
+    """
+    生成可在 GEE Code Editor 中运行的 JavaScript 代码
+    """
+    try:
+        bounds_dict = None
+        if request.bounds:
+            bounds_dict = {
+                "west": request.bounds.west,
+                "south": request.bounds.south,
+                "east": request.bounds.east,
+                "north": request.bounds.north,
+            }
+
+        code = generate_flood_gee_code(
+            event_name=request.event,
+            pre_date=request.pre_date,
+            peek_date=request.peek_date,
+            location=request.location or "",
+            coordinates=request.coordinates,
+            bounds=bounds_dict,
+            geojson=request.geojson,
+            days_range=request.days_range or 15,
+        )
+        return {"success": True, "code": code}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class FloodImpactRequest(BaseModel):
     """洪水损失评估请求"""
     pre_date: str
@@ -279,7 +322,7 @@ async def update_state(state: FloodState):
 if __name__ == "__main__":
     import uvicorn
     
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
     debug = os.getenv("DEBUG", "True").lower() == "true"
     

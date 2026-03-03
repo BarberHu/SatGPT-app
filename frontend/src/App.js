@@ -10,61 +10,13 @@ import Spinner from './components/Spinner';
 import { useAppContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
 
-// CopilotKit 运行时地址
-const COPILOTKIT_URL = process.env.REACT_APP_COPILOTKIT_URL || "http://localhost:5000/copilotkit";
-
-// 检查 CopilotKit Runtime 是否可用
-function useCopilotKitAvailable() {
-  const [available, setAvailable] = useState(false);
-  const [checked, setChecked] = useState(false);
-  
-  useEffect(() => {
-    // 使用 /health 端点检查 Runtime 是否可用
-    fetch('http://localhost:5000/health', { method: 'GET' })
-      .then(res => {
-        setAvailable(res.ok);
-        setChecked(true);
-      })
-      .catch(() => {
-        setAvailable(false);
-        setChecked(true);
-      });
-  }, []);
-  
-  return { available, checked };
-}
+// CopilotKit 运行时地址 - 动态获取当前主机，支持内网访问
+const COPILOTKIT_URL = process.env.REACT_APP_COPILOTKIT_URL 
+  || `http://${window.location.hostname}:5000/copilotkit`;
 
 function App() {
   // Initialize map data loading hook
   useMapData();
-  const { available: copilotAvailable, checked } = useCopilotKitAvailable();
-  
-  // 等待检查完成
-  if (!checked) {
-    return <div className="water"><Spinner /></div>;
-  }
-  
-  // 如果 CopilotKit 不可用，使用传统模式
-  if (!copilotAvailable) {
-    return (
-      <div className="water">
-        <MapContainer />
-        <div className="ui">
-          <SettingsButton />
-          <Legends />
-          <ChatBox />
-          <ResultBox />
-          <ControlPanel />
-          <Warnings />
-        </div>
-        <Modals />
-        <Spinner />
-      </div>
-    );
-  }
-  
-  // CopilotKit available - use full functionality
-  // ChatBox is always shown (handles mode switching internally)
   
   // Handle CopilotKit errors gracefully
   const handleCopilotError = (error) => {

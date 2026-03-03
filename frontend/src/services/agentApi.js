@@ -5,8 +5,8 @@
 
 import axios from 'axios';
 
-// FastAPI Agent 后端地址
-const AGENT_API_BASE = process.env.REACT_APP_AGENT_API_URL || 'http://localhost:8000';
+// FastAPI Agent 后端地址 - 动态获取当前主机，支持内网访问
+const AGENT_API_BASE = process.env.REACT_APP_AGENT_API_URL || `http://${window.location.hostname}:8000`;
 
 /**
  * 获取洪水事件影像
