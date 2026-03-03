@@ -910,8 +910,7 @@ a.mapboxgl-ctrl-logo {
 .agent-mode-content {
   margin: -15px;
   margin-top: 0;
-  height: calc(100vh - 180px);
-  overflow: hidden;
+  min-height: calc(93vh - 80px);
 }
 
 .agent-mode-content .agent-panel {

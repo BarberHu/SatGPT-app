@@ -735,37 +735,24 @@ function AgentPanel() {
                     <span className="info-value">{currentState.event_description}</span>
                   </div>
                 )}
-                {currentState.search_sources?.length > 0 && (
+                {(currentState.search_sources?.length > 0 || currentState.flood_report) && (
                   <div className="action-buttons">
-                    <button 
-                      className="action-btn"
-                      onClick={() => setSourcesDrawerOpen(true)}
-                    >
-                      🌐 Sources ({currentState.search_sources.length})
-                    </button>
-                  </div>
-                )}
-                {(currentState.flood_report || currentState.gee_code) && (
-                  <div className="download-group">
-                    <span className="download-group-label">Downloads</span>
-                    <div className="download-buttons">
-                      {currentState.flood_report && (
-                        <button 
-                          className="download-btn report"
-                          onClick={() => downloadReport(currentState.flood_report, currentState.event)}
-                        >
-                          📥 Report
-                        </button>
-                      )}
-                      {currentState.gee_code && (
-                        <button 
-                          className="download-btn gee-code"
-                          onClick={() => downloadGEECode(currentState.gee_code, currentState.event)}
-                        >
-                          💻 GEE Code
-                        </button>
-                      )}
-                    </div>
+                    {currentState.search_sources?.length > 0 && (
+                      <button 
+                        className="action-btn"
+                        onClick={() => setSourcesDrawerOpen(true)}
+                      >
+                        🌐 Sources ({currentState.search_sources.length})
+                      </button>
+                    )}
+                    {currentState.flood_report && (
+                      <button 
+                        className="action-btn"
+                        onClick={() => downloadReport(currentState.flood_report, currentState.event)}
+                      >
+                        📥 Download Report
+                      </button>
+                    )}
                   </div>
                 )}
               </>
@@ -1099,6 +1086,21 @@ function AgentPanel() {
             )}
           </div>
         )}
+      </div>
+
+      {/* GEE Code Download - bottom of panel, same style as Ask mode */}
+      <div className="download-btn-div">
+        <a
+          className={`submit btn download ${!currentState.gee_code ? 'disabled' : ''}`}
+          onClick={() => currentState.gee_code && downloadGEECode(currentState.gee_code, currentState.event)}
+          style={{ 
+            cursor: currentState.gee_code ? 'pointer' : 'not-allowed',
+            opacity: currentState.gee_code ? 1 : 0.5,
+            pointerEvents: currentState.gee_code ? 'auto' : 'none',
+          }}
+        >
+          DOWNLOAD GEE CODE
+        </a>
       </div>
     </div>
   );
