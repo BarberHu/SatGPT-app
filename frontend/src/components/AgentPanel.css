@@ -114,6 +114,49 @@
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
 }
 
+/* Download Group */
+.download-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.download-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.download-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.download-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.download-btn:hover {
+  background: #cbd5e1;
+}
+
 /* No Data Hint */
 .no-data-hint {
   padding: 16px;

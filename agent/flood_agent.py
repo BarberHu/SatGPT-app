@@ -27,6 +27,7 @@ from langgraph.types import Command, interrupt
 
 from state import FloodAgentState
 from prompts import SYSTEM_PROMPT, FLOOD_REPORT_TEMPLATE, REPORT_GENERATION_PROMPT
+from gee_code_generator import generate_flood_gee_code
 
 load_dotenv()
 
@@ -851,6 +852,22 @@ This flood event has caused certain impacts. Further information collection is n
     # 创建报告完成消息
     report_message = AIMessage(content=f"✅ Information confirmed, report generated!\n\n{flood_report}")
     
+    # 生成 GEE JavaScript 代码
+    gee_code = ""
+    try:
+        gee_code = generate_flood_gee_code(
+            event_name=event or "Flood Event",
+            pre_date=pre_date or "",
+            peek_date=peek_date or "",
+            location=location or "",
+            coordinates=coordinates,
+            bounds=bounds,
+            geojson=geojson
+        )
+        print(f"✅ GEE 代码生成成功，共 {len(gee_code)} 字符")
+    except Exception as e:
+        print(f"⚠️ GEE 代码生成失败: {e}")
+    
     print(f"✅ 报告生成完成，共 {len(search_sources)} 条参考来源")
     
     return Command(
@@ -870,6 +887,7 @@ This flood event has caused certain impacts. Further information collection is n
             "geojson": geojson,
             "geo_data": geo_data,
             "search_sources": search_sources,
+            "gee_code": gee_code,
             "stage": "completed",
             "user_confirmed": True,
             "is_valid_flood_query": True,
