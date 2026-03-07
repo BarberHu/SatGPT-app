@@ -364,7 +364,10 @@ function ChatBox() {
               <div
                 key={index}
                 className="chat-message"
-                onClick={() => handleFillSuggestion(suggestion)}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // Prevent blur from firing before click
+                  handleFillSuggestion(suggestion);
+                }}
               >
                 {suggestion}
               </div>
