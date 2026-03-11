@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
 import { CopilotChat } from "@copilotkit/react-ui";
+import { useCopilotContext } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 
 const SUGGESTIONS = [
@@ -44,10 +45,18 @@ function ChatBox() {
     setAppMode,
   } = useAppContext();
 
+  const { setThreadId } = useCopilotContext();
+
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [agentExpanded, setAgentExpanded] = useState(true);
+
+  // Start a new conversation by generating a fresh thread_id
+  const handleNewChat = () => {
+    const newId = crypto.randomUUID();
+    setThreadId(newId);
+  };
 
   const suggestions = dataType === 'floodHotspot' ? SUGGESTIONS_HOTSPOT : SUGGESTIONS;
 
@@ -216,8 +225,8 @@ function ChatBox() {
         {/* Bottom toolbar */}
         <div className="chat-bottom-toolbar">
           <div className="toolbar-left">
-            <button className="toolbar-icon-btn" title="Download report">
-              <i className="fa fa-arrow-down"></i>
+            <button className="toolbar-icon-btn" title="New conversation" onClick={handleNewChat}>
+              <i className="fa fa-plus"></i>
             </button>
           </div>
           <div className="toolbar-right">

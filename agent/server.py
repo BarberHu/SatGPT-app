@@ -15,11 +15,49 @@ import uvicorn
 # CopilotKit AG-UI 集成
 from copilotkit import LangGraphAGUIAgent
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
+from ag_ui.core import RunStartedEvent
 
 # 本地模块
 from flood_agent import graph
 from gee_service import gee_service, get_flood_images
 from gee_code_generator import generate_flood_gee_code
+
+
+# 继承 LangGraphAGUIAgent，只覆写 prepare_stream 一个方法来修 bug
+class PatchedLangGraphAGUIAgent(LangGraphAGUIAgent):
+
+    # 覆写 prepare_stream 方法
+    # 原始调用链: _handle_stream_events() 调用 prepare_stream() 拿到结果
+    #   _handle_stream_events 里会先无条件 yield 一个 RunStartedEvent
+    #   然后把 prepare_stream 返回的 events_to_dispatch 列表里的事件逐个 yield
+    #   但 prepare_stream 在"有中断且没有resume"时，往 events_to_dispatch 里也塞了一个 RunStartedEvent
+    #   结果就是两个 RunStartedEvent 被 yield 出去 → 协议违规 → 崩溃
+    async def prepare_stream(self, input, agent_state, config):
+
+        # 第1步: 调用父类的原始 prepare_stream，拿到它的返回结果
+        # 返回值是一个 dict，可能包含:
+        #   - "stream": 正常对话时的事件流
+        #   - "events_to_dispatch": 有中断时的预置事件列表（里面有多余的 RunStartedEvent）
+        #   - "state", "config": 其他状态
+        result = await super().prepare_stream(input, agent_state, config)
+
+        # 第2步: 取出 events_to_dispatch 列表
+        # 只有在"图中有未完成的 interrupt 且用户没发 resume"时，这个列表才存在
+        # 此时列表内容是: [RunStartedEvent, CustomEvent(interrupt数据), RunFinishedEvent]
+        events_to_dispatch = result.get("events_to_dispatch")
+
+        # 第3步: 如果列表存在，过滤掉里面的 RunStartedEvent
+        if events_to_dispatch:
+            # 用列表推导式，只保留"不是 RunStartedEvent 类型"的事件
+            # 过滤后列表变成: [CustomEvent(interrupt数据), RunFinishedEvent]
+            # 这样 _handle_stream_events 那边只有它自己发的那一个 RunStartedEvent，不会重复
+            result["events_to_dispatch"] = [
+                e for e in events_to_dispatch if not isinstance(e, RunStartedEvent)
+            ]
+
+        # 第4步: 把修改后的结果返回给 _handle_stream_events
+        # 最终事件流变成: RunStartedEvent(来自148行) → interrupt → RunFinishedEvent ✅
+        return result
 
 load_dotenv()
 
@@ -63,7 +101,7 @@ app.add_middleware(
 # 使用 LangGraphAGUIAgent 添加端点
 add_langgraph_fastapi_endpoint(
     app=app,
-    agent=LangGraphAGUIAgent(
+    agent=PatchedLangGraphAGUIAgent(
         name="flood_agent",
         description="洪水事件分析智能体，可以查询洪水事件信息、提取关键日期、生成洪水报告",
         graph=graph,
