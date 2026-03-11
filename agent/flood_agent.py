@@ -549,6 +549,18 @@ async def entry_node(
                 "event": None,
                 "event_description": None,
                 "flood_report": None,
+                "report_document": None,
+                "pre_date": None,
+                "peek_date": None,
+                "after_date": None,
+                "is_valid_flood_query": False,
+                "coordinates": None,
+                "location": None,
+                "bounds": None,
+                "geojson": None,
+                "geo_data": None,
+                "search_sources": [],
+                "gee_code": None,
             }
         )
     

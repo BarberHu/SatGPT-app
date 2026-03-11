@@ -8,8 +8,8 @@ import {
   CopilotRuntime,
   copilotRuntimeNodeHttpEndpoint,
   EmptyAdapter,
-  LangGraphHttpAgent,
 } from '@copilotkit/runtime';
+import { LangGraphHttpAgent } from '@copilotkit/runtime/langgraph';
 
 import dotenv from "dotenv";
 
