@@ -41,10 +41,17 @@ function MapContainer() {
     setAgentTileLoading,
     setAgentLayerLoading,
     setAgentTileError,
+    gridClickEnabled,
   } = useAppContext();
 
   // Track if map is initialized
   const mapInitialized = useRef(false);
+
+  // Keep a ref so the map click closure always sees the latest value
+  const gridClickEnabledRef = useRef(gridClickEnabled);
+  useEffect(() => {
+    gridClickEnabledRef.current = gridClickEnabled;
+  }, [gridClickEnabled]);
 
   // Initialize map
   useEffect(() => {
@@ -104,6 +111,7 @@ function MapContainer() {
 
     // Grid cell click handler
     map.on('click', 'grid_cell-layer', (e) => {
+      if (!gridClickEnabledRef.current) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['grid_cell-layer'] });
       if (features.length > 0 && features[0].geometry) {
         const cords = features[0].geometry.coordinates[0];
@@ -127,8 +135,9 @@ function MapContainer() {
       }
     });
 
-    // Change cursor on hover
+    // Change cursor on hover (only when grid click is enabled)
     map.on('mouseenter', 'grid_cell-layer', () => {
+      if (!gridClickEnabledRef.current) return;
       map.getCanvas().style.cursor = 'pointer';
     });
 

@@ -1396,14 +1396,14 @@ div#help #help-btn:hover
 
 .chat-box {
   position: fixed;
-  bottom: 15px;
-  left: 41.7%;
-  width: 40%; 
+  bottom: 20px;
+  left: 25%;
+  width: 50%; 
   background-color: #f2f2f2;
   border: 1px solid #ccc;
-  padding: 15px;
+  padding: 0;
   border-radius: 20px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
 }
 
 /* Styling for the chat messages */
@@ -1823,12 +1823,12 @@ margin-bottom: 1vw;
 
 @media screen and (max-width: 1310px) {
   .chat-box{
-      width:30%;
-      left:50%
+      width:60%;
+      left:20%
   }
   .result-box{
-    width:30%;
-    left:50%
+    width:60%;
+    left:20%
   }
 }
 

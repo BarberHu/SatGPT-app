@@ -539,28 +539,17 @@ async def entry_node(
     """
     current_stage = state.get('stage', 'initial')
     
-    # 如果已完成但用户发送新消息，重置为初始状态
+    # 如果已完成但用户发送新消息，重置流程控制字段，
+    # 但保留 event/location 等业务信息供追问使用。
+    # 全新查询应使用 New Chat（新 thread_id），无需在此全量清理。
     if current_stage == "completed":
         return Command(
             goto="chat_node",
             update={
                 "stage": "initial",
                 "user_confirmed": False,
-                "event": None,
-                "event_description": None,
-                "flood_report": None,
-                "report_document": None,
-                "pre_date": None,
-                "peek_date": None,
-                "after_date": None,
                 "is_valid_flood_query": False,
-                "coordinates": None,
-                "location": None,
-                "bounds": None,
-                "geojson": None,
-                "geo_data": None,
-                "search_sources": [],
-                "gee_code": None,
+        
             }
         )
     
@@ -578,6 +567,7 @@ async def chat_node(
     2. 处理工具调用请求
     3. 路由到 tool_node 或 extraction_node
     """
+    
     model = _get_model()
     
     # 获取前端工具并绑定所有工具

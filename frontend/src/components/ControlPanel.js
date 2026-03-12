@@ -29,6 +29,8 @@ function ControlPanel() {
     updateLayerData,
     appMode,
     setAppMode,
+    gridClickEnabled,
+    setGridClickEnabled,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -330,6 +332,19 @@ function ControlPanel() {
         >
           DOWNLOAD GEE CODE
         </a>
+      </div>
+
+      {/* Grid Click Toggle */}
+      <div className="toggle-switcher-css" style={{ marginTop: '10px' }}>
+        <label className="switch-label">Click to Load</label>
+        <div className="form-check form-switch">
+          <input
+            className="form-check-input"
+            type="checkbox"
+            checked={gridClickEnabled}
+            onChange={() => setGridClickEnabled(!gridClickEnabled)}
+          />
+        </div>
       </div>
 
       {/* Footer Links */}

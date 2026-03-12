@@ -46,6 +46,7 @@ export const AppProvider = ({ children }) => {
   const [mapInstance, setMapInstance] = useState(null);
   const [selectedGridCords, setSelectedGridCords] = useState(null);
   const [countries, setCountries] = useState({});
+  const [gridClickEnabled, setGridClickEnabled] = useState(false);
   
   // Layer State
   const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot'
@@ -211,6 +212,8 @@ export const AppProvider = ({ children }) => {
     setSelectedGridCords,
     countries,
     setCountries,
+    gridClickEnabled,
+    setGridClickEnabled,
     
     // Layer State
     dataType,

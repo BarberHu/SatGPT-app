@@ -12,15 +12,15 @@ import { useCopilotContext } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 
 const SUGGESTIONS = [
-  'Tell me about the 2010 Bangkok floods',
-  'How big was the flood in North India in 2020?',
-  'How much area was impacted by the 2007 Jakarta floods?',
+  { title: '2010 Bangkok Flood', message: 'Tell me about the 2010 Bangkok floods' },
+  { title: '2020 North India Flood', message: 'How big was the flood in North India in 2020?' },
+  { title: '2007 Jakarta Flood', message: 'How much area was impacted by the 2007 Jakarta floods?' },
 ];
 
 const SUGGESTIONS_HOTSPOT = [
-  'Tell me about the 2010 to 2020 Bangkok floods',
-  'Provide information regarding floods occurring in North India between 2015 and 2021',
-  'Inform me about the floods in Jakarta spanning from 2007 to 2020',
+  { title: '2010–2020 Bangkok Floods', message: 'Tell me about the 2010 to 2020 Bangkok floods' },
+  { title: '2015–2021 North India Floods', message: 'Provide information regarding floods occurring in North India between 2015 and 2021' },
+  { title: '2007–2020 Jakarta Floods', message: 'Inform me about the floods in Jakarta spanning from 2007 to 2020' },
 ];
 
 function ChatBox() {
@@ -47,10 +47,10 @@ function ChatBox() {
 
   const { setThreadId } = useCopilotContext();
 
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [agentExpanded, setAgentExpanded] = useState(true);
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [askHistory, setAskHistory] = useState([]);
 
   // Start a new conversation by generating a fresh thread_id
   const handleNewChat = () => {
@@ -67,16 +67,7 @@ function ChatBox() {
 
   const handleFillSuggestion = (text) => {
     setChatInput(text);
-    setShowSuggestions(false);
     setError('');
-  };
-
-  const handleFocus = () => {
-    setShowSuggestions(true);
-  };
-
-  const handleBlur = () => {
-    setTimeout(() => setShowSuggestions(false), 200);
   };
 
   const handleKeyDown = (e) => {
@@ -97,6 +88,9 @@ function ChatBox() {
       return;
     }
 
+    // Append user message to local history
+    setAskHistory(prev => [...prev, { role: 'user', text: chatInput.trim() }]);
+
     setIsLoading(true);
     setIsSubmitting(true);
     setError('');
@@ -109,6 +103,9 @@ function ChatBox() {
 
       setGptResponse(responseData);
       setResultText(responseData.Content || '');
+
+      // Append assistant reply to local history
+      setAskHistory(prev => [...prev, { role: 'assistant', text: responseData.Content || 'Analysis complete.' }]);
 
       // Zoom to country if available
       if (responseData.CountryCode && countries[responseData.CountryCode]) {
@@ -173,398 +170,546 @@ function ChatBox() {
     setError('');
   };
 
-  // Agent mode - show CopilotKit chat (Gemini-style layout)
-  if (chatMode === 'agent') {
-    return (
-      <div className="chat-box chat-box-gemini">
-        {/* Collapse/Expand handle at top center */}
-        <div 
-          className="expand-handle"
-          onClick={() => setAgentExpanded(!agentExpanded)}
-          title={agentExpanded ? 'Collapse' : 'Expand'}
-        >
-          <div className="handle-bar"></div>
-          <i className={`fa fa-chevron-${agentExpanded ? 'down' : 'up'}`}></i>
-        </div>
+  // Unified render for both modes
+  const isAgent = chatMode === 'agent';
 
-        {/* Agent chat interface - expandable */}
-        {agentExpanded && (
-          <div className="chat-main-area">
-            <CopilotChat
-              labels={{
-                title: "Flood Analysis Agent",
-                initial: "Hello! I'm the flood event analysis assistant. Which flood event would you like to analyze?",
-                placeholder: "Enter flood event information...",
-              }}
-              suggestions={[
-                {
-                  title: "2024 Chiang Mai Flood",
-                  message: "Please analyze the 2024 Chiang Mai flood event in Thailand",
-                },
-                {
-                  title: "2021 Zhengzhou Flood",
-                  message: "Please analyze the July 2021 Zhengzhou extreme rainfall event",
-                },
-                {
-                  title: "2020 Jakarta Flood",
-                  message: "Please analyze the January 2020 Jakarta flood event",
-                },
-              ]}
-              className="copilot-chat-full"
-              onError={(error) => {
-                if (error?.message?.includes('aborted') || error?.message?.includes('Aborted')) {
-                  console.log('ℹ️ Chat operation cancelled');
-                  return;
-                }
-                console.error('Chat error:', error);
-              }}
-            />
-          </div>
-        )}
-
-        {/* Bottom toolbar */}
-        <div className="chat-bottom-toolbar">
-          <div className="toolbar-left">
-            <button className="toolbar-icon-btn" title="New conversation" onClick={handleNewChat}>
-              <i className="fa fa-plus"></i>
-            </button>
-          </div>
-          <div className="toolbar-right">
-            <div className="mode-toggle">
-              <button
-                className={`mode-toggle-btn ${chatMode === 'ask' ? 'active' : ''}`}
-                onClick={() => handleModeToggle('ask')}
-              >
-                Ask
-              </button>
-              <button
-                className={`mode-toggle-btn ${chatMode === 'agent' ? 'active' : ''}`}
-                onClick={() => handleModeToggle('agent')}
-              >
-                Agent
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <style jsx="true">{`
-          .chat-box-gemini {
-            display: flex;
-            flex-direction: column;
-            background: #ffffff;
-            border-radius: 16px;
-            overflow: hidden;
-            border: 1px solid #e0e0e0;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-          }
-          .chat-main-area {
-            flex: 1;
-            min-height: 0;
-          }
-          .copilot-chat-full {
-            height: 100%;
-            min-height: 180px;
-            max-height: 480px;
-            background: #fafafa;
-          }
-          .expand-handle {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 6px 0;
-            cursor: pointer;
-            background: #f8f8f8;
-            transition: background 0.2s;
-            gap: 2px;
-          }
-          .expand-handle:hover {
-            background: #f0f0f0;
-          }
-          .handle-bar {
-            width: 32px;
-            height: 4px;
-            background: #d0d0d0;
-            border-radius: 2px;
-            transition: background 0.2s;
-          }
-          .expand-handle:hover .handle-bar {
-            background: #bbb;
-          }
-          .expand-handle i {
-            color: #999;
-            font-size: 10px;
-            line-height: 1;
-          }
-          .chat-bottom-toolbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 4px 8px;
-            margin: 0 8px 6px 8px;
-            background: #f5f5f5;
-            border-radius: 20px;
-          }
-          .toolbar-left, .toolbar-right {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-          }
-          .toolbar-icon-btn {
-            width: 28px;
-            height: 28px;
-            border: none;
-            background: transparent;
-            color: #666;
-            cursor: pointer;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            transition: all 0.2s;
-          }
-          .toolbar-icon-btn:hover {
-            background: #e8e8e8;
-            color: #333;
-          }
-          .mode-toggle {
-            display: flex;
-            align-items: center;
-            background: #e8e8e8;
-            border-radius: 16px;
-            padding: 2px;
-            gap: 0;
-          }
-          .mode-toggle-btn {
-            padding: 4px 14px;
-            border: none;
-            background: transparent;
-            color: #888;
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            border-radius: 14px;
-            transition: all 0.25s ease;
-            line-height: 1.4;
-          }
-          .mode-toggle-btn:hover {
-            color: #555;
-          }
-          .mode-toggle-btn.active {
-            background: #ffffff;
-            color: #333;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  // Ask mode (Gemini-style layout)
   return (
-    <div className="chat-box chat-box-gemini">
-      {/* Main input area */}
-      <div className="chat-main-area ask-area">
-        {showSuggestions && (
-          <div id="suggestionsBox">
-            <h5>Try any of these...</h5>
-            {suggestions.map((suggestion, index) => (
-              <div
-                key={index}
-                className="chat-message"
-                onMouseDown={(e) => {
-                  e.preventDefault(); // Prevent blur from firing before click
-                  handleFillSuggestion(suggestion);
-                }}
-              >
-                {suggestion}
+    <>
+      {/* ====== Floating trigger button (bottom-center) ====== */}
+      {!popupOpen && (
+        <button className="chat-popup-trigger" onClick={() => setPopupOpen(true)}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+      )}
+
+      {/* ====== Popup panel ====== */}
+      {popupOpen && (
+        <div className="chat-popup-overlay" onClick={() => setPopupOpen(false)}>
+          <div className="chat-popup-panel" onClick={(e) => e.stopPropagation()}>
+
+            {/* Main content area */}
+            {isAgent ? (
+              <div className="chat-main-area">
+                <CopilotChat
+                  labels={{
+                    title: "Flood Analysis Agent",
+                    initial: "",
+                    placeholder: "Enter flood event information...",
+                  }}
+                  suggestions={[
+                    { title: "2024 Chiang Mai Flood", message: "Please analyze the 2024 Chiang Mai flood event in Thailand" },
+                    { title: "2021 Zhengzhou Flood", message: "Please analyze the July 2021 Zhengzhou extreme rainfall event" },
+                    { title: "2020 Jakarta Flood", message: "Please analyze the January 2020 Jakarta flood event" },
+                  ]}
+                  className="copilot-chat-full"
+                  onError={(error) => {
+                    if (error?.message?.includes('aborted') || error?.message?.includes('Aborted')) {
+                      console.log('ℹ️ Chat operation cancelled');
+                      return;
+                    }
+                    console.error('Chat error:', error);
+                  }}
+                />
               </div>
-            ))}
-          </div>
-        )}
-
-        <div className="chat-input-wrapper">
-          <input
-            type="text"
-            className="chat-input-gemini"
-            placeholder="Type your prompt here"
-            value={chatInput}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
-            disabled={isSubmitting}
-          />
-          <button className="send-btn-gemini" onClick={handleSubmit} disabled={isSubmitting}>
-            {isSubmitting ? (
-              <i className="fa fa-spinner fa-spin"></i>
             ) : (
-              <i className="fa fa-send"></i>
+              <div className="chat-main-area ask-area">
+                {/* Messages area */}
+                <div className="ask-messages-area">
+                  {askHistory.length === 0 && !chatInput.trim() && (
+                    <div className="ask-suggestions-footer">
+                      <div className="ask-suggestions">
+                        {suggestions.map((s, i) => (
+                          <button
+                            key={i}
+                            className="ask-suggestion-chip"
+                            onClick={() => handleFillSuggestion(s.message)}
+                          >
+                            {s.title}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {askHistory.map((msg, i) => (
+                    <div key={i} className={`ask-msg ${msg.role}`}>
+                      <div className="ask-msg-bubble">{msg.text}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Input area */}
+                <div className="ask-input-container">
+                  <div className="ask-input-box" onClick={(e) => e.currentTarget.querySelector('textarea')?.focus()}>
+                    <textarea
+                      className="ask-input-textarea"
+                      placeholder="Enter flood event information..."
+                      value={chatInput}
+                      onChange={handleInputChange}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSubmit();
+                        }
+                      }}
+                      disabled={isSubmitting}
+                      rows={1}
+                    />
+                    <div className="ask-send-btn-row">
+                      <button
+                        className="ask-send-btn"
+                        onClick={handleSubmit}
+                        disabled={isSubmitting || !chatInput.trim()}
+                      >
+                        {isSubmitting ? (
+                          <i className="fa fa-spinner fa-spin"></i>
+                        ) : (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {error && <p className="error">{error}</p>}
+              </div>
             )}
-          </button>
-        </div>
 
-        {error && <p className="error">{error}</p>}
-      </div>
-
-      {/* Bottom toolbar */}
-      <div className="chat-bottom-toolbar">
-        <div className="toolbar-left">
-          <button className="toolbar-icon-btn" title="Download code">
-            <i className="fa fa-arrow-down"></i>
-          </button>
-        </div>
-        <div className="toolbar-right">
-            <div className="mode-toggle">
-              <button
-                className={`mode-toggle-btn ${chatMode === 'ask' ? 'active' : ''}`}
-                onClick={() => handleModeToggle('ask')}
-              >
-                Ask
-              </button>
-              <button
-                className={`mode-toggle-btn ${chatMode === 'agent' ? 'active' : ''}`}
-                onClick={() => handleModeToggle('agent')}
-              >
-                Agent
-              </button>
+            {/* Inline toolbar */}
+            <div className="inline-toolbar">
+              <div className="inline-toolbar-left">
+                <button
+                  className={`mode-btn ${!isAgent ? 'active' : ''}`}
+                  onClick={() => handleModeToggle('ask')}
+                >
+                  <i className="fa fa-search"></i>
+                  <span>Ask</span>
+                </button>
+                <button
+                  className={`mode-btn agent ${isAgent ? 'active' : ''}`}
+                  onClick={() => handleModeToggle('agent')}
+                >
+                  <i className="fa fa-bolt"></i>
+                  <span>Agent</span>
+                </button>
+              </div>
+              <div className="inline-toolbar-right">
+                {isAgent && (
+                  <button className="new-chat-btn" title="New conversation" onClick={handleNewChat}>
+                    <span>New Chat</span>
+                    <i className="fa fa-plus"></i>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-      </div>
+        </div>
+      )}
 
       <style jsx="true">{`
-        .chat-box-gemini {
-          display: flex;
-          flex-direction: column;
-          background: #ffffff;
-          border-radius: 16px;
-          overflow: hidden;
-          border: 1px solid #e0e0e0;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        .chat-main-area {
-          flex: 1;
-          min-height: 0;
-        }
-        .chat-main-area.ask-area {
-          display: flex;
-          flex-direction: column;
-          padding: 0;
-        }
-        .chat-input-wrapper {
+        /* ====== Floating trigger button ====== */
+        .chat-popup-trigger {
+          position: fixed;
+          bottom: 28px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 1000;
+          width: 52px;
+          height: 52px;
+          border-radius: 50%;
+          border: none;
+          background: #3b82f6;
+          color: #fff;
+          cursor: pointer;
           display: flex;
           align-items: center;
-          padding: 12px 16px;
-          gap: 12px;
+          justify-content: center;
+          box-shadow: 0 4px 16px rgba(59,130,246,0.35);
+          transition: transform 0.2s, box-shadow 0.2s;
         }
-        .chat-input-gemini {
-          flex: 1;
-          background: transparent;
-          border: none;
-          outline: none;
-          color: #333;
-          font-size: 15px;
-          padding: 8px 0;
+        .chat-popup-trigger:hover {
+          transform: translateX(-50%) scale(1.08);
+          box-shadow: 0 6px 24px rgba(59,130,246,0.45);
         }
-        .chat-input-gemini::placeholder {
-          color: #999;
+
+        /* ====== Overlay ====== */
+        .chat-popup-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 1001;
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+          padding-bottom: 24px;
+          background: rgba(0,0,0,0.15);
+          animation: popupFadeIn 0.2s ease;
         }
-        .send-btn-gemini {
-          width: 36px;
-          height: 36px;
-          border: none;
-          background: #4a90d9;
-          color: white;
+        @keyframes popupFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+
+        /* ====== Popup panel ====== */
+        .chat-popup-panel {
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          width: 40%;
+          max-width: 95vw;
+          min-width: 400px;
+          max-height: 70vh;
+          background: #ffffff;
+          border-radius: 20px;
+          border: 1px solid #e0e0e0;
+          box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+          overflow: hidden;
+          animation: popupSlideUp 0.25s ease;
+        }
+        @keyframes popupSlideUp {
+          from { transform: translateY(30px); opacity: 0; }
+          to   { transform: translateY(0);    opacity: 1; }
+        }
+
+        /* ====== Close button ====== */
+        .chat-popup-close {
+          position: absolute;
+          top: 10px;
+          right: 12px;
+          z-index: 10;
+          width: 28px;
+          height: 28px;
           border-radius: 50%;
+          border: none;
+          background: rgba(0,0,0,0.06);
+          color: #666;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           font-size: 14px;
-          transition: all 0.2s;
+          transition: background 0.2s, color 0.2s;
         }
-        .send-btn-gemini:hover {
-          background: #5a9fe9;
-          transform: scale(1.05);
+        .chat-popup-close:hover {
+          background: rgba(0,0,0,0.12);
+          color: #333;
         }
-        .send-btn-gemini:disabled {
-          background: #ccc;
-          cursor: not-allowed;
-        }
-        .chat-bottom-toolbar {
+
+        /* ---- Main content area ---- */
+        .chat-main-area {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 4px 8px;
-          margin: 0 8px 6px 8px;
-          background: #f5f5f5;
-          border-radius: 20px;
+          flex-direction: column;
         }
-        .toolbar-left, .toolbar-right {
+        .chat-main-area.ask-area {
           display: flex;
-          align-items: center;
-          gap: 4px;
+          flex-direction: column;
+          background: var(--copilot-kit-background-color, #fff);
         }
-        .toolbar-icon-btn {
-          width: 28px;
-          height: 28px;
+
+        /* ---- CopilotChat (Agent mode) ---- 
+           copilot-chat-full is ON the same div as copilotKitChat (compound selector). 
+           The div needs a height constraint for internal scrolling to work. */
+        .copilotKitChat.copilot-chat-full {
+          min-height: 0 !important;
+          max-height: 100% !important;
+          height: 100% !important;
+          background: #fff;
+          flex: 1 !important;
+          display: flex !important;
+          flex-direction: column !important;
+          overflow: hidden !important;
+        }
+        /* Hide CopilotKit default header */
+        .copilot-chat-full .copilotKitHeader {
+          display: none !important;
+        }
+        /* Messages area: scrollable, flex-grows to fill available space */
+        .copilot-chat-full .copilotKitMessages {
+          flex: 1 1 0% !important;
+          min-height: 0 !important;
+          overflow-y: auto !important;
+        }
+        /* When empty (no messages), don't take up space */
+        .copilot-chat-full .copilotKitMessages:not(:has(.copilotKitMessage)) {
+          flex: 0 0 auto !important;
+        }
+        /* Ensure input container is always visible */
+        .copilot-chat-full .copilotKitInputContainer {
+          display: flex !important;
+          flex-shrink: 0 !important;
+        }
+        .copilot-chat-full .copilotKitMessage {
+          padding: 12px 16px;
+          line-height: 1.6;
+        }
+        /* Input container — zero out all spacing, no radius, transparent bg */
+        .copilot-chat-full .copilotKitInputContainer {
+          padding-bottom: 0 !important;
+          margin-bottom: 0 !important;
+          border-radius: 0 !important;
+          background: transparent !important;
+        }
+        /* Input box — visible border, flat bottom to fuse with toolbar */
+        .copilot-chat-full .copilotKitInput {
+          border: 1.5px solid #d0d5dd !important;
+          border-bottom: none !important;
+          border-radius: 20px 20px 0 0 !important;
+          background-color: #fbfbfb !important;
+          min-height: 60px !important;
+          padding: 12px 14px !important;
+        }
+        /* Agent input textarea — match Ask mode font */
+        .copilot-chat-full .copilotKitInput > textarea {
+          font-size: 0.875rem !important;
+          line-height: 1.5 !important;
+        }
+        /* Hide "Powered by CopilotKit" text only — do NOT hide poweredByContainer
+           because CopilotKit adds that class to copilotKitInputContainer itself! */
+        .copilot-chat-full .poweredBy {
+          display: none !important;
+        }
+
+        /* ---- Unified suggestion chip styles (Agent mode) ---- */
+        .copilot-chat-full .copilotKitMessagesFooter {
+          padding: 0.5rem 24px !important;
+        }
+        .copilot-chat-full .copilotKitMessages footer .suggestions {
+          gap: 8px !important;
+        }
+        .copilot-chat-full .copilotKitMessages footer .suggestions .suggestion {
+          padding: 6px 12px !important;
+          font-size: 0.75rem !important;
+          border-radius: 15px !important;
+          border: 1px solid #d0d5dd !important;
+          color: rgb(28, 28, 28) !important;
+          background: #fff !important;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04) !important;
+          cursor: pointer !important;
+        }
+        .copilot-chat-full .copilotKitMessages footer .suggestions button:not(:disabled):hover {
+          transform: scale(1.03) !important;
+          border-color: #b0b5bb !important;
+        }
+        /* copilotKitChat wrapper — no bottom padding */
+        .copilotKitChat.copilot-chat-full {
+          padding-bottom: 0 !important;
+          margin-bottom: 0 !important;
+        }
+
+        /* ---- Ask mode ---- */
+        .ask-messages-area {
+          flex: 1;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;         /* 👈 内容靠底部排列，贴近输入框 */
+          min-height: 80px;
+          padding: 1rem 24px;                /* 👈 消息区内边距(上下 左右) */
+          background: var(--copilot-kit-background-color, #fff);
+        }
+        .ask-messages-area::-webkit-scrollbar { width: 6px; }
+        .ask-messages-area::-webkit-scrollbar-thumb {
+          background-color: #c8c8c8;
+          border-radius: 10rem;
+        }
+        .ask-msg { margin-bottom: 0.5rem; display: flex; }
+        .ask-msg.user { justify-content: flex-end; }
+        .ask-msg.assistant { justify-content: flex-start; }
+        .ask-msg-bubble {
+          border-radius: 15px;
+          padding: 8px 12px;
+          font-size: 1rem;
+          line-height: 1.5;
+          max-width: 80%;
+          overflow-wrap: break-word;
+        }
+        .ask-msg.user .ask-msg-bubble {
+          background: rgb(28, 28, 28);
+          color: #fff;
+          white-space: pre-wrap;
+        }
+        .ask-msg.assistant .ask-msg-bubble {
+          background: transparent;
+          color: rgb(28, 28, 28);
+          padding-left: 0;
+        }
+        .ask-suggestions-footer {
+          display: flex;
+          padding: 0;                        /* 👈 建议词区域内边距，改大=离边更远 */
+          margin-bottom: -10px;                /* 👈 建议词与输入框的间距，改大=离输入框更远 */
+          justify-content: flex-start;
+          flex-direction: column;
+        }
+        .ask-suggestions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;                          /* 👈 建议词之间的间距 */
+        }
+        .ask-suggestion-chip {
+          padding: 4px 8px;                 /* 👈 建议词内边距(上下 左右)，改大=按钮更大 */
+          font-size: 0.8rem;                /* 👈 建议词字号，改大=文字更大 */
+          border-radius: 100px;               /* 👈 圆角 */
+          border: 1px solid #d0d5dd;
+          color: rgb(28, 28, 28);
+          background: #fff;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04);
+          cursor: pointer;
+          transition: transform 0.3s ease;
+        }
+        .ask-suggestion-chip:hover {
+          transform: scale(1.03);
+          border-color: #b0b5bb;
+        }
+        .ask-input-container {
+          width: 100%;
+          padding: 0;
+          background: var(--copilot-kit-background-color, #fff);
+        }
+        .ask-input-box {
+          cursor: text;
+          position: relative;
+          background-color: #fbfbfb;
+          border-radius: 20px 20px 0 0;
+          border: 1.5px solid #d0d5dd;
+          border-bottom: none;
+          padding: 12px 14px;
+          min-height: 75px;
+          margin: 0 auto;
+          width: 95%;
+          display: flex;
+          flex-direction: column;
+        }
+        .ask-input-textarea {
+          flex: 1;
+          border: none;
+          outline: none;
+          background: transparent;
+          font-size: 0.875rem;
+          color: rgb(28, 28, 28);
+          resize: none;
+          line-height: 1.5;
+          max-height: 120px;
+          overflow-y: auto;
+          font-family: inherit;
+        }
+        .ask-input-textarea::placeholder { color: #999; }
+        .ask-send-btn-row {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 4px;
+        }
+        .ask-send-btn {
+          width: 24px;
+          height: 24px;
           border: none;
           background: transparent;
-          color: #666;
+          color: rgba(0, 0, 0, 0.25);
           cursor: pointer;
-          border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 12px;
-          transition: all 0.2s;
+          padding: 0;
+          flex-shrink: 0;
+          transition: transform 0.2s, color 0.2s;
         }
-        .toolbar-icon-btn:hover {
-          background: #e8e8e8;
-          color: #333;
+        .ask-send-btn:not(:disabled) {
+          color: rgb(28, 28, 28);
         }
-        .mode-toggle {
+        .ask-send-btn:not(:disabled):hover {
+          transform: scale(1.05);
+        }
+        .ask-send-btn:disabled {
+          cursor: default;
+        }
+
+        /* ============================================= */
+        /* Inline toolbar — inside input area            */
+        /* ============================================= */
+        .inline-toolbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 6px 14px 10px;
+          margin: 0 auto 0;
+          width: 95%;
+          background: var(--copilot-kit-input-background-color, #fbfbfb);
+          border: 1.5px solid #d0d5dd;
+          border-top: 1px solid #e8e8e8;
+          border-radius: 0 0 20px 20px;
+          margin-bottom: 12px;
+          flex-shrink: 0;
+        }
+        .inline-toolbar-left,
+        .inline-toolbar-right {
           display: flex;
           align-items: center;
-          background: #e8e8e8;
-          border-radius: 16px;
-          padding: 2px;
-          gap: 0;
+          gap: 6px;
         }
-        .mode-toggle-btn {
-          padding: 4px 14px;
-          border: none;
-          background: transparent;
-          color: #888;
-          font-size: 12px;
+
+        /* ---- Mode toggle buttons (Ask / Agent) ---- */
+        .mode-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 14px;
+          border: 1px solid #e5e7eb;
+          background: #ffffff;
+          color: #6b7280;
+          border-radius: 18px;
+          font-size: 13px;
           font-weight: 500;
           cursor: pointer;
-          border-radius: 14px;
-          transition: all 0.25s ease;
+          transition: all 0.2s ease;
           line-height: 1.4;
+          white-space: nowrap;
         }
-        .mode-toggle-btn:hover {
-          color: #555;
+        .mode-btn i { font-size: 11px; }
+        .mode-btn:hover {
+          background: #f3f4f6;
+          border-color: #d1d5db;
         }
-        .mode-toggle-btn.active {
+        /* Ask active */
+        .mode-btn.active {
+          background: #eef4ff;
+          color: #2563eb;
+          border-color: #93bbfd;
+        }
+        /* Agent active – filled blue */
+        .mode-btn.agent.active {
+          background: #3b82f6;
+          color: #ffffff;
+          border-color: #3b82f6;
+          box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+        }
+        .mode-btn.agent.active:hover {
+          background: #2563eb;
+          border-color: #2563eb;
+        }
+
+        /* ---- New Chat button (right side) ---- */
+        .new-chat-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 14px;
+          border: 1px solid #e5e7eb;
           background: #ffffff;
+          color: #6b7280;
+          border-radius: 18px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+        }
+        .new-chat-btn i { font-size: 11px; }
+        .new-chat-btn:hover {
+          background: #f3f4f6;
           color: #333;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+          border-color: #d1d5db;
         }
-        #suggestionsBox {
-          background: #fafafa;
-          border-bottom: 1px solid #e8e8e8;
-        }
-        #suggestionsBox h5 {
-          color: #666;
-        }
-        #suggestionsBox .chat-message {
-          color: #333;
-        }
-        #suggestionsBox .chat-message:hover {
-          background: #f0f0f0;
-        }
+
         .error {
           color: #e74c3c;
           padding: 0 16px 8px;
@@ -572,7 +717,7 @@ function ChatBox() {
           font-size: 12px;
         }
       `}</style>
-    </div>
+    </>
   );
 }
 
