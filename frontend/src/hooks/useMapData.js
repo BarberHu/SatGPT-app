@@ -1,12 +1,13 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
+import { buildAskMapRequestParams } from '../utils/aoi';
 
 const FLOOD_HOTSPOT_YEAR_FROM = 1988;
 
 export const useMapData = () => {
   const {
-    selectedGridCords,
+    selectedAOI,
     dataType,
     yearControl,
     setIsLoading,
@@ -16,26 +17,23 @@ export const useMapData = () => {
   } = useAppContext();
 
   // Track previous grid coords to detect changes
-  const prevGridCordsRef = useRef(null);
+  const prevAoiRef = useRef(null);
 
   // Fetch map data when grid is selected
-  const fetchMapData = useCallback(async (gridCords) => {
-    if (!gridCords) return;
+  const fetchMapData = useCallback(async (aoi) => {
+    if (!aoi) return;
 
-    console.log('fetchMapData called with:', gridCords);
+    console.log('fetchMapData called with AOI:', aoi);
 
     // Build parameters
-    const geoJsonList = gridCords.map((coords) => [coords[0], coords[1]]);
-    
-    const params = {
-      AoI_cords: JSON.stringify(geoJsonList),
+    const params = buildAskMapRequestParams(aoi, {
       time_start: '2010-01-01',
       time_end: '2024-12-31',
       cloud_mask: 'true',
       climatology: 'false',
       month_from: '1',
       month_to: '12',
-    };
+    });
 
     console.log('API params:', params);
     setIsLoading(true);
@@ -74,27 +72,25 @@ export const useMapData = () => {
     }
   }, [dataType, yearControl, setIsLoading, setWarning, updateLayerData, setGeeCodeUrl]);
 
-  // Auto-fetch when grid is selected or data type changes
+  // Auto-fetch when AOI is selected or data type changes
   useEffect(() => {
-    if (selectedGridCords) {
-      console.log('selectedGridCords changed:', selectedGridCords);
-      // Compare with previous coords using JSON stringify
-      const currentCordsStr = JSON.stringify(selectedGridCords);
-      const prevCordsStr = JSON.stringify(prevGridCordsRef.current);
+    if (selectedAOI) {
+      console.log('selectedAOI changed:', selectedAOI);
+      const currentAoiStr = JSON.stringify(selectedAOI);
+      const prevAoiStr = JSON.stringify(prevAoiRef.current);
       
-      // Only fetch if coords changed or it's the first selection
-      if (currentCordsStr !== prevCordsStr || !prevGridCordsRef.current) {
-        console.log('Fetching map data for new grid...');
-        prevGridCordsRef.current = selectedGridCords;
-        fetchMapData(selectedGridCords);
+      if (currentAoiStr !== prevAoiStr || !prevAoiRef.current) {
+        console.log('Fetching map data for new AOI...');
+        prevAoiRef.current = selectedAOI;
+        fetchMapData(selectedAOI);
       }
     }
-  }, [selectedGridCords, fetchMapData]);
+  }, [selectedAOI, fetchMapData]);
 
   // Also refetch when dataType or yearControl changes (if grid is selected)
   useEffect(() => {
-    if (selectedGridCords && prevGridCordsRef.current) {
-      fetchMapData(selectedGridCords);
+    if (selectedAOI && prevAoiRef.current) {
+      fetchMapData(selectedAOI);
     }
   }, [dataType, yearControl]); // eslint-disable-line react-hooks/exhaustive-deps
 

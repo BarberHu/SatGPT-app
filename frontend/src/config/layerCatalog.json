@@ -1,0 +1,152 @@
+{
+  "basic": {
+    "historical": {
+      "jrcYearlyHistory": {
+        "dataset": "JRC/GSW1_4/YearlyHistory",
+        "version": "1.4"
+      },
+      "water": {
+        "band": "waterClass",
+        "matchValue": 3,
+        "visualization": {
+          "min": 0,
+          "max": 1,
+          "palette": ["#00008B"]
+        }
+      },
+      "flood": {
+        "band": "waterClass",
+        "matchValue": 2,
+        "visualization": {
+          "min": 0,
+          "max": 1,
+          "palette": ["#FD0303"]
+        }
+      }
+    },
+    "hotspot": {
+      "jrcYearlyHistory": {
+        "dataset": "JRC/GSW1_4/YearlyHistory",
+        "version": "1.4"
+      },
+      "worldCoverPrimaryWater": {
+        "dataset": "ESA/WorldCover/v200",
+        "version": "v200",
+        "classValue": 80
+      },
+      "worldCoverLegacyWater": {
+        "dataset": "ESA/WorldCover/v100",
+        "version": "v100",
+        "classValue": 80
+      },
+      "water": {
+        "visualization": {
+          "min": 0,
+          "max": 1,
+          "palette": ["#00008B"]
+        }
+      },
+      "floodFrequency": {
+        "visualization": {
+          "min": 0.1,
+          "max": 0.8,
+          "palette": [
+            "#ffa9bb",
+            "#ff9cac",
+            "#ff8f9e",
+            "#ff8190",
+            "#ff7281",
+            "#ff6171",
+            "#ff4f61",
+            "#ff3b50",
+            "#ff084a"
+          ]
+        }
+      }
+    },
+    "supplementary": {
+      "landcover": {
+        "dataset": "ESA/WorldCover/v200",
+        "version": "v200"
+      },
+      "populationDensity": {
+        "dataset": "CIESIN/GPWv411/GPW_UNWPP-Adjusted_Population_Density/gpw_v4_population_density_adjusted_to_2015_unwpp_country_totals_rev11_2020_30_sec",
+        "version": "2020",
+        "visualization": {
+          "min": 0,
+          "max": 1000,
+          "palette": ["ffffe7", "FFc869", "ffac1d", "e17735", "f2552c", "9f0c21"]
+        }
+      },
+      "soilTexture": {
+        "dataset": "OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-TT_M/v02",
+        "band": "b10",
+        "version": "v02",
+        "visualization": {
+          "min": 1,
+          "max": 12,
+          "palette": [
+            "d5c36b",
+            "b96947",
+            "9d3706",
+            "ae868f",
+            "f86714",
+            "46d143",
+            "368f20",
+            "3e5a14",
+            "ffd557",
+            "fff72e",
+            "ff5a9d",
+            "ff005b"
+          ]
+        }
+      },
+      "healthCareAccess": {
+        "dataset": "Oxford/MAP/accessibility_to_healthcare_2019",
+        "band": "accessibility",
+        "version": "2019",
+        "visualization": {
+          "min": 1,
+          "max": 60,
+          "palette": [
+            "FFF8DC",
+            "FFEBCD",
+            "FFDEAD",
+            "F5DEB3",
+            "DEB887",
+            "D2B48C",
+            "CD853F",
+            "8B4513",
+            "A0522D",
+            "8B4513"
+          ]
+        }
+      }
+    }
+  },
+  "advanced": {
+    "floodDetection": {
+      "permanentWater": {
+        "dataset": "JRC/GSW1_4/GlobalSurfaceWater",
+        "band": "occurrence",
+        "threshold": 95,
+        "version": "1.4"
+      }
+    },
+    "impact": {
+      "population": {
+        "dataset": "WorldPop/GP/100m/pop",
+        "version": "2020"
+      },
+      "landcover": {
+        "dataset": "ESA/WorldCover/v200",
+        "version": "2021"
+      },
+      "urban": {
+        "dataset": "JRC/GHSL/P2023A/GHS_BUILT_S/2020",
+        "band": "built_surface",
+        "version": "2020"
+      }
+    }
+  }
+}
