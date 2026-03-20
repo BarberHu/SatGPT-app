@@ -45,6 +45,7 @@ export const AppProvider = ({ children }) => {
   // Map State
   const [mapInstance, setMapInstance] = useState(null);
   const [selectedGridCords, setSelectedGridCords] = useState(null);
+  const [selectedAOI, setSelectedAOI] = useState(null);
   const [countries, setCountries] = useState({});
   
   // Layer State
@@ -209,6 +210,8 @@ export const AppProvider = ({ children }) => {
     setMapInstance,
     selectedGridCords,
     setSelectedGridCords,
+    selectedAOI,
+    setSelectedAOI,
     countries,
     setCountries,
     

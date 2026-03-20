@@ -7,6 +7,7 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
+import { buildAskMapRequestParams } from '../utils/aoi';
 import { CopilotChat } from "@copilotkit/react-ui";
 import { useCopilotContext } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
@@ -31,7 +32,7 @@ function ChatBox() {
     setResultText,
     setIsLoading,
     setWarning,
-    selectedGridCords,
+    selectedAOI,
     dataType,
     yearControl,
     updateLayerData,
@@ -41,7 +42,6 @@ function ChatBox() {
     mapInstance,
     chatMode,
     setChatMode,
-    appMode,
     setAppMode,
   } = useAppContext();
 
@@ -92,7 +92,7 @@ function ChatBox() {
       return;
     }
 
-    if (!selectedGridCords) {
+    if (!selectedAOI) {
       setActiveModal('prompt');
       return;
     }
@@ -122,11 +122,10 @@ function ChatBox() {
       }
 
       // Prepare params for map API
-      const params = {
-        AoI_cords: JSON.stringify(selectedGridCords),
+      const params = buildAskMapRequestParams(selectedAOI, {
         time_start: responseData.start_date,
         time_end: responseData.end_date,
-      };
+      });
 
       // Validate dates
       if (params.time_start > params.time_end) {

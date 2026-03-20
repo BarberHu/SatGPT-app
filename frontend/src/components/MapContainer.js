@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { useAppContext } from '../context/AppContext';
+import { buildAoiFromGridSelection } from '../utils/aoi';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -17,8 +18,8 @@ function MapContainer() {
   
   const {
     setMapInstance,
-    selectedGridCords,
     setSelectedGridCords,
+    setSelectedAOI,
     layerData,
     layerVisibility,
     layerOpacity,
@@ -113,6 +114,7 @@ function MapContainer() {
         
         // Set new grid coordinates (this triggers useMapData to fetch new data)
         setSelectedGridCords(cords);
+        setSelectedAOI(buildAoiFromGridSelection(cords));
         drawSelectedPolygon(map, cords);
         
         // Fit bounds to selected grid

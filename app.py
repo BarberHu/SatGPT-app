@@ -37,6 +37,9 @@ from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 """GOOGLE DRIVE END"""
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LAYER_CATALOG_PATH = os.path.join(BASE_DIR, 'frontend', 'src', 'config', 'layerCatalog.json')
+
 
 
 # Initialization
@@ -72,6 +75,113 @@ app = Flask(__name__)
 # Enable CORS for all origins (支持内网/局域网访问)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+
+def load_layer_catalog():
+    with open(LAYER_CATALOG_PATH, 'r', encoding='utf-8') as handle:
+        return json.load(handle)
+
+
+LAYER_CATALOG = load_layer_catalog()
+BASIC_LAYER_CATALOG = LAYER_CATALOG["basic"]
+
+
+def get_bounds_from_ring(coordinates):
+    lngs = [point[0] for point in coordinates]
+    lats = [point[1] for point in coordinates]
+    return {
+        "west": min(lngs),
+        "south": min(lats),
+        "east": max(lngs),
+        "north": max(lats),
+    }
+
+
+def build_aoi_from_legacy_coords(coordinates):
+    return {
+        "version": 1,
+        "source": "legacy_polygon",
+        "kind": "polygon",
+        "bounds": get_bounds_from_ring(coordinates),
+        "geojson": {
+            "type": "Polygon",
+            "coordinates": [coordinates],
+        },
+        "legacy": {
+            "AoI_cords": coordinates,
+        },
+    }
+
+
+def extract_geojson_geometry(geojson):
+    if not isinstance(geojson, dict):
+        return None
+
+    geo_type = geojson.get("type")
+    if geo_type == "FeatureCollection":
+        features = geojson.get("features") or []
+        return extract_geojson_geometry(features[0]) if features else None
+    if geo_type == "Feature":
+        return geojson.get("geometry")
+
+    return geojson
+
+
+def is_valid_bounds(bounds):
+    if not isinstance(bounds, dict):
+        return False
+
+    required_keys = {"west", "south", "east", "north"}
+    return required_keys.issubset(bounds.keys())
+
+
+def parse_aoi_from_request_args(args):
+    serialized_aoi = args.get("aoi")
+    if serialized_aoi:
+        aoi = json.loads(serialized_aoi)
+        if isinstance(aoi, dict):
+            return aoi
+
+    legacy_coords = args.get("AoI_cords")
+    if legacy_coords:
+        return build_aoi_from_legacy_coords(json.loads(legacy_coords))
+
+    raise ValueError("Missing AOI definition. Expected 'aoi' or legacy 'AoI_cords'.")
+
+
+def aoi_to_ee_geometry(aoi):
+    geometry = extract_geojson_geometry(aoi.get("geojson"))
+    if geometry:
+        return ee.Geometry(geometry)
+
+    bounds = aoi.get("bounds")
+    if is_valid_bounds(bounds):
+        return ee.Geometry.Rectangle([
+            bounds["west"],
+            bounds["south"],
+            bounds["east"],
+            bounds["north"],
+        ])
+
+    legacy_coords = (aoi.get("legacy") or {}).get("AoI_cords")
+    if legacy_coords:
+        return ee.Geometry.Polygon(legacy_coords)
+
+    raise ValueError("AOI payload does not include geojson, bounds, or legacy coordinates.")
+
+
+def visualize_image(image, vis_params):
+    return image.visualize(
+        min=vis_params["min"],
+        max=vis_params["max"],
+        palette=vis_params["palette"],
+    )
+
+
+def attach_map_id(content, key, map_id):
+    content[f'eeMapId{key}'] = map_id['mapid']
+    content[f'eeToken{key}'] = map_id['token']
+    content[f'eeMapURL{key}'] = map_id['tile_fetcher'].url_format
+
 @app.route('/flask-health-check', methods=['GET'])
 def health_check():
     return "healthy", 200
@@ -97,28 +207,26 @@ def getDefaultHandler():
 
 @app.route('/get_unsupervised_map')
 def getUnsupervisedHandler():
-
-    AoI_cords = json.loads(request.args.get('AoI_cords'))
-    eeRing = ee.Geometry.Polygon(AoI_cords)
-    AoI = ee.FeatureCollection(ee.Feature(eeRing))
+    aoi = parse_aoi_from_request_args(request.args)
+    region = aoi_to_ee_geometry(aoi)
 
     time_start   = request.args.get('time_start')
     time_end     = request.args.get('time_end')
     collection = ee.ImageCollection('LANDSAT/LE07/C01/T1_SR')\
-               .filterBounds(AoI)\
+               .filterBounds(region)\
                .filterDate(time_start, time_end)
     def computeNDWI(image):
         ndwi = image.normalizedDifference(['B2', 'B4']).rename('NDWI')
         return image.addBands(ndwi)
     
     landsatNDWI = collection.map(computeNDWI)
-    medianNDWI = landsatNDWI.median().clip(AoI)
+    medianNDWI = landsatNDWI.median().clip(region)
     gsw = ee.Image('JRC/GSW1_2/GlobalSurfaceWater')
     occurence = gsw.select('occurrence')
     waterMask = occurence.gte(90)
     maskedResult = medianNDWI.updateMask(waterMask)
     training = maskedResult.select('NDWI').sample(
-        region=AoI,
+        region=region,
         scale=30,
         numPixels=5000
     )
@@ -149,43 +257,43 @@ def getUnsupervisedHandler():
   
 @app.route('/get_historical_map')
 def getHistoricalHandler():
-
-    AoI_cords = json.loads(request.args.get('AoI_cords'))
-    eeRing = ee.Geometry.Polygon(AoI_cords)
-    AoI = ee.FeatureCollection(ee.Feature(eeRing))
+    aoi = parse_aoi_from_request_args(request.args)
+    region = aoi_to_ee_geometry(aoi)
+    historical_catalog = BASIC_LAYER_CATALOG["historical"]
+    supplementary_catalog = BASIC_LAYER_CATALOG["supplementary"]
 
     time_start   = request.args.get('time_start')
     time_end     = request.args.get('time_end')
     start_year = int(time_start.split("-")[0])
     end_year = int(time_end.split("-")[0])
 
-    jrcSurfaceWater = ee.ImageCollection('JRC/GSW1_3/YearlyHistory') \
+    jrcSurfaceWater = ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"]) \
         .filter(ee.Filter.calendarRange(start_year, end_year, 'year')) \
-        .map(lambda image: image.select('waterClass').eq(3)) \
+        .map(lambda image: image.select(historical_catalog["water"]["band"]).eq(historical_catalog["water"]["matchValue"])) \
         .sum() \
-        .clip(AoI)
+        .clip(region)
     jrcSurfaceWater = jrcSurfaceWater.updateMask(jrcSurfaceWater.gt(0)) 
-    jrcSurfaceWater = jrcSurfaceWater.visualize(min=0, max=1, palette=['#00008B'])
+    jrcSurfaceWater = visualize_image(jrcSurfaceWater, historical_catalog["water"]["visualization"])
                    
-    jrcSurfaceFlood = ee.ImageCollection('JRC/GSW1_3/YearlyHistory') \
+    jrcSurfaceFlood = ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"]) \
         .filter(ee.Filter.calendarRange(start_year, end_year, 'year')) \
-        .map(lambda image: image.select('waterClass').eq(2)) \
+        .map(lambda image: image.select(historical_catalog["flood"]["band"]).eq(historical_catalog["flood"]["matchValue"])) \
         .sum() \
-        .clip(AoI)
+        .clip(region)
 
     jrcSurfaceFlood = jrcSurfaceFlood.updateMask(jrcSurfaceFlood.gt(0)) 
-    jrcSurfaceFlood = jrcSurfaceFlood.visualize(min=0, max=1, palette=['#FD0303'])
+    jrcSurfaceFlood = visualize_image(jrcSurfaceFlood, historical_catalog["flood"]["visualization"])
 
-    LCLU = ee.ImageCollection("ESA/WorldCover/v200").first().clip(AoI)
+    LCLU = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
 
-    PopulationDensity = ee.Image('CIESIN/GPWv411/GPW_UNWPP-Adjusted_Population_Density/gpw_v4_population_density_adjusted_to_2015_unwpp_country_totals_rev11_2020_30_sec').clip(AoI);
-    PopulationDensity = PopulationDensity.visualize(min = 0.0, max = 1000,  palette = ['ffffe7','FFc869', 'ffac1d','e17735','f2552c', '9f0c21'])
+    PopulationDensity = ee.Image(supplementary_catalog["populationDensity"]["dataset"]).clip(region);
+    PopulationDensity = visualize_image(PopulationDensity, supplementary_catalog["populationDensity"]["visualization"])
 
-    SoilTexture = ee.Image('OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-TT_M/v02').clip(AoI).select('b10')
-    SoilTexture = SoilTexture.visualize(min = 1.0, max = 12.0, palette = ['d5c36b','b96947','9d3706','ae868f','f86714','46d143','368f20','3e5a14','ffd557','fff72e','ff5a9d','ff005b'])
+    SoilTexture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(supplementary_catalog["soilTexture"]["band"])
+    SoilTexture = visualize_image(SoilTexture, supplementary_catalog["soilTexture"]["visualization"])
 
-    HealthCareAccess = ee.Image('Oxford/MAP/accessibility_to_healthcare_2019').select('accessibility').clip(AoI)
-    HealthCareAccess = HealthCareAccess.visualize(min = 1,  max = 60,  palette = ['FFF8DC', 'FFEBCD', 'FFDEAD', 'F5DEB3', 'DEB887', 'D2B48C', 'CD853F', '8B4513', 'A0522D', '8B4513'])
+    HealthCareAccess = ee.Image(supplementary_catalog["healthCareAccess"]["dataset"]).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
+    HealthCareAccess = visualize_image(HealthCareAccess, supplementary_catalog["healthCareAccess"]["visualization"])
     
     mapIdWater = jrcSurfaceWater.getMapId()
     mapIdFlood = jrcSurfaceFlood.getMapId()
@@ -196,25 +304,13 @@ def getHistoricalHandler():
 
 
     content = { 
-        'eeMapIdFlood': mapIdFlood['mapid'],
-        'eeTokenFlood': mapIdFlood['token'],
-        'eeMapURLFlood': mapIdFlood['tile_fetcher'].url_format,
-        'eeMapIdWater': mapIdWater['mapid'],
-        'eeTokenWater': mapIdWater['token'],
-        'eeMapURLWater': mapIdWater['tile_fetcher'].url_format,
-        'eeMapIdLCLU': mapIdLCLU['mapid'],
-        'eeTokenLCLU': mapIdLCLU['token'],
-        'eeMapURLLCLU': mapIdLCLU['tile_fetcher'].url_format,
-        'eeMapIdPopulationDensity': mapIdPopulationDensity['mapid'],
-        'eeTokenPopulationDensity': mapIdPopulationDensity['token'],
-        'eeMapURLPopulationDensity': mapIdPopulationDensity['tile_fetcher'].url_format,
-        'eeMapIdSoilTexture': mapIdSoilTexture['mapid'],
-        'eeTokenSoilTexture': mapIdSoilTexture['token'],
-        'eeMapURLSoilTexture': mapIdSoilTexture['tile_fetcher'].url_format,
-        'eeMapIdHealthCareAccess': mapIdHealthCareAccess['mapid'],
-        'eeTokenHealthCareAccess': mapIdHealthCareAccess['token'],
-        'eeMapURLHealthCareAccess': mapIdHealthCareAccess['tile_fetcher'].url_format,
     }
+    attach_map_id(content, 'Flood', mapIdFlood)
+    attach_map_id(content, 'Water', mapIdWater)
+    attach_map_id(content, 'LCLU', mapIdLCLU)
+    attach_map_id(content, 'PopulationDensity', mapIdPopulationDensity)
+    attach_map_id(content, 'SoilTexture', mapIdSoilTexture)
+    attach_map_id(content, 'HealthCareAccess', mapIdHealthCareAccess)
 
     # send content using json
     response = Response()
@@ -224,47 +320,46 @@ def getHistoricalHandler():
   
 @app.route('/get_flood_hotspot_map')
 def getFloodHotspotHandler():
-    AoI_cords = json.loads(request.args.get('AoI_cords'))
-    eeRing = ee.Geometry.Polygon(AoI_cords)
-    AoI = ee.FeatureCollection(ee.Feature(eeRing))
+    aoi = parse_aoi_from_request_args(request.args)
+    region = aoi_to_ee_geometry(aoi)
+    hotspot_catalog = BASIC_LAYER_CATALOG["hotspot"]
+    supplementary_catalog = BASIC_LAYER_CATALOG["supplementary"]
     year_from = int(request.args.get('year_from'))
     year_count = int(request.args.get('year_count'))
     year_to = year_from + year_count 
     
-    WaterESA2 = ee.ImageCollection("ESA/WorldCover/v200").first().eq(80).selfMask()#.clip(AoI)
-    WaterESA1 = ee.ImageCollection("ESA/WorldCover/v100").first().eq(80).selfMask()#.clip(AoI)
-    waterHistory = ee.ImageCollection("JRC/GSW1_4/YearlyHistory").filter(ee.Filter.calendarRange(year_from, year_to, 'year'))
+    WaterESA2 = ee.ImageCollection(hotspot_catalog["worldCoverPrimaryWater"]["dataset"]).first().eq(hotspot_catalog["worldCoverPrimaryWater"]["classValue"]).selfMask()
+    WaterESA1 = ee.ImageCollection(hotspot_catalog["worldCoverLegacyWater"]["dataset"]).first().eq(hotspot_catalog["worldCoverLegacyWater"]["classValue"]).selfMask()
+    waterHistory = ee.ImageCollection(hotspot_catalog["jrcYearlyHistory"]["dataset"]).filter(ee.Filter.calendarRange(year_from, year_to, 'year'))
 
     masks = waterHistory.map(lambda image: image.select('waterClass').eq(3))
 
     PermanentWater = masks.sum()
     PermanentWaterFrequency = PermanentWater.divide(year_count);
     PermanentWaterFrequencyMap = PermanentWaterFrequency.gt(0).selfMask()
-    PermanentWaterLayer = ee.ImageCollection([WaterESA1.rename('waterClass'),WaterESA2.rename('waterClass'), PermanentWaterFrequencyMap]).mosaic().clip(AoI);
+    PermanentWaterLayer = ee.ImageCollection([WaterESA1.rename('waterClass'),WaterESA2.rename('waterClass'), PermanentWaterFrequencyMap]).mosaic().clip(region);
 
     binary_masks = waterHistory.map(lambda image: image.select('waterClass').eq(2))
     yearsWithWater = binary_masks.sum()
     floodFrequency = yearsWithWater.divide(year_count);
-    floodFrequencyMap = floodFrequency.where(PermanentWaterLayer.eq(1),0).selfMask().clip(AoI)
+    floodFrequencyMap = floodFrequency.where(PermanentWaterLayer.eq(1),0).selfMask().clip(region)
     floodFrequencyMapMasked = floodFrequencyMap.updateMask(floodFrequencyMap.lte(0.91))
-    minMax = floodFrequencyMap.reduceRegion(ee.Reducer.minMax(), AoI);
+    minMax = floodFrequencyMap.reduceRegion(ee.Reducer.minMax(), region);
     floodFrequencyMap = floodFrequencyMap.where(floodFrequencyMap.gt(0.9),0.90)
 
-    pink = ['#ffa9bb', '#ff9cac', '#ff8f9e', '#ff8190', '#ff7281', '#ff6171', '#ff4f61', '#ff3b50', '#ff084a']
+    permanentWaterLayer = visualize_image(PermanentWaterLayer.select('waterClass'), hotspot_catalog["water"]["visualization"])
+    floodLayer = visualize_image(floodFrequencyMap.select('waterClass'), hotspot_catalog["floodFrequency"]["visualization"])
 
-    permanentWaterLayer = PermanentWaterLayer.select('waterClass').visualize(min=0, max=1, palette=['#00008B'])
-    floodLayer = floodFrequencyMap.select('waterClass').visualize(min=0.1, max=0.8, palette=pink)
+    LCLU = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
 
-    LCLU = ee.ImageCollection("ESA/WorldCover/v200").first().clip(AoI)
+    PopulationDensity = ee.Image(supplementary_catalog["populationDensity"]["dataset"]).clip(region);
+    PopulationDensity = visualize_image(PopulationDensity, supplementary_catalog["populationDensity"]["visualization"])
 
-    PopulationDensity = ee.Image('CIESIN/GPWv411/GPW_UNWPP-Adjusted_Population_Density/gpw_v4_population_density_adjusted_to_2015_unwpp_country_totals_rev11_2020_30_sec').clip(AoI);
-    PopulationDensity = PopulationDensity.visualize(min = 0.0, max = 1000,  palette = ['ffffe7','FFc869', 'ffac1d','e17735','f2552c', '9f0c21'])
+    SoilTexture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(supplementary_catalog["soilTexture"]["band"])
+    SoilTexture = visualize_image(SoilTexture, supplementary_catalog["soilTexture"]["visualization"])
 
-    SoilTexture = ee.Image('OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-TT_M/v02').clip(AoI).select('b10')
-    SoilTexture = SoilTexture.visualize(min = 1.0, max = 12.0, palette = ['d5c36b','b96947','9d3706','ae868f','f86714','46d143','368f20','3e5a14','ffd557','fff72e','ff5a9d','ff005b'])
-
-    HealthCareAccess = ee.Image('Oxford/MAP/accessibility_to_healthcare_2019').select('accessibility').clip(AoI)
-    HealthCareAccess = HealthCareAccess.visualize(min = 1,  max = 60,  palette = ['FFF8DC', 'FFEBCD', 'FFDEAD', 'F5DEB3', 'DEB887', 'D2B48C', 'CD853F', '8B4513', 'A0522D', '8B4513'])
+    HealthCareAccess = ee.Image(supplementary_catalog["healthCareAccess"]["dataset"]).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
+    HealthCareAccess = visualize_image(HealthCareAccess, supplementary_catalog["healthCareAccess"]["visualization"])
 
     mapIdWater = permanentWaterLayer.getMapId()
     mapIdFlood = floodLayer.getMapId()
@@ -273,26 +368,13 @@ def getFloodHotspotHandler():
     mapIdSoilTexture = SoilTexture.getMapId()
     mapIdHealthCareAccess = HealthCareAccess.getMapId()
 
-    content = { 
-        'eeMapIdFlood': mapIdFlood['mapid'],
-        'eeTokenFlood': mapIdFlood['token'],
-        'eeMapURLFlood': mapIdFlood['tile_fetcher'].url_format,
-        'eeMapIdWater': mapIdWater['mapid'],
-        'eeTokenWater': mapIdWater['token'],
-        'eeMapURLWater': mapIdWater['tile_fetcher'].url_format,
-        'eeMapIdLCLU': mapIdLCLU['mapid'],
-        'eeTokenLCLU': mapIdLCLU['token'],
-        'eeMapURLLCLU': mapIdLCLU['tile_fetcher'].url_format,
-        'eeMapIdPopulationDensity': mapIdPopulationDensity['mapid'],
-        'eeTokenPopulationDensity': mapIdPopulationDensity['token'],
-        'eeMapURLPopulationDensity': mapIdPopulationDensity['tile_fetcher'].url_format,
-        'eeMapIdSoilTexture': mapIdSoilTexture['mapid'],
-        'eeTokenSoilTexture': mapIdSoilTexture['token'],
-        'eeMapURLSoilTexture': mapIdSoilTexture['tile_fetcher'].url_format,
-        'eeMapIdHealthCareAccess': mapIdHealthCareAccess['mapid'],
-        'eeTokenHealthCareAccess': mapIdHealthCareAccess['token'],
-        'eeMapURLHealthCareAccess': mapIdHealthCareAccess['tile_fetcher'].url_format,
-    }
+    content = {}
+    attach_map_id(content, 'Flood', mapIdFlood)
+    attach_map_id(content, 'Water', mapIdWater)
+    attach_map_id(content, 'LCLU', mapIdLCLU)
+    attach_map_id(content, 'PopulationDensity', mapIdPopulationDensity)
+    attach_map_id(content, 'SoilTexture', mapIdSoilTexture)
+    attach_map_id(content, 'HealthCareAccess', mapIdHealthCareAccess)
 
     # send content using json
     response = Response()

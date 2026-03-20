@@ -21,14 +21,12 @@ function ControlPanel() {
     resetAllOpacity,
     geeCodeUrl,
     setActiveModal,
-    countries,
     setCountries,
     mapInstance,
-    selectedGridCords,
     setSelectedGridCords,
+    setSelectedAOI,
     updateLayerData,
     appMode,
-    setAppMode,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -77,6 +75,7 @@ function ControlPanel() {
     
     // Reset selected grid so user needs to re-select
     setSelectedGridCords(null);
+    setSelectedAOI(null);
     
     // Set new data type
     setDataType(type);
