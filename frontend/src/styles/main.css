@@ -322,15 +322,7 @@ input[type="range"]::-moz-range-thumb {
 /*****************************/
 
 .chat-box {
-  position: fixed;
-  bottom: 15px;
-  left: 41.7%;
-  width: 40%;
-  background-color: #f2f2f2;
-  border: 1px solid #ccc;
-  padding: 15px;
-  border-radius: 20px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+  /* Popup mode - positioning handled by chat-popup-overlay / chat-popup-panel */
   z-index: 10;
 }
 
@@ -835,10 +827,8 @@ a.mapboxgl-ctrl-logo {
 /*****************************/
 
 @media only screen and (max-width: 600px) {
-  .chat-box {
-    width: 80%;
-    left: 10%;
-    margin: 10px;
+  .chat-popup-panel {
+    width: 95vw;
   }
 
   .result-box {
@@ -860,9 +850,8 @@ a.mapboxgl-ctrl-logo {
 }
 
 @media screen and (max-width: 1310px) {
-  .chat-box {
+  .chat-popup-panel {
     width: 40%;
-    left: 30%;
   }
 
   .result-box {
@@ -917,109 +906,89 @@ a.mapboxgl-ctrl-logo {
   height: 100%;
 }
 
-.aoi-upload-panel {
-  margin-bottom: 16px;
-  padding: 14px;
-  border-radius: 12px;
-  border: 1px solid #dbe4f0;
-  background: linear-gradient(180deg, #f8fbff 0%, #f1f6fb 100%);
+.aoi-upload-inline-shell.ask {
+  padding-left: 10px;
+  margin: 12px 0 6px;
 }
 
-.aoi-upload-header {
+.aoi-upload-inline-shell.agent {
+  margin-top: 8px;
+}
+
+.aoi-upload-inline-body {
+  background: #ffffff;
+}
+
+.aoi-upload-heading-row {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
-.aoi-upload-header h3 {
-  margin: 0 0 4px 0;
-  font-size: 18px;
-}
-
-.aoi-upload-header p,
-.aoi-upload-hint,
-.aoi-status-meta,
-.aoi-status-hint {
+.aoi-upload-heading {
   margin: 0;
-  font-size: 12px;
-  color: #5b6b7d;
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #111827;
 }
 
-.aoi-badge {
-  padding: 4px 8px;
+.aoi-upload-inline-badge {
+  padding: 2px 7px;
   border-radius: 999px;
   background: #dbeafe;
-  color: #1d4ed8;
-  font-size: 11px;
+  color: #2563eb;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-}
-
-.aoi-upload-body {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.aoi-status-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  background: #ffffff;
-  border: 1px solid #dbe4f0;
-  border-radius: 10px;
-}
-
-.aoi-status-label {
-  font-size: 11px;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #64748b;
 }
 
-.aoi-status-value {
-  font-size: 14px;
-  color: #0f172a;
-  word-break: break-word;
-}
-
-.aoi-upload-actions {
+.aoi-upload-action-row {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.aoi-btn {
+.aoi-upload-action-btn {
   border: none;
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: 6px;
+  padding: 6px 12px;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 700;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  font-weight: 600;
+  transition: all 0.2s;
 }
 
-.aoi-btn:hover {
-  transform: translateY(-1px);
+.aoi-upload-action-btn:hover {
+  background: #cbd5e1;
 }
 
-.aoi-btn:disabled {
-  opacity: 0.6;
-  cursor: wait;
-  transform: none;
+.aoi-upload-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-.aoi-btn.primary {
-  background: #0f172a;
-  color: #f8fafc;
+.aoi-upload-action-btn.primary {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
 }
 
-.aoi-btn.secondary {
+.aoi-upload-action-btn.primary:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+.aoi-upload-action-btn.secondary {
   background: #e2e8f0;
-  color: #334155;
+  color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .aoi-upload-action-row {
+    align-items: flex-start;
+  }
 }
 
 .feedback-widget {

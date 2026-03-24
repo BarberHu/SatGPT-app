@@ -18,10 +18,12 @@ export const useMapData = () => {
 
   // Track previous grid coords to detect changes
   const prevAoiRef = useRef(null);
+  const requestIdRef = useRef(0);
 
   // Fetch map data when grid is selected
   const fetchMapData = useCallback(async (aoi) => {
     if (!aoi) return;
+    const requestId = ++requestIdRef.current;
 
     console.log('fetchMapData called with AOI:', aoi);
 
@@ -51,6 +53,10 @@ export const useMapData = () => {
         data = await getFloodHotspotMap(params);
       }
 
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
+
       // Update layer data in context
       updateLayerData(data);
 
@@ -70,10 +76,15 @@ export const useMapData = () => {
       }
 
     } catch (error) {
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
       console.error('Error fetching map data:', error);
       setWarning('Error loading map data. Please try again.');
     } finally {
-      setIsLoading(false);
+      if (requestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   }, [dataType, yearControl, setIsLoading, setWarning, updateLayerData, setGeeCodeUrl]);
 
@@ -89,6 +100,9 @@ export const useMapData = () => {
         prevAoiRef.current = selectedAOI;
         fetchMapData(selectedAOI);
       }
+    } else {
+      prevAoiRef.current = null;
+      requestIdRef.current += 1;
     }
   }, [selectedAOI, fetchMapData]);
 

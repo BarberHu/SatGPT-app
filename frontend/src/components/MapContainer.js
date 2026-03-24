@@ -11,17 +11,27 @@ const DEFAULT_ZOOM = 5;
 
 // Custom Mapbox style (same as original project)
 const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
+const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+const AGENT_SOURCE_IDS = [
+  'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
+  'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
+  'agent-flood-detection', 'agent-population', 'agent-urban', 'agent-landcover',
+];
+const AOI_SOURCE_ID = 'analysis-aoi';
+const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
 
 function MapContainer() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
+  const gridClickEnabledRef = useRef(true);
   
   const {
     setMapInstance,
     setSelectedGridCords,
     setSelectedAOI,
     selectedAOI,
+    gridClickEnabled,
     resetAgentSession,
     resetAskSession,
     layerData,
@@ -47,21 +57,48 @@ function MapContainer() {
   // Track if map is initialized
   const mapInitialized = useRef(false);
 
-  const removePreviousLayers = useCallback((map) => {
-    const layerIds = ['water-layer', 'flood-layer', 'lclu-layer', 'populationDensity-layer', 'soilTexture-layer', 'healthCareAccess-layer'];
-    const sourceIds = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-    
-    layerIds.forEach(id => {
-      if (map.getLayer(id)) {
-        map.removeLayer(id);
+  useEffect(() => {
+    gridClickEnabledRef.current = gridClickEnabled;
+  }, [gridClickEnabled]);
+
+  const removeAskLayers = useCallback((map) => {
+    ASK_LAYER_NAMES.forEach((id) => {
+      if (map.getLayer(`${id}-layer`)) {
+        map.removeLayer(`${id}-layer`);
       }
     });
-    
-    sourceIds.forEach(id => {
+
+    ASK_LAYER_NAMES.forEach((id) => {
       if (map.getSource(id)) {
         map.removeSource(id);
       }
     });
+  }, []);
+
+  const removeAgentLayers = useCallback((map) => {
+    AGENT_SOURCE_IDS.forEach((id) => {
+      if (map.getLayer(id)) {
+        map.removeLayer(id);
+      }
+    });
+
+    AGENT_SOURCE_IDS.forEach((id) => {
+      if (map.getSource(id)) {
+        map.removeSource(id);
+      }
+    });
+  }, []);
+
+  const removeAoiLayers = useCallback((map) => {
+    AOI_LAYER_IDS.forEach((id) => {
+      if (map.getLayer(id)) {
+        map.removeLayer(id);
+      }
+    });
+
+    if (map.getSource(AOI_SOURCE_ID)) {
+      map.removeSource(AOI_SOURCE_ID);
+    }
   }, []);
 
   const loadGridLayer = useCallback((map) => {
@@ -83,12 +120,14 @@ function MapContainer() {
 
     // Grid cell click handler
     map.on('click', 'grid_cell-layer', (e) => {
+      if (!gridClickEnabledRef.current) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['grid_cell-layer'] });
       if (features.length > 0 && features[0].geometry) {
         const cords = features[0].geometry.coordinates[0];
         
         // Remove previous EE layers before setting new grid
-        removePreviousLayers(map);
+        removeAskLayers(map);
+        removeAgentLayers(map);
         
         // Set new grid coordinates (this triggers useMapData to fetch new data)
         resetAskSession();
@@ -100,13 +139,14 @@ function MapContainer() {
 
     // Change cursor on hover
     map.on('mouseenter', 'grid_cell-layer', () => {
+      if (!gridClickEnabledRef.current) return;
       map.getCanvas().style.cursor = 'pointer';
     });
 
     map.on('mouseleave', 'grid_cell-layer', () => {
       map.getCanvas().style.cursor = '';
     });
-  }, [removePreviousLayers, resetAgentSession, resetAskSession, setSelectedAOI, setSelectedGridCords]);
+  }, [removeAgentLayers, removeAskLayers, resetAgentSession, resetAskSession, setSelectedAOI, setSelectedGridCords]);
 
   // Initialize map
   useEffect(() => {
@@ -146,9 +186,7 @@ function MapContainer() {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
 
-    const layers = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-    
-    layers.forEach((layerName) => {
+    ASK_LAYER_NAMES.forEach((layerName) => {
       const data = layerData[layerName];
       
       // Remove existing layer and source
@@ -184,15 +222,36 @@ function MapContainer() {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
 
-    const layers = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-    
-    layers.forEach((layerName) => {
+    ASK_LAYER_NAMES.forEach((layerName) => {
       if (map.getLayer(`${layerName}-layer`)) {
         const opacity = layerVisibility[layerName] ? layerOpacity[layerName] : 0;
         map.setPaintProperty(`${layerName}-layer`, 'raster-opacity', opacity);
       }
     });
   }, [layerVisibility, layerOpacity]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    if (appMode === 'ask') {
+      removeAgentLayers(map);
+    } else {
+      removeAskLayers(map);
+    }
+  }, [appMode, removeAgentLayers, removeAskLayers]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    if (appMode === 'ask') {
+      removeAskLayers(map);
+    } else {
+      removeAgentLayers(map);
+      setAgentTileError(null);
+    }
+  }, [appMode, selectedAOI, removeAgentLayers, removeAskLayers, setAgentTileError]);
 
   // Handle 3D terrain
   useEffect(() => {
@@ -464,13 +523,11 @@ function MapContainer() {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
 
-    const sourceId = 'analysis-aoi';
+    const sourceId = AOI_SOURCE_ID;
     const layerId = 'analysis-aoi-fill';
     const outlineLayerId = 'analysis-aoi-outline';
 
-    if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId);
-    if (map.getLayer(layerId)) map.removeLayer(layerId);
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
+    removeAoiLayers(map);
 
     if (!displayedAoi?.geojson) {
       lastFittedAoiRef.current = null;
@@ -508,7 +565,7 @@ function MapContainer() {
       map.fitBounds([[west, south], [east, north]], { padding: 50 });
       lastFittedAoiRef.current = boundsKey;
     }
-  }, [displayedAoi]);
+  }, [displayedAoi, removeAoiLayers]);
 
   return (
     <div 
