@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import AgentPanel from './AgentPanel';
+import AoiUploadPanel from './AoiUploadPanel';
 
 function ControlPanel() {
   const {
@@ -23,10 +24,9 @@ function ControlPanel() {
     setActiveModal,
     setCountries,
     mapInstance,
-    setSelectedGridCords,
-    setSelectedAOI,
-    updateLayerData,
+    selectedAOI,
     appMode,
+    resetAskSession,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -61,27 +61,24 @@ function ControlPanel() {
           mapInstance.removeSource(sourceId);
         }
       });
-      // Remove selection line
-      if (mapInstance.getLayer('LineString')) {
-        mapInstance.removeLayer('LineString');
-      }
-      if (mapInstance.getSource('LineString')) {
-        mapInstance.removeSource('LineString');
+      ['analysis-aoi-fill', 'analysis-aoi-outline'].forEach((layerId) => {
+        if (mapInstance.getLayer(layerId)) {
+          mapInstance.removeLayer(layerId);
+        }
+      });
+      if (mapInstance.getSource('analysis-aoi')) {
+        mapInstance.removeSource('analysis-aoi');
       }
     }
     
-    // Clear layer data
-    updateLayerData({});
-    
-    // Reset selected grid so user needs to re-select
-    setSelectedGridCords(null);
-    setSelectedAOI(null);
+    resetAskSession();
     
     // Set new data type
     setDataType(type);
     
-    // Show prompt to select grid
-    setActiveModal('prompt');
+    if (!selectedAOI) {
+      setActiveModal('prompt');
+    }
   };
 
   const handleLayerChange = (layerName) => {
@@ -130,6 +127,7 @@ function ControlPanel() {
       </header>
       
       <hr style={{ margin: '10px 0px 20px 0px' }} />
+      <AoiUploadPanel />
 
       {/* Content based on mode - synced with ChatBox toggle */}
       {appMode === 'agent' ? (

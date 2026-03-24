@@ -917,3 +917,213 @@ a.mapboxgl-ctrl-logo {
   height: 100%;
 }
 
+.aoi-upload-panel {
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #dbe4f0;
+  background: linear-gradient(180deg, #f8fbff 0%, #f1f6fb 100%);
+}
+
+.aoi-upload-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.aoi-upload-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+}
+
+.aoi-upload-header p,
+.aoi-upload-hint,
+.aoi-status-meta,
+.aoi-status-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #5b6b7d;
+}
+
+.aoi-badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.aoi-upload-body {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.aoi-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+}
+
+.aoi-status-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.aoi-status-value {
+  font-size: 14px;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.aoi-upload-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aoi-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.aoi-btn:hover {
+  transform: translateY(-1px);
+}
+
+.aoi-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+}
+
+.aoi-btn.primary {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.aoi-btn.secondary {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.feedback-widget {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.feedback-trigger {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+}
+
+.feedback-card {
+  width: min(360px, calc(100vw - 32px));
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #dbe4f0;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.feedback-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.feedback-card-header p {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.feedback-count {
+  font-size: 11px;
+  color: #475569;
+  background: #e2e8f0;
+  border-radius: 999px;
+  padding: 4px 8px;
+  align-self: flex-start;
+}
+
+.feedback-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.feedback-card select,
+.feedback-card textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.feedback-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.feedback-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.feedback-btn.primary {
+  background: #0f766e;
+  color: #f0fdfa;
+}
+
+.feedback-btn.secondary {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.feedback-btn.ghost {
+  background: #f8fafc;
+  color: #64748b;
+}
+

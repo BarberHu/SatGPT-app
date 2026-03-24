@@ -11,6 +11,9 @@ import { useCoAgent, useLangGraphInterrupt, useCopilotMessagesContext } from "@c
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import SourcesDrawer from './SourcesDrawer';
+import { getFloodImages, getFloodImpact } from '../services/agentApi';
+import { buildAoiFromAgentState } from '../utils/aoi';
+import { trackUxEvent } from '../utils/analytics';
 import './AgentPanel.css';
 
 // FloodAgent 默认状态
@@ -464,11 +467,12 @@ function AgentPanel() {
   const { 
     setFloodAgentState, 
     floodAgentState,
+    selectedAOI,
+    setWarning,
     setAgentImagery,
     setAgentImageryLoading,
     agentImagery,
     agentImageryLoading,
-    mapInstance,
     // Agent control states from context
     agentSelectedPeriod,
     setAgentSelectedPeriod,
@@ -505,150 +509,142 @@ function AgentPanel() {
     chatHistory: false,
   });
 
-  // Use CopilotKit's useCoAgent for state sync
-  const { state, setState } = useCoAgent({
+  const { state } = useCoAgent({
     name: "flood_agent",
     initialState: defaultAgentState,
   });
 
-  // Sync agent state to AppContext when it changes
+  const imageryRequestKeyRef = useRef(null);
+  const impactRequestKeyRef = useRef(null);
+
   useEffect(() => {
     if (state) {
       setFloodAgentState(state);
-      
-      // Move map to coordinates if available
-      if (state.coordinates && mapInstance) {
-        const [lng, lat] = state.coordinates;
-        if (lng !== 0 && lat !== 0) {
-          mapInstance.flyTo({
-            center: [lng, lat],
-            zoom: 8,
-            duration: 2000,
-          });
-        }
-      }
-      
-      // Add GeoJSON to map if available
-      if (state.geojson && mapInstance) {
-        addGeoJSONToMap(state.geojson);
-      }
-      
-      // Fetch imagery when we have complete data
-      if (state.pre_date && state.peek_date && state.after_date && 
-          (state.bounds || state.geojson)) {
-        fetchAgentImagery(state);
-      }
     }
-  }, [state, mapInstance, setFloodAgentState]);
+  }, [state, setFloodAgentState]);
 
-  // Add GeoJSON to map
-  const addGeoJSONToMap = useCallback((geojson) => {
-    if (!mapInstance) return;
-    
-    const sourceId = 'agent-geojson';
-    const layerId = 'agent-geojson-layer';
-    const outlineLayerId = 'agent-geojson-outline';
-    
-    // Remove existing layers and source
-    if (mapInstance.getLayer(outlineLayerId)) {
-      mapInstance.removeLayer(outlineLayerId);
-    }
-    if (mapInstance.getLayer(layerId)) {
-      mapInstance.removeLayer(layerId);
-    }
-    if (mapInstance.getSource(sourceId)) {
-      mapInstance.removeSource(sourceId);
-    }
-    
-    // Add new source and layers
-    mapInstance.addSource(sourceId, {
-      type: 'geojson',
-      data: geojson,
-    });
-    
-    mapInstance.addLayer({
-      id: layerId,
-      type: 'fill',
-      source: sourceId,
-      paint: {
-        'fill-color': '#3b82f6',
-        'fill-opacity': 0.1,
-      },
-    });
-    
-    mapInstance.addLayer({
-      id: outlineLayerId,
-      type: 'line',
-      source: sourceId,
-      paint: {
-        'line-color': '#3b82f6',
-        'line-width': 2,
-      },
-    });
-  }, [mapInstance]);
+  const currentState = state || floodAgentState;
+  const effectiveAoi = selectedAOI || buildAoiFromAgentState(currentState, {
+    source: 'agent_geocode',
+    label: currentState.location || 'Agent-derived boundary',
+  });
 
-  // Fetch FloodAgent imagery
-  const fetchAgentImagery = useCallback(async (agentState) => {
+  const fetchAgentImagery = useCallback(async (agentState, aoi) => {
+    const requestKey = JSON.stringify({
+      pre_date: agentState.pre_date,
+      peek_date: agentState.peek_date,
+      after_date: agentState.after_date,
+      bounds: aoi?.bounds || agentState.bounds || null,
+      geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
+      coordinates: agentState.coordinates || null,
+    });
+
+    if (imageryRequestKeyRef.current === requestKey) {
+      return;
+    }
+
+    imageryRequestKeyRef.current = requestKey;
     setAgentImageryLoading(true);
+    setWarning('');
+
     try {
-      const response = await fetch(`http://${window.location.hostname}:8000/api/flood-images`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          pre_date: agentState.pre_date,
-          peek_date: agentState.peek_date,
-          after_date: agentState.after_date,
-          longitude: agentState.coordinates?.[0] || 0,
-          latitude: agentState.coordinates?.[1] || 0,
-          bounds: agentState.bounds,
-          geojson: agentState.geojson?.geometry,
-        }),
+      const result = await getFloodImages({
+        pre_date: agentState.pre_date,
+        peek_date: agentState.peek_date,
+        after_date: agentState.after_date,
+        longitude: agentState.coordinates?.[0] || 0,
+        latitude: agentState.coordinates?.[1] || 0,
+        bounds: aoi?.bounds || agentState.bounds || null,
+        geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
       });
-      
-      const result = await response.json();
-      if (result.success) {
+
+      if (result?.success) {
         setAgentImagery(result.data);
+        setWarning('');
+        trackUxEvent('imagery_request_success', {
+          source: aoi?.source || 'agent',
+          mode: 'agent',
+        });
+      } else {
+        throw new Error('Flood imagery response was not successful.');
       }
     } catch (error) {
       console.error('Failed to fetch imagery:', error);
+      imageryRequestKeyRef.current = null;
+      setWarning(error?.message || 'Flood imagery request failed.');
+      trackUxEvent('imagery_request_fail', {
+        mode: 'agent',
+        error: error?.message || 'Unknown imagery error',
+      });
     } finally {
       setAgentImageryLoading(false);
     }
-  }, [setAgentImagery, setAgentImageryLoading]);
+  }, [setAgentImagery, setAgentImageryLoading, setWarning]);
+
+  useEffect(() => {
+    if (!currentState.pre_date || !currentState.peek_date || !currentState.after_date) {
+      return;
+    }
+
+    if (effectiveAoi || currentState.coordinates) {
+      fetchAgentImagery(currentState, effectiveAoi);
+    }
+  }, [
+    currentState,
+    currentState.pre_date,
+    currentState.peek_date,
+    currentState.after_date,
+    currentState.coordinates,
+    effectiveAoi,
+    fetchAgentImagery,
+  ]);
 
   // Fetch flood impact assessment data
   const fetchImpactData = useCallback(async () => {
-    const currentState = state || floodAgentState;
     if (!currentState.pre_date || !currentState.peek_date) return;
-    if (agentImpactData) return; // Already loaded
+
+    const requestKey = JSON.stringify({
+      pre_date: currentState.pre_date,
+      peek_date: currentState.peek_date,
+      bounds: effectiveAoi?.bounds || currentState.bounds || null,
+      geojson: effectiveAoi?.geojson?.geometry || currentState.geojson?.geometry || currentState.geojson || null,
+    });
+
+    if (impactRequestKeyRef.current === requestKey && agentImpactData) {
+      return;
+    }
     
+    impactRequestKeyRef.current = requestKey;
     setAgentImpactLoading(true);
+    setWarning('');
     try {
-      const response = await fetch(`http://${window.location.hostname}:8000/api/flood-impact`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          pre_date: currentState.pre_date,
-          peek_date: currentState.peek_date,
-          bounds: currentState.bounds,
-          geojson: currentState.geojson,
-        }),
+      const result = await getFloodImpact({
+        pre_date: currentState.pre_date,
+        peek_date: currentState.peek_date,
+        bounds: effectiveAoi?.bounds || currentState.bounds || null,
+        geojson: effectiveAoi?.geojson?.geometry || currentState.geojson || null,
       });
-      
-      const result = await response.json();
+
       if (result.success) {
         setAgentImpactData(result.data);
+        setWarning('');
+        trackUxEvent('impact_request_success', {
+          mode: 'agent',
+          source: effectiveAoi?.source || 'agent',
+        });
       }
     } catch (error) {
       console.error('Failed to fetch impact data:', error);
+      impactRequestKeyRef.current = null;
+      setWarning(error?.message || 'Flood impact request failed.');
+      trackUxEvent('impact_request_fail', {
+        mode: 'agent',
+        error: error?.message || 'Unknown impact error',
+      });
     } finally {
       setAgentImpactLoading(false);
     }
-  }, [state, floodAgentState, agentImpactData, setAgentImpactData, setAgentImpactLoading]);
+  }, [agentImpactData, currentState, effectiveAoi, setAgentImpactData, setAgentImpactLoading, setWarning]);
 
   // Auto-fetch impact data in background as soon as imagery arrives
   useEffect(() => {
@@ -675,9 +671,15 @@ function AgentPanel() {
           data={interruptData.data}
           message={interruptData.message}
           onConfirm={(confirmedData) => {
+            trackUxEvent('agent_confirmation_confirm', {
+              event: confirmedData?.event || interruptData.data?.event || null,
+            });
             resolve(JSON.stringify(confirmedData));
           }}
           onCancel={() => {
+            trackUxEvent('agent_confirmation_cancel', {
+              event: interruptData.data?.event || null,
+            });
             resolve(JSON.stringify({ cancelled: true }));
           }}
         />
@@ -685,7 +687,6 @@ function AgentPanel() {
     },
   });
 
-  const currentState = state || floodAgentState;
   const hasValidDates = currentState.pre_date && currentState.peek_date && currentState.after_date;
 
   // Toggle section expansion
@@ -748,7 +749,13 @@ function AgentPanel() {
                     {currentState.flood_report && (
                       <button 
                         className="action-btn"
-                        onClick={() => downloadReport(currentState.flood_report, currentState.event)}
+                        onClick={() => {
+                          trackUxEvent('export_report', {
+                            event: currentState.event || null,
+                            mode: 'agent',
+                          });
+                          downloadReport(currentState.flood_report, currentState.event);
+                        }}
                       >
                         📥 Download Report
                       </button>
@@ -810,8 +817,14 @@ function AgentPanel() {
                 <p>Enable analysis layers to calculate impact</p>
                 <button 
                   className="load-impact-btn"
-                  onClick={fetchImpactData}
-                  disabled={!state?.pre_date || !state?.peek_date}
+                  onClick={() => {
+                    trackUxEvent('impact_request_manual', {
+                      mode: 'agent',
+                      event: currentState.event || null,
+                    });
+                    fetchImpactData();
+                  }}
+                  disabled={!currentState?.pre_date || !currentState?.peek_date}
                 >
                   Calculate Now
                 </button>
@@ -1090,9 +1103,19 @@ function AgentPanel() {
 
       {/* GEE Code Download - bottom of panel, same style as Ask mode */}
       <div className="download-btn-div">
-        <a
+        <button
+          type="button"
           className={`submit btn download ${!currentState.gee_code ? 'disabled' : ''}`}
-          onClick={() => currentState.gee_code && downloadGEECode(currentState.gee_code, currentState.event)}
+          onClick={() => {
+            if (!currentState.gee_code) {
+              return;
+            }
+            trackUxEvent('export_gee_code', {
+              event: currentState.event || null,
+              mode: 'agent',
+            });
+            downloadGEECode(currentState.gee_code, currentState.event);
+          }}
           style={{ 
             cursor: currentState.gee_code ? 'pointer' : 'not-allowed',
             opacity: currentState.gee_code ? 1 : 0.5,
@@ -1100,7 +1123,7 @@ function AgentPanel() {
           }}
         >
           DOWNLOAD GEE CODE
-        </a>
+        </button>
       </div>
     </div>
   );

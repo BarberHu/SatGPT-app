@@ -41,6 +41,177 @@ export const getBoundsFromRing = (coordinates = []) => {
   };
 };
 
+const mergeBounds = (boundsList = []) => {
+  const validBounds = boundsList.filter(Boolean);
+  if (!validBounds.length) {
+    return null;
+  }
+
+  return {
+    west: Math.min(...validBounds.map((bounds) => bounds.west)),
+    south: Math.min(...validBounds.map((bounds) => bounds.south)),
+    east: Math.max(...validBounds.map((bounds) => bounds.east)),
+    north: Math.max(...validBounds.map((bounds) => bounds.north)),
+  };
+};
+
+const normalizePolygon = (coordinates = []) => {
+  const shell = closePolygonRing(coordinates[0] || []);
+  if (!shell.length) {
+    return null;
+  }
+
+  const holes = (coordinates || [])
+    .slice(1)
+    .map((ring) => closePolygonRing(ring))
+    .filter((ring) => ring.length >= 4);
+
+  return [shell, ...holes];
+};
+
+const getBoundsFromPolygonCoordinates = (coordinates = []) => {
+  const shell = coordinates[0] || [];
+  return getBoundsFromRing(shell);
+};
+
+const geometryToMultiPolygonCoordinates = (geometry) => {
+  if (!geometry || typeof geometry !== 'object') {
+    return [];
+  }
+
+  if (geometry.type === 'Polygon') {
+    const polygon = normalizePolygon(geometry.coordinates || []);
+    return polygon ? [polygon] : [];
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    return (geometry.coordinates || [])
+      .map((polygon) => normalizePolygon(polygon))
+      .filter(Boolean);
+  }
+
+  if (geometry.type === 'GeometryCollection') {
+    return (geometry.geometries || []).flatMap((item) => geometryToMultiPolygonCoordinates(item));
+  }
+
+  return [];
+};
+
+export const normalizeGeoJSONGeometry = (input) => {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const type = input.type;
+
+  if (type === 'FeatureCollection') {
+    const polygons = (input.features || [])
+      .flatMap((feature) => normalizeGeoJSONGeometry(feature))
+      .flatMap((geometry) => geometryToMultiPolygonCoordinates(geometry));
+
+    if (!polygons.length) {
+      return null;
+    }
+
+    if (polygons.length === 1) {
+      return { type: 'Polygon', coordinates: polygons[0] };
+    }
+
+    return { type: 'MultiPolygon', coordinates: polygons };
+  }
+
+  if (type === 'Feature') {
+    return normalizeGeoJSONGeometry(input.geometry);
+  }
+
+  if (type === 'Polygon' || type === 'MultiPolygon' || type === 'GeometryCollection') {
+    const polygons = geometryToMultiPolygonCoordinates(input);
+
+    if (!polygons.length) {
+      return null;
+    }
+
+    if (polygons.length === 1) {
+      return { type: 'Polygon', coordinates: polygons[0] };
+    }
+
+    return { type: 'MultiPolygon', coordinates: polygons };
+  }
+
+  return null;
+};
+
+export const getBoundsFromGeometry = (geometry) => {
+  if (!geometry) {
+    return null;
+  }
+
+  if (geometry.type === 'Polygon') {
+    return getBoundsFromPolygonCoordinates(geometry.coordinates || []);
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    return mergeBounds(
+      (geometry.coordinates || []).map((polygon) => getBoundsFromPolygonCoordinates(polygon))
+    );
+  }
+
+  return null;
+};
+
+export const buildAoiFromGeoJSON = (input, overrides = {}) => {
+  const geometry = normalizeGeoJSONGeometry(input);
+  const bounds = getBoundsFromGeometry(geometry);
+
+  if (!geometry || !bounds) {
+    return null;
+  }
+
+  return {
+    version: AOI_VERSION,
+    source: overrides.source || 'upload',
+    kind: geometry.type === 'MultiPolygon' ? 'multipolygon' : 'polygon',
+    label: overrides.label || 'Uploaded boundary',
+    bounds,
+    geojson: {
+      type: 'Feature',
+      properties: {
+        source: overrides.source || 'upload',
+        label: overrides.label || 'Uploaded boundary',
+      },
+      geometry,
+    },
+    legacy: {
+      AoI_cords: geometry.type === 'Polygon' ? geometry.coordinates[0] : [],
+    },
+  };
+};
+
+export const buildAoiFromBounds = (bounds, overrides = {}) => {
+  if (!bounds) {
+    return null;
+  }
+
+  const requiredKeys = ['west', 'south', 'east', 'north'];
+  const hasBounds = requiredKeys.every((key) => Number.isFinite(Number(bounds[key])));
+
+  if (!hasBounds) {
+    return null;
+  }
+
+  const ring = closePolygonRing([
+    [bounds.west, bounds.south],
+    [bounds.east, bounds.south],
+    [bounds.east, bounds.north],
+    [bounds.west, bounds.north],
+  ]);
+
+  return buildAoiFromGridSelection(ring, {
+    source: overrides.source || 'bounds',
+    label: overrides.label || 'Bounding box AOI',
+  });
+};
+
 export const buildAoiFromGridSelection = (coordinates, overrides = {}) => {
   const ring = closePolygonRing(coordinates);
   const bounds = getBoundsFromRing(ring);
@@ -82,6 +253,28 @@ export const buildAoiFromLegacyCoords = (coordinates) => {
   });
 };
 
+export const buildAoiFromAgentState = (state, overrides = {}) => {
+  if (!state) {
+    return null;
+  }
+
+  if (state.geojson) {
+    return buildAoiFromGeoJSON(state.geojson, {
+      source: overrides.source || 'agent_geocode',
+      label: overrides.label || state.location || 'Agent-derived boundary',
+    });
+  }
+
+  if (state.bounds) {
+    return buildAoiFromBounds(state.bounds, {
+      source: overrides.source || 'agent_bounds',
+      label: overrides.label || state.location || 'Agent-derived bounds',
+    });
+  }
+
+  return null;
+};
+
 export const parseSerializedAoi = (value) => {
   if (!value) {
     return null;
@@ -109,7 +302,7 @@ export const getAoiGeometry = (aoi) => {
   }
 
   if (parsed.geojson) {
-    return parsed.geojson;
+    return parsed.geojson.type === 'Feature' ? parsed.geojson.geometry || null : parsed.geojson;
   }
 
   if (parsed.legacy?.AoI_cords) {
@@ -120,6 +313,15 @@ export const getAoiGeometry = (aoi) => {
   }
 
   return null;
+};
+
+export const getAoiLabel = (aoi) => {
+  const parsed = parseSerializedAoi(aoi);
+  if (!parsed) {
+    return 'No AOI selected';
+  }
+
+  return parsed.label || parsed.geojson?.properties?.label || parsed.source || 'AOI selected';
 };
 
 export const buildAskMapRequestParams = (aoi, extraParams = {}) => {

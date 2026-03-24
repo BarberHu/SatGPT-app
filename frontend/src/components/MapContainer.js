@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { useAppContext } from '../context/AppContext';
-import { buildAoiFromGridSelection } from '../utils/aoi';
+import { buildAoiFromAgentState, buildAoiFromGridSelection } from '../utils/aoi';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -15,20 +15,22 @@ const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
 function MapContainer() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
+  const lastFittedAoiRef = useRef(null);
   
   const {
     setMapInstance,
     setSelectedGridCords,
     setSelectedAOI,
+    selectedAOI,
+    resetAgentSession,
+    resetAskSession,
     layerData,
     layerVisibility,
     layerOpacity,
     is3DEnabled,
     isBuildingsEnabled,
-    setActiveModal,
     appMode,
     agentImagery,
-    agentImageryLoading,
     floodAgentState,
     // Agent control states
     agentSelectedPeriod,
@@ -38,8 +40,6 @@ function MapContainer() {
     agentShowUrbanLayer,
     agentShowLandcoverLayer,
     agentImpactData,
-    agentTileLoading,
-    setAgentTileLoading,
     setAgentLayerLoading,
     setAgentTileError,
   } = useAppContext();
@@ -47,46 +47,24 @@ function MapContainer() {
   // Track if map is initialized
   const mapInitialized = useRef(false);
 
-  // Initialize map
-  useEffect(() => {
-    // Prevent double initialization in StrictMode
-    if (mapInitialized.current || mapRef.current) return;
-    mapInitialized.current = true;
-
-    // Clear container if it has children (from previous render)
-    if (mapContainerRef.current) {
-      mapContainerRef.current.innerHTML = '';
-    }
-
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: MAPBOX_STYLE,
-      center: DEFAULT_CENTER,
-      zoom: DEFAULT_ZOOM,
-    });
-
-    // Add navigation controls
-    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-
-    map.on('load', () => {
-      mapRef.current = map;
-      setMapInstance(map);
-      
-      // Load grid layer
-      loadGridLayer(map);
-    });
-
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        mapInitialized.current = false;
+  const removePreviousLayers = useCallback((map) => {
+    const layerIds = ['water-layer', 'flood-layer', 'lclu-layer', 'populationDensity-layer', 'soilTexture-layer', 'healthCareAccess-layer'];
+    const sourceIds = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+    
+    layerIds.forEach(id => {
+      if (map.getLayer(id)) {
+        map.removeLayer(id);
       }
-    };
-  }, [setMapInstance]);
+    });
+    
+    sourceIds.forEach(id => {
+      if (map.getSource(id)) {
+        map.removeSource(id);
+      }
+    });
+  }, []);
 
-  // Load grid layer
-  const loadGridLayer = (map) => {
+  const loadGridLayer = useCallback((map) => {
     map.addSource('grid_cell', {
       type: 'geojson',
       data: '/static/HFMT_Fishnet_3_FeaturesToJSO.geojson',
@@ -113,19 +91,10 @@ function MapContainer() {
         removePreviousLayers(map);
         
         // Set new grid coordinates (this triggers useMapData to fetch new data)
+        resetAskSession();
         setSelectedGridCords(cords);
         setSelectedAOI(buildAoiFromGridSelection(cords));
-        drawSelectedPolygon(map, cords);
-        
-        // Fit bounds to selected grid
-        const bounds = cords;
-        map.fitBounds(
-          [
-            [bounds[0][0], bounds[0][1]],
-            [bounds[2][0], bounds[2][1]],
-          ],
-          { padding: 150 }
-        );
+        resetAgentSession({ preserveSelectedAoi: true });
       }
     });
 
@@ -137,69 +106,40 @@ function MapContainer() {
     map.on('mouseleave', 'grid_cell-layer', () => {
       map.getCanvas().style.cursor = '';
     });
-  };
+  }, [removePreviousLayers, resetAgentSession, resetAskSession, setSelectedAOI, setSelectedGridCords]);
 
-  // Remove previous EE layers
-  const removePreviousLayers = (map) => {
-    const layerIds = ['water-layer', 'flood-layer', 'lclu-layer', 'populationDensity-layer', 'soilTexture-layer', 'healthCareAccess-layer'];
-    const sourceIds = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-    
-    layerIds.forEach(id => {
-      if (map.getLayer(id)) {
-        map.removeLayer(id);
-      }
-    });
-    
-    sourceIds.forEach(id => {
-      if (map.getSource(id)) {
-        map.removeSource(id);
-      }
-    });
-  };
+  // Initialize map
+  useEffect(() => {
+    if (mapInitialized.current || mapRef.current) return;
+    mapInitialized.current = true;
 
-  // Draw selected polygon
-  const drawSelectedPolygon = (map, cords) => {
-    // Remove existing line if present
-    if (map.getLayer('LineString')) {
-      map.removeLayer('LineString');
-    }
-    if (map.getSource('LineString')) {
-      map.removeSource('LineString');
+    if (mapContainerRef.current) {
+      mapContainerRef.current.innerHTML = '';
     }
 
-    const geojson = {
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            properties: {},
-            coordinates: cords,
-          },
-        },
-      ],
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: MAPBOX_STYLE,
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
+    });
+
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+    map.on('load', () => {
+      mapRef.current = map;
+      setMapInstance(map);
+      loadGridLayer(map);
+    });
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        mapInitialized.current = false;
+      }
     };
-
-    map.addSource('LineString', {
-      type: 'geojson',
-      data: geojson,
-    });
-
-    map.addLayer({
-      id: 'LineString',
-      type: 'line',
-      source: 'LineString',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round',
-      },
-      paint: {
-        'line-color': '#FFFFFF',
-        'line-width': 5,
-      },
-    });
-  };
+  }, [loadGridLayer, resetAgentSession, setMapInstance]);
 
   // Update EE layers when layer data changes
   useEffect(() => {
@@ -237,7 +177,7 @@ function MapContainer() {
         });
       }
     });
-  }, [layerData]);
+  }, [layerData, layerOpacity, layerVisibility]);
 
   // Update layer visibility and opacity
   useEffect(() => {
@@ -306,7 +246,7 @@ function MapContainer() {
 
   // ========== Helper: per-layer tile loading lifecycle ==========
   // Creates standard idle/timeout handlers for a single layer, managing its own loading key.
-  const createLayerTileLifecycle = (map, layerKey) => {
+  const createLayerTileLifecycle = useCallback((map, layerKey) => {
     setAgentLayerLoading(prev => ({ ...prev, [layerKey]: true }));
 
     let resolved = false;
@@ -327,7 +267,7 @@ function MapContainer() {
         clearTimeout(timeout);
       },
     };
-  };
+  }, [setAgentLayerLoading]);
 
   // ========== Effect A: Base Sentinel Imagery ==========
   useEffect(() => {
@@ -433,7 +373,7 @@ function MapContainer() {
 
     const lifecycle = createLayerTileLifecycle(map, 'flood-detection');
     return lifecycle.cleanup;
-  }, [agentImagery, appMode, agentShowFloodDetection, setAgentLayerLoading]);
+  }, [agentImagery, appMode, agentShowFloodDetection, createLayerTileLifecycle]);
 
   // ========== Effect C: Population Impact Overlay ==========
   useEffect(() => {
@@ -459,7 +399,7 @@ function MapContainer() {
 
     const lifecycle = createLayerTileLifecycle(map, 'population');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowPopulationLayer, setAgentLayerLoading]);
+  }, [agentImpactData, appMode, agentShowPopulationLayer, createLayerTileLifecycle]);
 
   // ========== Effect D: Built-up Area Overlay ==========
   useEffect(() => {
@@ -485,7 +425,7 @@ function MapContainer() {
 
     const lifecycle = createLayerTileLifecycle(map, 'urban');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowUrbanLayer, setAgentLayerLoading]);
+  }, [agentImpactData, appMode, agentShowUrbanLayer, createLayerTileLifecycle]);
 
   // ========== Effect E: Land Cover Overlay ==========
   useEffect(() => {
@@ -511,27 +451,35 @@ function MapContainer() {
 
     const lifecycle = createLayerTileLifecycle(map, 'landcover');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowLandcoverLayer, setAgentLayerLoading]);
+  }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle]);
 
-  // FloodAgent GeoJSON 边界处理
+  const displayedAoi = appMode === 'agent'
+    ? selectedAOI || buildAoiFromAgentState(floodAgentState, {
+        source: 'agent_geocode',
+        label: floodAgentState?.location || 'Agent-derived boundary',
+      })
+    : selectedAOI;
+
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
-    if (!floodAgentState?.geojson) return;
+    if (!map || !map.isStyleLoaded()) return;
 
-    const sourceId = 'agent-geojson';
-    const layerId = 'agent-geojson-layer';
-    const outlineLayerId = 'agent-geojson-outline';
+    const sourceId = 'analysis-aoi';
+    const layerId = 'analysis-aoi-fill';
+    const outlineLayerId = 'analysis-aoi-outline';
 
-    // 移除已存在的图层和源
     if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId);
     if (map.getLayer(layerId)) map.removeLayer(layerId);
     if (map.getSource(sourceId)) map.removeSource(sourceId);
 
-    // 添加新的源和图层
+    if (!displayedAoi?.geojson) {
+      lastFittedAoiRef.current = null;
+      return;
+    }
+
     map.addSource(sourceId, {
       type: 'geojson',
-      data: floodAgentState.geojson,
+      data: displayedAoi.geojson,
     });
 
     map.addLayer({
@@ -554,23 +502,13 @@ function MapContainer() {
       },
     });
 
-    // 适配边界
-    if (floodAgentState.bounds) {
-      const { west, south, east, north } = floodAgentState.bounds;
+    const boundsKey = JSON.stringify(displayedAoi.bounds || {});
+    if (displayedAoi.bounds && boundsKey !== lastFittedAoiRef.current) {
+      const { west, south, east, north } = displayedAoi.bounds;
       map.fitBounds([[west, south], [east, north]], { padding: 50 });
+      lastFittedAoiRef.current = boundsKey;
     }
-  }, [floodAgentState?.geojson, floodAgentState?.bounds, appMode]);
-
-  // Zoom to country
-  const zoomToCountry = useCallback((bounds) => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    map.fitBounds([
-      [bounds[0], bounds[1]],
-      [bounds[2], bounds[3]],
-    ]);
-  }, []);
+  }, [displayedAoi]);
 
   return (
     <div 
