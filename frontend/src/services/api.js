@@ -19,19 +19,19 @@ export const getDefaultMap = async () => {
 
 // Get historical map data
 export const getHistoricalMap = async (params) => {
-  const response = await axios.get(`${API_BASE}/get_historical_map`, { params });
+  const response = await axios.post(`${API_BASE}/get_historical_map`, params);
   return response.data;
 };
 
 // Get unsupervised classification map
 export const getUnsupervisedMap = async (params) => {
-  const response = await axios.get(`${API_BASE}/get_unsupervised_map`, { params });
+  const response = await axios.post(`${API_BASE}/get_unsupervised_map`, params);
   return response.data;
 };
 
 // Get flood hotspot map
 export const getFloodHotspotMap = async (params) => {
-  const response = await axios.get(`${API_BASE}/get_flood_hotspot_map`, { params });
+  const response = await axios.post(`${API_BASE}/get_flood_hotspot_map`, params);
   return response.data;
 };
 

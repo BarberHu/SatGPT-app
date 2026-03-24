@@ -11,6 +11,7 @@ import { useCoAgent, useLangGraphInterrupt, useCopilotMessagesContext } from "@c
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import SourcesDrawer from './SourcesDrawer';
+import AoiUploadPanel from './AoiUploadPanel';
 import { getFloodImages, getFloodImpact } from '../services/agentApi';
 import { buildAoiFromAgentState } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
@@ -492,6 +493,7 @@ function AgentPanel() {
     setAgentImpactLoading,
     agentLayerLoading,
     agentTileError,
+    setAgentTileError,
   } = useAppContext();
   
   // Get chat messages from CopilotKit (with safety check)
@@ -544,6 +546,10 @@ function AgentPanel() {
     }
 
     imageryRequestKeyRef.current = requestKey;
+    impactRequestKeyRef.current = null;
+    setAgentImagery(null);
+    setAgentImpactData(null);
+    setAgentTileError(null);
     setAgentImageryLoading(true);
     setWarning('');
 
@@ -558,6 +564,10 @@ function AgentPanel() {
         geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
       });
 
+      if (imageryRequestKeyRef.current !== requestKey) {
+        return;
+      }
+
       if (result?.success) {
         setAgentImagery(result.data);
         setWarning('');
@@ -570,19 +580,27 @@ function AgentPanel() {
       }
     } catch (error) {
       console.error('Failed to fetch imagery:', error);
-      imageryRequestKeyRef.current = null;
+      if (imageryRequestKeyRef.current !== requestKey) {
+        return;
+      }
+      if (imageryRequestKeyRef.current === requestKey) {
+        imageryRequestKeyRef.current = null;
+      }
       setWarning(error?.message || 'Flood imagery request failed.');
       trackUxEvent('imagery_request_fail', {
         mode: 'agent',
         error: error?.message || 'Unknown imagery error',
       });
     } finally {
-      setAgentImageryLoading(false);
+      if (imageryRequestKeyRef.current === requestKey) {
+        setAgentImageryLoading(false);
+      }
     }
-  }, [setAgentImagery, setAgentImageryLoading, setWarning]);
+  }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentTileError, setWarning]);
 
   useEffect(() => {
     if (!currentState.pre_date || !currentState.peek_date || !currentState.after_date) {
+      imageryRequestKeyRef.current = null;
       return;
     }
 
@@ -625,6 +643,10 @@ function AgentPanel() {
         geojson: effectiveAoi?.geojson?.geometry || currentState.geojson || null,
       });
 
+      if (impactRequestKeyRef.current !== requestKey) {
+        return;
+      }
+
       if (result.success) {
         setAgentImpactData(result.data);
         setWarning('');
@@ -635,23 +657,35 @@ function AgentPanel() {
       }
     } catch (error) {
       console.error('Failed to fetch impact data:', error);
-      impactRequestKeyRef.current = null;
+      if (impactRequestKeyRef.current !== requestKey) {
+        return;
+      }
+      if (impactRequestKeyRef.current === requestKey) {
+        impactRequestKeyRef.current = null;
+      }
       setWarning(error?.message || 'Flood impact request failed.');
       trackUxEvent('impact_request_fail', {
         mode: 'agent',
         error: error?.message || 'Unknown impact error',
       });
     } finally {
-      setAgentImpactLoading(false);
+      if (impactRequestKeyRef.current === requestKey) {
+        setAgentImpactLoading(false);
+      }
     }
   }, [agentImpactData, currentState, effectiveAoi, setAgentImpactData, setAgentImpactLoading, setWarning]);
 
   // Auto-fetch impact data in background as soon as imagery arrives
   useEffect(() => {
+    if (!currentState.pre_date || !currentState.peek_date) {
+      impactRequestKeyRef.current = null;
+      return;
+    }
+
     if (agentImagery && !agentImpactData && !agentImpactLoading) {
       fetchImpactData();
     }
-  }, [agentImagery, agentImpactData, agentImpactLoading, fetchImpactData]);
+  }, [agentImagery, agentImpactData, agentImpactLoading, currentState.pre_date, currentState.peek_date, fetchImpactData]);
 
   // Also fetch if user enables an impact layer before data arrived
   useEffect(() => {
@@ -1063,6 +1097,8 @@ function AgentPanel() {
           </div>
         )}
       </div>
+
+      <AoiUploadPanel variant="agent" />
 
       {/* Chat History Section */}
       <div className="control-section">

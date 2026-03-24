@@ -1,24 +1,22 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import shp from 'shpjs';
 import { useAppContext } from '../context/AppContext';
-import { buildAoiFromGeoJSON, getAoiLabel } from '../utils/aoi';
+import { buildAoiFromGeoJSON } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 
-function AoiUploadPanel() {
+function AoiUploadPanel({ variant = 'ask' }) {
   const fileInputRef = useRef(null);
   const [isParsing, setIsParsing] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   const {
     selectedAOI,
     setSelectedAOI,
     setSelectedGridCords,
     setWarning,
-    appMode,
     resetAgentSession,
     resetAskSession,
   } = useAppContext();
-
-  const aoiLabel = useMemo(() => getAoiLabel(selectedAOI), [selectedAOI]);
 
   const openFilePicker = () => {
     fileInputRef.current?.click();
@@ -30,7 +28,7 @@ function AoiUploadPanel() {
     setSelectedGridCords(null);
     setWarning('');
     resetAgentSession({ preserveSelectedAoi: false });
-    trackUxEvent('aoi_clear', { mode: appMode });
+    trackUxEvent('aoi_clear', { mode: variant });
   };
 
   const readFileAsText = (file) =>
@@ -90,7 +88,7 @@ function AoiUploadPanel() {
       setSelectedAOI(aoi);
       resetAgentSession({ preserveSelectedAoi: true });
       trackUxEvent('aoi_upload_success', {
-        mode: appMode,
+        mode: variant,
         fileName: file.name,
         source: aoi.source,
         kind: aoi.kind,
@@ -99,7 +97,7 @@ function AoiUploadPanel() {
       const message = error?.message || 'Boundary parsing failed.';
       setWarning(message);
       trackUxEvent('aoi_upload_fail', {
-        mode: appMode,
+        mode: variant,
         fileName: file.name,
         error: message,
       });
@@ -109,57 +107,45 @@ function AoiUploadPanel() {
     }
   };
 
+  const actionRow = (
+    <div className={`aoi-upload-action-row ${variant}`}>
+      <button
+        type="button"
+        className="aoi-upload-action-btn primary"
+        disabled={isParsing}
+        onClick={openFilePicker}
+      >
+        {isParsing ? 'Uploading...' : 'Upload file'}
+      </button>
+      <button
+        type="button"
+        className="aoi-upload-action-btn secondary"
+        disabled={!selectedAOI || isParsing}
+        onClick={clearAoi}
+      >
+        Clear
+      </button>
+    </div>
+  );
+
   return (
-    <section className="aoi-upload-panel">
-      <div className="aoi-upload-header">
-        <div>
-          <h3>Analysis Boundary</h3>
-          <p>Fishnet click and file upload now share one AOI pipeline.</p>
+    <>
+      {variant === 'agent' ? (
+        <div className="control-section aoi-upload-inline-shell agent">
+          <div className="section-header" onClick={() => setIsExpanded((value) => !value)}>
+            <span className="section-title">Analysis Boundary</span>
+            <span className={`expand-icon ${isExpanded ? 'expanded' : ''}`}>▼</span>
+          </div>
+          {isExpanded && <div className="section-body aoi-upload-inline-body">{actionRow}</div>}
         </div>
-        {selectedAOI && (
-          <span className="aoi-badge">
-            {selectedAOI.source === 'upload' ? 'Uploaded' : selectedAOI.source}
-          </span>
-        )}
-      </div>
-
-      <div className="aoi-upload-body">
-        <div className="aoi-status-card">
-          <span className="aoi-status-label">Current AOI</span>
-          <strong className="aoi-status-value">{aoiLabel}</strong>
-          {selectedAOI?.bounds && (
-            <span className="aoi-status-meta">
-              W {selectedAOI.bounds.west.toFixed(2)} / E {selectedAOI.bounds.east.toFixed(2)} / S {selectedAOI.bounds.south.toFixed(2)} / N {selectedAOI.bounds.north.toFixed(2)}
-            </span>
-          )}
-          {appMode === 'agent' && selectedAOI && (
-            <span className="aoi-status-hint">Agent mode will prioritize this manual boundary.</span>
-          )}
-        </div>
-
-        <div className="aoi-upload-actions">
-          <button
-            type="button"
-            className="aoi-btn primary"
-            disabled={isParsing}
-            onClick={openFilePicker}
-          >
-            {isParsing ? 'Parsing boundary...' : 'Upload GeoJSON / ZIP Shapefile'}
-          </button>
-          <button
-            type="button"
-            className="aoi-btn secondary"
-            disabled={!selectedAOI || isParsing}
-            onClick={clearAoi}
-          >
-            Clear AOI
-          </button>
-        </div>
-
-        <p className="aoi-upload-hint">
-          Supported formats: <code>.geojson</code>, <code>.json</code>, <code>.zip</code>. The map fishnet is still available for quick selection.
-        </p>
-      </div>
+      ) : (
+        <section className="aoi-upload-inline-shell ask">
+          <div className="aoi-upload-heading-row">
+            <h4 className="aoi-upload-heading">Analysis Boundary</h4>
+          </div>
+          {actionRow}
+        </section>
+      )}
 
       <input
         ref={fileInputRef}
@@ -168,7 +154,7 @@ function AoiUploadPanel() {
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />
-    </section>
+    </>
   );
 }
 
