@@ -148,6 +148,13 @@ def parse_aoi_from_request_args(args):
     raise ValueError("Missing AOI definition. Expected 'aoi' or legacy 'AoI_cords'.")
 
 
+def get_request_payload():
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        return payload if isinstance(payload, dict) else {}
+    return request.args
+
+
 def aoi_to_ee_geometry(aoi):
     geometry = extract_geojson_geometry(aoi.get("geojson"))
     if geometry:
@@ -205,13 +212,14 @@ def getDefaultHandler():
     response.data = json.dumps(content)
     return response
 
-@app.route('/get_unsupervised_map')
+@app.route('/get_unsupervised_map', methods=['GET', 'POST'])
 def getUnsupervisedHandler():
-    aoi = parse_aoi_from_request_args(request.args)
+    payload = get_request_payload()
+    aoi = parse_aoi_from_request_args(payload)
     region = aoi_to_ee_geometry(aoi)
 
-    time_start   = request.args.get('time_start')
-    time_end     = request.args.get('time_end')
+    time_start   = payload.get('time_start')
+    time_end     = payload.get('time_end')
     collection = ee.ImageCollection('LANDSAT/LE07/C01/T1_SR')\
                .filterBounds(region)\
                .filterDate(time_start, time_end)
@@ -255,15 +263,16 @@ def getUnsupervisedHandler():
     response.data = json.dumps(content)
     return response
   
-@app.route('/get_historical_map')
+@app.route('/get_historical_map', methods=['GET', 'POST'])
 def getHistoricalHandler():
-    aoi = parse_aoi_from_request_args(request.args)
+    payload = get_request_payload()
+    aoi = parse_aoi_from_request_args(payload)
     region = aoi_to_ee_geometry(aoi)
     historical_catalog = BASIC_LAYER_CATALOG["historical"]
     supplementary_catalog = BASIC_LAYER_CATALOG["supplementary"]
 
-    time_start   = request.args.get('time_start')
-    time_end     = request.args.get('time_end')
+    time_start   = payload.get('time_start')
+    time_end     = payload.get('time_end')
     start_year = int(time_start.split("-")[0])
     end_year = int(time_end.split("-")[0])
 
@@ -318,14 +327,15 @@ def getHistoricalHandler():
     response.data = json.dumps(content)
     return response
   
-@app.route('/get_flood_hotspot_map')
+@app.route('/get_flood_hotspot_map', methods=['GET', 'POST'])
 def getFloodHotspotHandler():
-    aoi = parse_aoi_from_request_args(request.args)
+    payload = get_request_payload()
+    aoi = parse_aoi_from_request_args(payload)
     region = aoi_to_ee_geometry(aoi)
     hotspot_catalog = BASIC_LAYER_CATALOG["hotspot"]
     supplementary_catalog = BASIC_LAYER_CATALOG["supplementary"]
-    year_from = int(request.args.get('year_from'))
-    year_count = int(request.args.get('year_count'))
+    year_from = int(payload.get('year_from'))
+    year_count = int(payload.get('year_count'))
     year_to = year_from + year_count 
     
     WaterESA2 = ee.ImageCollection(hotspot_catalog["worldCoverPrimaryWater"]["dataset"]).first().eq(hotspot_catalog["worldCoverPrimaryWater"]["classValue"]).selfMask()

@@ -1395,15 +1395,7 @@ div#help #help-btn:hover
 /* chat box */
 
 .chat-box {
-  position: fixed;
-  bottom: 15px;
-  left: 41.7%;
-  width: 40%; 
-  background-color: #f2f2f2;
-  border: 1px solid #ccc;
-  padding: 15px;
-  border-radius: 20px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+  z-index: 10;
 }
 
 /* Styling for the chat messages */
@@ -1523,10 +1515,8 @@ p.year-error {
   display: none;
 }
 @media only screen and (max-width: 600px) {
-  .chat-box {
-    width: 80%;
-    left: 0;
-    margin: 10px;
+  .chat-popup-panel {
+    width: 95vw;
   }
   #contact-modal .modal-content_3d{
     height: 300px;
@@ -1822,9 +1812,8 @@ margin-bottom: 1vw;
 /* remaining legends work end here */
 
 @media screen and (max-width: 1310px) {
-  .chat-box{
-      width:30%;
-      left:50%
+  .chat-popup-panel{
+      width:40%;
   }
   .result-box{
     width:30%;

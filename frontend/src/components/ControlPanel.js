@@ -27,6 +27,8 @@ function ControlPanel() {
     selectedAOI,
     appMode,
     resetAskSession,
+    gridClickEnabled,
+    setGridClickEnabled,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -127,7 +129,6 @@ function ControlPanel() {
       </header>
       
       <hr style={{ margin: '10px 0px 20px 0px' }} />
-      <AoiUploadPanel />
 
       {/* Content based on mode - synced with ChatBox toggle */}
       {appMode === 'agent' ? (
@@ -205,6 +206,18 @@ function ControlPanel() {
         </div>
       </div>
 
+      <div className="toggle-switcher-css" style={{ marginTop: '10px' }}>
+        <label className="switch-label">Click to Load</label>
+        <div className="form-check form-switch">
+          <input
+            className="form-check-input"
+            type="checkbox"
+            checked={gridClickEnabled}
+            onChange={() => setGridClickEnabled(!gridClickEnabled)}
+          />
+        </div>
+      </div>
+
       {/* Legend */}
       <div className="Legend-sec">
         <div className="heading-title">
@@ -268,6 +281,8 @@ function ControlPanel() {
           </div>
         </div>
       </div>
+
+      <AoiUploadPanel variant="ask" />
 
       {/* Transparency Control */}
       <div className="transparency">

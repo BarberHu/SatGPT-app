@@ -56,6 +56,7 @@ export const AppProvider = ({ children }) => {
   const [selectedGridCords, setSelectedGridCords] = useState(null);
   const [selectedAOI, setSelectedAOI] = useState(null);
   const [countries, setCountries] = useState({});
+  const [gridClickEnabled, setGridClickEnabled] = useState(true);
   
   // Layer State
   const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot'
@@ -266,6 +267,8 @@ export const AppProvider = ({ children }) => {
     setSelectedAOI,
     countries,
     setCountries,
+    gridClickEnabled,
+    setGridClickEnabled,
     
     // Layer State
     dataType,
