@@ -60,7 +60,12 @@ export const useMapData = () => {
       if (codeSnippet) {
         const blob = new Blob([codeSnippet], { type: 'text/javascript' });
         const url = URL.createObjectURL(blob);
-        setGeeCodeUrl(url);
+        setGeeCodeUrl((previousUrl) => {
+          if (previousUrl) {
+            URL.revokeObjectURL(previousUrl);
+          }
+          return url;
+        });
         console.log('GEE code URL created:', url);
       }
 

@@ -27,6 +27,15 @@ const defaultFloodAgentState = {
   is_valid_flood_query: false,
 };
 
+const defaultAgentLayerVisibility = {
+  agentSelectedPeriod: 'peek_date',
+  agentSelectedType: 'sentinel2',
+  agentShowFloodDetection: true,
+  agentShowPopulationLayer: false,
+  agentShowUrbanLayer: false,
+  agentShowLandcoverLayer: false,
+};
+
 export const AppProvider = ({ children }) => {
   // UI State
   const [isPanelVisible, setIsPanelVisible] = useState(true);
@@ -127,6 +136,28 @@ export const AppProvider = ({ children }) => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
   }, []);
+
+  const resetAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
+    setFloodAgentState(defaultFloodAgentState);
+    setAgentImagery(null);
+    setAgentImageryLoading(false);
+    setAgentImpactData(null);
+    setAgentImpactLoading(false);
+    setAgentTileLoading(false);
+    setAgentLayerLoading({});
+    setAgentTileError(null);
+    setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
+    setAgentSelectedType(defaultAgentLayerVisibility.agentSelectedType);
+    setAgentShowFloodDetection(defaultAgentLayerVisibility.agentShowFloodDetection);
+    setAgentShowPopulationLayer(defaultAgentLayerVisibility.agentShowPopulationLayer);
+    setAgentShowUrbanLayer(defaultAgentLayerVisibility.agentShowUrbanLayer);
+    setAgentShowLandcoverLayer(defaultAgentLayerVisibility.agentShowLandcoverLayer);
+
+    if (!preserveSelectedAoi) {
+      setSelectedAOI(null);
+      setSelectedGridCords(null);
+    }
+  }, []);
   
   // Toggle layer visibility
   const toggleLayerVisibility = useCallback((layerName) => {
@@ -192,6 +223,27 @@ export const AppProvider = ({ children }) => {
     });
   }, []);
 
+  const resetAskSession = useCallback(() => {
+    setGptResponse(null);
+    setResultText('');
+    setIsResultVisible(true);
+    setWarning('');
+    setLayerData({
+      water: null,
+      flood: null,
+      lclu: null,
+      populationDensity: null,
+      soilTexture: null,
+      healthCareAccess: null,
+    });
+    setGeeCodeUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return null;
+    });
+  }, []);
+
   const value = {
     // UI State
     isPanelVisible,
@@ -246,6 +298,7 @@ export const AppProvider = ({ children }) => {
     // Map Layer Data
     layerData,
     updateLayerData,
+    resetAskSession,
     
     // GEE Code
     geeCodeUrl,
@@ -262,6 +315,7 @@ export const AppProvider = ({ children }) => {
     setFloodAgentState,
     updateFloodAgentField,
     resetFloodAgentState,
+    resetAgentSession,
     agentImagery,
     setAgentImagery,
     agentImageryLoading,

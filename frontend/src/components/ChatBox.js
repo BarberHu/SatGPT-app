@@ -11,6 +11,7 @@ import { buildAskMapRequestParams } from '../utils/aoi';
 import { CopilotChat } from "@copilotkit/react-ui";
 import { useCopilotContext } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
+import { trackUxEvent } from '../utils/analytics';
 
 const SUGGESTIONS = [
   'Tell me about the 2010 Bangkok floods',
@@ -43,6 +44,7 @@ function ChatBox() {
     chatMode,
     setChatMode,
     setAppMode,
+    resetAgentSession,
   } = useAppContext();
 
   const { setThreadId } = useCopilotContext();
@@ -56,6 +58,8 @@ function ChatBox() {
   const handleNewChat = () => {
     const newId = crypto.randomUUID();
     setThreadId(newId);
+    resetAgentSession({ preserveSelectedAoi: true });
+    trackUxEvent('agent_new_chat', { mode: chatMode });
   };
 
   const suggestions = dataType === 'floodHotspot' ? SUGGESTIONS_HOTSPOT : SUGGESTIONS;
@@ -151,7 +155,13 @@ function ChatBox() {
       // Generate GEE code download
       const codeSnippet = createCodeSnippet(params, dataType === 'floodHotspot' ? 'flood_hotspot' : 'historical');
       const blob = new Blob([codeSnippet], { type: 'text/javascript' });
-      setGeeCodeUrl(URL.createObjectURL(blob));
+      const nextUrl = URL.createObjectURL(blob);
+      setGeeCodeUrl((previousUrl) => {
+        if (previousUrl) {
+          URL.revokeObjectURL(previousUrl);
+        }
+        return nextUrl;
+      });
       setChatInput('');
 
     } catch (err) {
@@ -166,6 +176,12 @@ function ChatBox() {
 
   // Toggle mode handler - syncs chatMode and appMode
   const handleModeToggle = (mode) => {
+    if (mode !== chatMode) {
+      trackUxEvent('mode_switch', { from: chatMode, to: mode });
+      if (chatMode === 'agent' || mode === 'agent') {
+        resetAgentSession({ preserveSelectedAoi: true });
+      }
+    }
     setChatMode(mode);
     setAppMode(mode);
     setChatInput('');
