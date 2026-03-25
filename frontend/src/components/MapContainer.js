@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
+import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { useAppContext } from '../context/AppContext';
-import { buildAoiFromAgentState, buildAoiFromGridSelection } from '../utils/aoi';
+import { buildAoiFromAgentState, buildAoiFromDrawFeature, buildAoiFromGridSelection } from '../utils/aoi';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -19,19 +20,154 @@ const AGENT_SOURCE_IDS = [
 ];
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
+const DRAW_BLUE = '#2563eb';
+const DRAW_ORANGE = '#f97316';
+const DRAW_WHITE = '#ffffff';
+const DRAW_STYLES = [
+  {
+    id: 'gl-draw-polygon-fill',
+    type: 'fill',
+    filter: ['all', ['==', '$type', 'Polygon']],
+    paint: {
+      'fill-color': [
+        'case',
+        ['==', ['get', 'active'], 'true'], DRAW_ORANGE,
+        DRAW_BLUE,
+      ],
+      'fill-opacity': 0.14,
+    },
+  },
+  {
+    id: 'gl-draw-lines',
+    type: 'line',
+    filter: [
+      'any',
+      ['==', '$type', 'LineString'],
+      ['==', '$type', 'Polygon'],
+    ],
+    layout: {
+      'line-cap': 'round',
+      'line-join': 'round',
+    },
+    paint: {
+      'line-color': [
+        'case',
+        ['==', ['get', 'active'], 'true'], DRAW_ORANGE,
+        DRAW_BLUE,
+      ],
+      'line-dasharray': [
+        'case',
+        ['==', ['get', 'active'], 'true'], ['literal', [0.2, 2]],
+        ['literal', [2, 0]],
+      ],
+      'line-width': 2.5,
+    },
+  },
+  {
+    id: 'gl-draw-point-outer',
+    type: 'circle',
+    filter: [
+      'all',
+      ['==', '$type', 'Point'],
+      ['==', 'meta', 'feature'],
+    ],
+    paint: {
+      'circle-radius': [
+        'case',
+        ['==', ['get', 'active'], 'true'], 7,
+        5,
+      ],
+      'circle-color': DRAW_WHITE,
+    },
+  },
+  {
+    id: 'gl-draw-point-inner',
+    type: 'circle',
+    filter: [
+      'all',
+      ['==', '$type', 'Point'],
+      ['==', 'meta', 'feature'],
+    ],
+    paint: {
+      'circle-radius': [
+        'case',
+        ['==', ['get', 'active'], 'true'], 5,
+        3,
+      ],
+      'circle-color': [
+        'case',
+        ['==', ['get', 'active'], 'true'], DRAW_ORANGE,
+        DRAW_BLUE,
+      ],
+    },
+  },
+  {
+    id: 'gl-draw-vertex-outer',
+    type: 'circle',
+    filter: [
+      'all',
+      ['==', '$type', 'Point'],
+      ['==', 'meta', 'vertex'],
+      ['!=', 'mode', 'simple_select'],
+    ],
+    paint: {
+      'circle-radius': [
+        'case',
+        ['==', ['get', 'active'], 'true'], 7,
+        5,
+      ],
+      'circle-color': DRAW_WHITE,
+    },
+  },
+  {
+    id: 'gl-draw-vertex-inner',
+    type: 'circle',
+    filter: [
+      'all',
+      ['==', '$type', 'Point'],
+      ['==', 'meta', 'vertex'],
+      ['!=', 'mode', 'simple_select'],
+    ],
+    paint: {
+      'circle-radius': [
+        'case',
+        ['==', ['get', 'active'], 'true'], 5,
+        3,
+      ],
+      'circle-color': DRAW_ORANGE,
+    },
+  },
+  {
+    id: 'gl-draw-midpoint',
+    type: 'circle',
+    filter: ['all', ['==', 'meta', 'midpoint']],
+    paint: {
+      'circle-radius': 3,
+      'circle-color': DRAW_ORANGE,
+    },
+  },
+];
 
 function MapContainer() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
+  const drawRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
   const gridClickEnabledRef = useRef(true);
+  const isAoiEditingRef = useRef(false);
+  const editableGeojsonRef = useRef(null);
   
   const {
     setMapInstance,
     setSelectedGridCords,
     setSelectedAOI,
+    setDraftAOI,
     selectedAOI,
+    draftAOI,
     gridClickEnabled,
+    isAoiEditing,
+    aoiEditorMode,
+    setWarning,
     resetAgentSession,
     resetAskSession,
     layerData,
@@ -60,6 +196,14 @@ function MapContainer() {
   useEffect(() => {
     gridClickEnabledRef.current = gridClickEnabled;
   }, [gridClickEnabled]);
+
+  useEffect(() => {
+    isAoiEditingRef.current = isAoiEditing;
+  }, [isAoiEditing]);
+
+  useEffect(() => {
+    editableGeojsonRef.current = draftAOI?.geojson || selectedAOI?.geojson || null;
+  }, [draftAOI, selectedAOI]);
 
   const removeAskLayers = useCallback((map) => {
     ASK_LAYER_NAMES.forEach((id) => {
@@ -120,7 +264,7 @@ function MapContainer() {
 
     // Grid cell click handler
     map.on('click', 'grid_cell-layer', (e) => {
-      if (!gridClickEnabledRef.current) return;
+      if (!gridClickEnabledRef.current || isAoiEditingRef.current) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['grid_cell-layer'] });
       if (features.length > 0 && features[0].geometry) {
         const cords = features[0].geometry.coordinates[0];
@@ -132,6 +276,7 @@ function MapContainer() {
         // Set new grid coordinates (this triggers useMapData to fetch new data)
         resetAskSession();
         setSelectedGridCords(cords);
+        setDraftAOI(null);
         setSelectedAOI(buildAoiFromGridSelection(cords));
         resetAgentSession({ preserveSelectedAoi: true });
       }
@@ -139,14 +284,14 @@ function MapContainer() {
 
     // Change cursor on hover
     map.on('mouseenter', 'grid_cell-layer', () => {
-      if (!gridClickEnabledRef.current) return;
+      if (!gridClickEnabledRef.current || isAoiEditingRef.current) return;
       map.getCanvas().style.cursor = 'pointer';
     });
 
     map.on('mouseleave', 'grid_cell-layer', () => {
       map.getCanvas().style.cursor = '';
     });
-  }, [removeAgentLayers, removeAskLayers, resetAgentSession, resetAskSession, setSelectedAOI, setSelectedGridCords]);
+  }, [removeAgentLayers, removeAskLayers, resetAgentSession, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords]);
 
   // Initialize map
   useEffect(() => {
@@ -169,17 +314,139 @@ function MapContainer() {
     map.on('load', () => {
       mapRef.current = map;
       setMapInstance(map);
+      drawRef.current = new MapboxDraw({
+        displayControlsDefault: false,
+        defaultMode: 'simple_select',
+        styles: DRAW_STYLES,
+      });
+      map.addControl(drawRef.current, 'top-right');
       loadGridLayer(map);
     });
 
     return () => {
       if (mapRef.current) {
+        drawRef.current = null;
         mapRef.current.remove();
         mapRef.current = null;
         mapInitialized.current = false;
       }
     };
   }, [loadGridLayer, resetAgentSession, setMapInstance]);
+
+  const syncDraftFromFeature = useCallback((feature) => {
+    const nextDraftAoi = buildAoiFromDrawFeature(feature, {
+      source: aoiEditorMode === 'edit' ? 'edited' : 'draw',
+      label: selectedAOI?.label || 'Manual boundary',
+    });
+
+    if (!nextDraftAoi) {
+      setDraftAOI(null);
+      setWarning('当前绘制结果不是有效的单 Polygon，请重新绘制。');
+      return;
+    }
+
+    setDraftAOI(nextDraftAoi);
+    setWarning('');
+  }, [aoiEditorMode, selectedAOI, setDraftAOI, setWarning]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const draw = drawRef.current;
+    if (!map || !draw) return;
+
+    const handleCreate = (event) => {
+      const createdFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon');
+      if (!createdFeature) {
+        setDraftAOI(null);
+        setWarning('请绘制一个有效的 Polygon 边界。');
+        return;
+      }
+
+      const allFeatures = draw.getAll().features || [];
+      allFeatures
+        .filter((feature) => feature.id !== createdFeature.id)
+        .forEach((feature) => draw.delete(feature.id));
+
+      syncDraftFromFeature(createdFeature);
+
+      if (createdFeature.id) {
+        window.requestAnimationFrame(() => {
+          if (!drawRef.current || !isAoiEditingRef.current) {
+            return;
+          }
+
+          try {
+            drawRef.current.changeMode('direct_select', { featureId: createdFeature.id });
+          } catch (error) {
+            try {
+              drawRef.current.changeMode('simple_select', { featureIds: [createdFeature.id] });
+            } catch (fallbackError) {
+              console.warn('Failed to switch draw mode after polygon creation:', fallbackError);
+            }
+          }
+        });
+      }
+    };
+
+    const handleUpdate = (event) => {
+      const updatedFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon')
+        || draw.getAll().features.find((feature) => feature.geometry?.type === 'Polygon');
+      syncDraftFromFeature(updatedFeature);
+    };
+
+    const handleDelete = () => {
+      setDraftAOI(null);
+    };
+
+    map.on('draw.create', handleCreate);
+    map.on('draw.update', handleUpdate);
+    map.on('draw.delete', handleDelete);
+
+    return () => {
+      map.off('draw.create', handleCreate);
+      map.off('draw.update', handleUpdate);
+      map.off('draw.delete', handleDelete);
+    };
+  }, [setDraftAOI, setWarning, syncDraftFromFeature]);
+
+  useEffect(() => {
+    const draw = drawRef.current;
+    if (!draw) return;
+
+    if (aoiEditorMode === 'idle') {
+      draw.deleteAll();
+      draw.changeMode('simple_select');
+      return;
+    }
+
+    if (aoiEditorMode === 'draw') {
+      draw.deleteAll();
+      setDraftAOI(null);
+      setWarning('');
+      draw.changeMode('draw_polygon');
+      return;
+    }
+
+    if (aoiEditorMode === 'edit') {
+      const editableFeature = editableGeojsonRef.current;
+      if (!editableFeature?.geometry || editableFeature.geometry.type !== 'Polygon') {
+        setWarning('当前边界无法进入编辑模式，请先选择或绘制一个单 Polygon。');
+        return;
+      }
+
+      draw.deleteAll();
+      const featureIds = draw.add(editableFeature);
+      const featureId = Array.isArray(featureIds) ? featureIds[0] : featureIds;
+
+      if (featureId) {
+        try {
+          draw.changeMode('direct_select', { featureId });
+        } catch (error) {
+          draw.changeMode('simple_select', { featureIds: [featureId] });
+        }
+      }
+    }
+  }, [aoiEditorMode, setDraftAOI, setWarning]);
 
   // Update EE layers when layer data changes
   useEffect(() => {
@@ -512,7 +779,9 @@ function MapContainer() {
     return lifecycle.cleanup;
   }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle]);
 
-  const displayedAoi = appMode === 'agent'
+  const displayedAoi = isAoiEditing
+    ? null
+    : appMode === 'agent'
     ? selectedAOI || buildAoiFromAgentState(floodAgentState, {
         source: 'agent_geocode',
         label: floodAgentState?.location || 'Agent-derived boundary',
