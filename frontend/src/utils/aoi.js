@@ -187,6 +187,29 @@ export const buildAoiFromGeoJSON = (input, overrides = {}) => {
   };
 };
 
+export const buildAoiFromDrawFeature = (feature, overrides = {}) => {
+  if (!feature || typeof feature !== 'object') {
+    return null;
+  }
+
+  const geometry = feature.type === 'Feature' ? feature.geometry : feature;
+  if (!geometry || geometry.type !== 'Polygon') {
+    return null;
+  }
+
+  return buildAoiFromGeoJSON(
+    {
+      type: 'Feature',
+      properties: feature.properties || {},
+      geometry,
+    },
+    {
+      source: overrides.source || 'draw',
+      label: overrides.label || 'Drawn boundary',
+    }
+  );
+};
+
 export const buildAoiFromBounds = (bounds, overrides = {}) => {
   if (!bounds) {
     return null;

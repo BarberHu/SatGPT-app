@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import shp from 'shpjs';
 import { useAppContext } from '../context/AppContext';
-import { buildAoiFromGeoJSON } from '../utils/aoi';
+import { buildAoiFromAgentState, buildAoiFromGeoJSON } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 
 function AoiUploadPanel({ variant = 'ask' }) {
@@ -11,14 +11,28 @@ function AoiUploadPanel({ variant = 'ask' }) {
 
   const {
     selectedAOI,
+    draftAOI,
     setSelectedAOI,
     setSelectedGridCords,
     setWarning,
+    floodAgentState,
+    isAoiEditing,
+    startAoiDraw,
+    startAoiEdit,
+    applyDraftAoi,
+    cancelDraftAoi,
     resetAgentSession,
     resetAskSession,
   } = useAppContext();
 
+  const effectiveAoi = selectedAOI || buildAoiFromAgentState(floodAgentState, {
+    source: 'agent_geocode',
+    label: floodAgentState?.location || 'Agent-derived boundary',
+  });
+  const hasEditableAoi = Boolean(effectiveAoi);
+
   const openFilePicker = () => {
+    if (isAoiEditing) return;
     fileInputRef.current?.click();
   };
 
@@ -86,6 +100,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
       resetAskSession();
       setSelectedGridCords(null);
       setSelectedAOI(aoi);
+      cancelDraftAoi();
       resetAgentSession({ preserveSelectedAoi: true });
       trackUxEvent('aoi_upload_success', {
         mode: variant,
@@ -107,7 +122,53 @@ function AoiUploadPanel({ variant = 'ask' }) {
     }
   };
 
-  const actionRow = (
+  const handleStartDraw = () => {
+    startAoiDraw();
+    trackUxEvent('aoi_draw_start', { mode: variant });
+  };
+
+  const handleStartEdit = () => {
+    const started = startAoiEdit();
+    if (started) {
+      trackUxEvent('aoi_edit_start', {
+        mode: variant,
+        source: effectiveAoi?.source || 'unknown',
+        kind: effectiveAoi?.kind || 'unknown',
+      });
+    }
+  };
+
+  const handleApply = () => {
+    const applied = applyDraftAoi();
+    if (applied) {
+      trackUxEvent('aoi_edit_apply', { mode: variant });
+    }
+  };
+
+  const handleCancel = () => {
+    cancelDraftAoi();
+    trackUxEvent('aoi_edit_cancel', { mode: variant });
+  };
+
+  const actionRow = isAoiEditing ? (
+    <div className={`aoi-upload-action-row ${variant}`}>
+      <button
+        type="button"
+        className="aoi-upload-action-btn primary"
+        disabled={!draftAOI?.geojson}
+        onClick={handleApply}
+      >
+        Apply
+      </button>
+      <button
+        type="button"
+        className="aoi-upload-action-btn secondary"
+        onClick={handleCancel}
+      >
+        Cancel
+      </button>
+    </div>
+  ) : (
     <div className={`aoi-upload-action-row ${variant}`}>
       <button
         type="button"
@@ -116,6 +177,22 @@ function AoiUploadPanel({ variant = 'ask' }) {
         onClick={openFilePicker}
       >
         {isParsing ? 'Uploading...' : 'Upload file'}
+      </button>
+      <button
+        type="button"
+        className="aoi-upload-action-btn secondary"
+        disabled={isParsing}
+        onClick={handleStartDraw}
+      >
+        Draw
+      </button>
+      <button
+        type="button"
+        className="aoi-upload-action-btn secondary"
+        disabled={!hasEditableAoi || isParsing}
+        onClick={handleStartEdit}
+      >
+        Edit
       </button>
       <button
         type="button"
@@ -152,6 +229,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
         type="file"
         accept=".geojson,.json,.zip,application/geo+json,application/json,application/zip"
         onChange={handleFileChange}
+        disabled={isAoiEditing}
         style={{ display: 'none' }}
       />
     </>

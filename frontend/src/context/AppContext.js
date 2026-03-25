@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import { buildAoiFromAgentState } from '../utils/aoi';
 
 const AppContext = createContext();
 
@@ -55,6 +56,8 @@ export const AppProvider = ({ children }) => {
   const [mapInstance, setMapInstance] = useState(null);
   const [selectedGridCords, setSelectedGridCords] = useState(null);
   const [selectedAOI, setSelectedAOI] = useState(null);
+  const [draftAOI, setDraftAOI] = useState(null);
+  const [aoiEditorMode, setAoiEditorMode] = useState('idle');
   const [countries, setCountries] = useState({});
   const [gridClickEnabled, setGridClickEnabled] = useState(true);
   
@@ -245,6 +248,59 @@ export const AppProvider = ({ children }) => {
     });
   }, []);
 
+  const cancelDraftAoi = useCallback(() => {
+    setDraftAOI(null);
+    setAoiEditorMode('idle');
+    setWarning('');
+  }, []);
+
+  const startAoiDraw = useCallback(() => {
+    setDraftAOI(null);
+    setAoiEditorMode('draw');
+    setWarning('');
+  }, []);
+
+  const startAoiEdit = useCallback(() => {
+    const editableAoi = selectedAOI || buildAoiFromAgentState(floodAgentState, {
+      source: 'agent_geocode',
+      label: floodAgentState?.location || 'Agent-derived boundary',
+    });
+
+    if (!editableAoi) {
+      setWarning('请先通过鱼网、上传文件或 Agent 分析获得一个边界。');
+      return false;
+    }
+
+    if (editableAoi.kind === 'multipolygon') {
+      setWarning('当前边界是 MultiPolygon，第一版暂不支持直接编辑。请重新绘制一个单 Polygon。');
+      return false;
+    }
+
+    setDraftAOI(editableAoi);
+    setAoiEditorMode('edit');
+    setWarning('');
+    return true;
+  }, [floodAgentState, selectedAOI]);
+
+  const applyDraftAoi = useCallback(() => {
+    if (!draftAOI?.geojson) {
+      setWarning('请先绘制或编辑出一个有效的 Polygon 边界。');
+      return false;
+    }
+
+      const nextAoi = JSON.parse(JSON.stringify(draftAOI));
+      resetAskSession();
+      setSelectedGridCords(null);
+      setSelectedAOI(nextAoi);
+    resetAgentSession({ preserveSelectedAoi: true });
+    setDraftAOI(null);
+    setAoiEditorMode('idle');
+    setWarning('');
+    return true;
+  }, [draftAOI, resetAgentSession, resetAskSession]);
+
+  const isAoiEditing = aoiEditorMode !== 'idle';
+
   const value = {
     // UI State
     isPanelVisible,
@@ -265,6 +321,15 @@ export const AppProvider = ({ children }) => {
     setSelectedGridCords,
     selectedAOI,
     setSelectedAOI,
+    draftAOI,
+    setDraftAOI,
+    aoiEditorMode,
+    setAoiEditorMode,
+    isAoiEditing,
+    startAoiDraw,
+    startAoiEdit,
+    applyDraftAoi,
+    cancelDraftAoi,
     countries,
     setCountries,
     gridClickEnabled,

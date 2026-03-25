@@ -29,6 +29,7 @@ function ControlPanel() {
     resetAskSession,
     gridClickEnabled,
     setGridClickEnabled,
+    isAoiEditing,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -213,6 +214,7 @@ function ControlPanel() {
             className="form-check-input"
             type="checkbox"
             checked={gridClickEnabled}
+            disabled={isAoiEditing}
             onChange={() => setGridClickEnabled(!gridClickEnabled)}
           />
         </div>
