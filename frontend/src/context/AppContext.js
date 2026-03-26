@@ -58,6 +58,7 @@ export const AppProvider = ({ children }) => {
   const [selectedAOI, setSelectedAOI] = useState(null);
   const [draftAOI, setDraftAOI] = useState(null);
   const [aoiEditorMode, setAoiEditorMode] = useState('idle');
+  const [aoiClearVersion, setAoiClearVersion] = useState(0);
   const [countries, setCountries] = useState({});
   const [gridClickEnabled, setGridClickEnabled] = useState(true);
   
@@ -299,6 +300,17 @@ export const AppProvider = ({ children }) => {
     return true;
   }, [draftAOI, resetAgentSession, resetAskSession]);
 
+  const clearAoiState = useCallback(() => {
+    resetAskSession();
+    resetAgentSession({ preserveSelectedAoi: false });
+    setDraftAOI(null);
+    setAoiEditorMode('idle');
+    setSelectedGridCords(null);
+    setSelectedAOI(null);
+    setWarning('');
+    setAoiClearVersion((value) => value + 1);
+  }, [resetAgentSession, resetAskSession]);
+
   const isAoiEditing = aoiEditorMode !== 'idle';
 
   const value = {
@@ -325,11 +337,13 @@ export const AppProvider = ({ children }) => {
     setDraftAOI,
     aoiEditorMode,
     setAoiEditorMode,
+    aoiClearVersion,
     isAoiEditing,
     startAoiDraw,
     startAoiEdit,
     applyDraftAoi,
     cancelDraftAoi,
+    clearAoiState,
     countries,
     setCountries,
     gridClickEnabled,

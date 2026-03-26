@@ -8,6 +8,7 @@ const FLOOD_HOTSPOT_YEAR_FROM = 1988;
 export const useMapData = () => {
   const {
     selectedAOI,
+    aoiClearVersion,
     dataType,
     yearControl,
     setIsLoading,
@@ -103,8 +104,15 @@ export const useMapData = () => {
     } else {
       prevAoiRef.current = null;
       requestIdRef.current += 1;
+      setIsLoading(false);
     }
-  }, [selectedAOI, fetchMapData]);
+  }, [selectedAOI, fetchMapData, setIsLoading]);
+
+  useEffect(() => {
+    requestIdRef.current += 1;
+    prevAoiRef.current = null;
+    setIsLoading(false);
+  }, [aoiClearVersion, setIsLoading]);
 
   // Also refetch when dataType or yearControl changes (if grid is selected)
   useEffect(() => {

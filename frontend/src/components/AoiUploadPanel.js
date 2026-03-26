@@ -21,6 +21,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
     startAoiEdit,
     applyDraftAoi,
     cancelDraftAoi,
+    clearAoiState,
     resetAgentSession,
     resetAskSession,
   } = useAppContext();
@@ -37,11 +38,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
   };
 
   const clearAoi = () => {
-    resetAskSession();
-    setSelectedAOI(null);
-    setSelectedGridCords(null);
-    setWarning('');
-    resetAgentSession({ preserveSelectedAoi: false });
+    clearAoiState();
     trackUxEvent('aoi_clear', { mode: variant });
   };
 
@@ -197,7 +194,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
       <button
         type="button"
         className="aoi-upload-action-btn secondary"
-        disabled={!selectedAOI || isParsing}
+        disabled={!effectiveAoi || isParsing}
         onClick={clearAoi}
       >
         Clear
