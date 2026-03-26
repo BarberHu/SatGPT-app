@@ -164,6 +164,7 @@ function MapContainer() {
     setDraftAOI,
     selectedAOI,
     draftAOI,
+    aoiClearVersion,
     gridClickEnabled,
     isAoiEditing,
     aoiEditorMode,
@@ -499,7 +500,7 @@ function MapContainer() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
 
     if (appMode === 'ask') {
       removeAgentLayers(map);
@@ -510,7 +511,7 @@ function MapContainer() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
 
     if (appMode === 'ask') {
       removeAskLayers(map);
@@ -519,6 +520,27 @@ function MapContainer() {
       setAgentTileError(null);
     }
   }, [appMode, selectedAOI, removeAgentLayers, removeAskLayers, setAgentTileError]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const draw = drawRef.current;
+    if (!map) return;
+
+    removeAskLayers(map);
+    removeAgentLayers(map);
+    removeAoiLayers(map);
+    lastFittedAoiRef.current = null;
+    map.getCanvas().style.cursor = '';
+
+    if (draw) {
+      try {
+        draw.deleteAll();
+        draw.changeMode('simple_select');
+      } catch (error) {
+        console.warn('Failed to reset draw state during AOI clear:', error);
+      }
+    }
+  }, [aoiClearVersion, removeAgentLayers, removeAskLayers, removeAoiLayers]);
 
   // Handle 3D terrain
   useEffect(() => {
@@ -790,7 +812,7 @@ function MapContainer() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
 
     const sourceId = AOI_SOURCE_ID;
     const layerId = 'analysis-aoi-fill';
@@ -800,6 +822,10 @@ function MapContainer() {
 
     if (!displayedAoi?.geojson) {
       lastFittedAoiRef.current = null;
+      return;
+    }
+
+    if (!map.isStyleLoaded()) {
       return;
     }
 
