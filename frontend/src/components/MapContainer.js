@@ -13,10 +13,16 @@ const DEFAULT_ZOOM = 5;
 // Custom Mapbox style (same as original project)
 const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
 const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-const AGENT_SOURCE_IDS = [
+const AGENT_BASE_LAYER_IDS = [
   'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
   'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
+];
+const AGENT_ANALYSIS_LAYER_IDS = [
   'agent-flood-detection', 'agent-population', 'agent-urban', 'agent-landcover',
+];
+const AGENT_SOURCE_IDS = [
+  ...AGENT_BASE_LAYER_IDS,
+  ...AGENT_ANALYSIS_LAYER_IDS,
 ];
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
@@ -246,6 +252,64 @@ function MapContainer() {
     }
   }, []);
 
+  const getExistingLayerBands = useCallback((map) => {
+    const styleLayers = map.getStyle()?.layers || [];
+    const styleLayerIds = styleLayers.map((layer) => layer.id);
+    const existingLayerIds = new Set(styleLayerIds);
+
+    return {
+      gridLayers: ['grid_cell-layer'].filter((id) => existingLayerIds.has(id)),
+      baseImageryLayers: AGENT_BASE_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
+      analysisLayers: [
+        ...ASK_LAYER_NAMES.map((layerName) => `${layerName}-layer`),
+        ...AGENT_ANALYSIS_LAYER_IDS,
+      ].filter((id) => existingLayerIds.has(id)),
+      aoiLayers: AOI_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
+      drawLayers: styleLayerIds.filter((id) => id.startsWith('gl-draw-')),
+    };
+  }, []);
+
+  const promoteDrawLayers = useCallback((map) => {
+    if (!map || !map.isStyleLoaded()) return;
+
+    const { drawLayers } = getExistingLayerBands(map);
+    drawLayers.forEach((id) => {
+      if (!map.getLayer(id)) return;
+      try {
+        map.moveLayer(id);
+      } catch (error) {
+        console.warn(`Failed to promote draw layer ${id}:`, error);
+      }
+    });
+  }, [getExistingLayerBands]);
+
+  const reconcileLayerOrder = useCallback((map) => {
+    if (!map || !map.isStyleLoaded()) return;
+
+    const {
+      gridLayers,
+      baseImageryLayers,
+      analysisLayers,
+      aoiLayers,
+      drawLayers,
+    } = getExistingLayerBands(map);
+
+    [
+      ...gridLayers,
+      ...baseImageryLayers,
+      ...analysisLayers,
+      ...aoiLayers,
+      ...drawLayers,
+    ].forEach((id) => {
+      if (!map.getLayer(id)) return;
+      try {
+        map.moveLayer(id);
+      } catch (error) {
+        console.warn(`Failed to reconcile layer order for ${id}:`, error);
+      }
+    });
+  }, [getExistingLayerBands]);
+
   const loadGridLayer = useCallback((map) => {
     map.addSource('grid_cell', {
       type: 'geojson',
@@ -280,6 +344,7 @@ function MapContainer() {
         setDraftAOI(null);
         setSelectedAOI(buildAoiFromGridSelection(cords));
         resetAgentSession({ preserveSelectedAoi: true });
+        reconcileLayerOrder(map);
       }
     });
 
@@ -292,7 +357,7 @@ function MapContainer() {
     map.on('mouseleave', 'grid_cell-layer', () => {
       map.getCanvas().style.cursor = '';
     });
-  }, [removeAgentLayers, removeAskLayers, resetAgentSession, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords]);
+  }, [reconcileLayerOrder, removeAgentLayers, removeAskLayers, resetAgentSession, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords]);
 
   // Initialize map
   useEffect(() => {
@@ -322,9 +387,16 @@ function MapContainer() {
       });
       map.addControl(drawRef.current, 'top-right');
       loadGridLayer(map);
+      window.requestAnimationFrame(() => reconcileLayerOrder(map));
     });
 
+    const handleStyleData = () => {
+      window.requestAnimationFrame(() => reconcileLayerOrder(map));
+    };
+    map.on('styledata', handleStyleData);
+
     return () => {
+      map.off('styledata', handleStyleData);
       if (mapRef.current) {
         drawRef.current = null;
         mapRef.current.remove();
@@ -332,7 +404,7 @@ function MapContainer() {
         mapInitialized.current = false;
       }
     };
-  }, [loadGridLayer, resetAgentSession, setMapInstance]);
+  }, [loadGridLayer, reconcileLayerOrder, resetAgentSession, setMapInstance]);
 
   const syncDraftFromFeature = useCallback((feature) => {
     const nextDraftAoi = buildAoiFromDrawFeature(feature, {
@@ -385,6 +457,7 @@ function MapContainer() {
               console.warn('Failed to switch draw mode after polygon creation:', fallbackError);
             }
           }
+          promoteDrawLayers(map);
         });
       }
     };
@@ -393,10 +466,12 @@ function MapContainer() {
       const updatedFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon')
         || draw.getAll().features.find((feature) => feature.geometry?.type === 'Polygon');
       syncDraftFromFeature(updatedFeature);
+      promoteDrawLayers(map);
     };
 
     const handleDelete = () => {
       setDraftAOI(null);
+      promoteDrawLayers(map);
     };
 
     map.on('draw.create', handleCreate);
@@ -408,15 +483,19 @@ function MapContainer() {
       map.off('draw.update', handleUpdate);
       map.off('draw.delete', handleDelete);
     };
-  }, [setDraftAOI, setWarning, syncDraftFromFeature]);
+  }, [promoteDrawLayers, setDraftAOI, setWarning, syncDraftFromFeature]);
 
   useEffect(() => {
+    const map = mapRef.current;
     const draw = drawRef.current;
     if (!draw) return;
 
     if (aoiEditorMode === 'idle') {
       draw.deleteAll();
       draw.changeMode('simple_select');
+      if (map) {
+        window.requestAnimationFrame(() => reconcileLayerOrder(map));
+      }
       return;
     }
 
@@ -425,6 +504,9 @@ function MapContainer() {
       setDraftAOI(null);
       setWarning('');
       draw.changeMode('draw_polygon');
+      if (map) {
+        window.requestAnimationFrame(() => promoteDrawLayers(map));
+      }
       return;
     }
 
@@ -446,8 +528,12 @@ function MapContainer() {
           draw.changeMode('simple_select', { featureIds: [featureId] });
         }
       }
+
+      if (map) {
+        window.requestAnimationFrame(() => promoteDrawLayers(map));
+      }
     }
-  }, [aoiEditorMode, setDraftAOI, setWarning]);
+  }, [aoiEditorMode, promoteDrawLayers, reconcileLayerOrder, setDraftAOI, setWarning]);
 
   // Update EE layers when layer data changes
   useEffect(() => {
@@ -483,7 +569,9 @@ function MapContainer() {
         });
       }
     });
-  }, [layerData, layerOpacity, layerVisibility]);
+
+    reconcileLayerOrder(map);
+  }, [layerData, layerOpacity, layerVisibility, reconcileLayerOrder]);
 
   // Update layer visibility and opacity
   useEffect(() => {
@@ -507,7 +595,9 @@ function MapContainer() {
     } else {
       removeAskLayers(map);
     }
-  }, [appMode, removeAgentLayers, removeAskLayers]);
+
+    reconcileLayerOrder(map);
+  }, [appMode, reconcileLayerOrder, removeAgentLayers, removeAskLayers]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -519,7 +609,9 @@ function MapContainer() {
       removeAgentLayers(map);
       setAgentTileError(null);
     }
-  }, [appMode, selectedAOI, removeAgentLayers, removeAskLayers, setAgentTileError]);
+
+    reconcileLayerOrder(map);
+  }, [appMode, selectedAOI, reconcileLayerOrder, removeAgentLayers, removeAskLayers, setAgentTileError]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -540,7 +632,9 @@ function MapContainer() {
         console.warn('Failed to reset draw state during AOI clear:', error);
       }
     }
-  }, [aoiClearVersion, removeAgentLayers, removeAskLayers, removeAoiLayers]);
+
+    reconcileLayerOrder(map);
+  }, [aoiClearVersion, reconcileLayerOrder, removeAgentLayers, removeAskLayers, removeAoiLayers]);
 
   // Handle 3D terrain
   useEffect(() => {
@@ -590,7 +684,8 @@ function MapContainer() {
         map.removeLayer('3d-buildings');
       }
     }
-  }, [isBuildingsEnabled]);
+    reconcileLayerOrder(map);
+  }, [isBuildingsEnabled, reconcileLayerOrder]);
 
   // ========== Helper: per-layer tile loading lifecycle ==========
   // Creates standard idle/timeout handlers for a single layer, managing its own loading key.
@@ -653,6 +748,7 @@ function MapContainer() {
       source: sourceId,
       paint: { 'raster-opacity': 1 },
     });
+    reconcileLayerOrder(map);
 
     // Track tile errors (only on base imagery since it's the primary GEE layer)
     let tileErrorCount = 0;
@@ -695,7 +791,7 @@ function MapContainer() {
       map.off('idle', finish);
       clearTimeout(timeout);
     };
-  }, [agentImagery, appMode, agentSelectedPeriod, agentSelectedType, setAgentLayerLoading, setAgentTileError]);
+  }, [agentImagery, appMode, agentSelectedPeriod, agentSelectedType, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
 
   // ========== Effect B: Flood Detection Overlay ==========
   useEffect(() => {
@@ -718,10 +814,11 @@ function MapContainer() {
       source: 'agent-flood-detection',
       paint: { 'raster-opacity': 0.7 },
     });
+    reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'flood-detection');
     return lifecycle.cleanup;
-  }, [agentImagery, appMode, agentShowFloodDetection, createLayerTileLifecycle]);
+  }, [agentImagery, appMode, agentShowFloodDetection, createLayerTileLifecycle, reconcileLayerOrder]);
 
   // ========== Effect C: Population Impact Overlay ==========
   useEffect(() => {
@@ -744,10 +841,11 @@ function MapContainer() {
       source: 'agent-population',
       paint: { 'raster-opacity': 0.7 },
     });
+    reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'population');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowPopulationLayer, createLayerTileLifecycle]);
+  }, [agentImpactData, appMode, agentShowPopulationLayer, createLayerTileLifecycle, reconcileLayerOrder]);
 
   // ========== Effect D: Built-up Area Overlay ==========
   useEffect(() => {
@@ -770,10 +868,11 @@ function MapContainer() {
       source: 'agent-urban',
       paint: { 'raster-opacity': 0.7 },
     });
+    reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'urban');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowUrbanLayer, createLayerTileLifecycle]);
+  }, [agentImpactData, appMode, agentShowUrbanLayer, createLayerTileLifecycle, reconcileLayerOrder]);
 
   // ========== Effect E: Land Cover Overlay ==========
   useEffect(() => {
@@ -796,10 +895,11 @@ function MapContainer() {
       source: 'agent-landcover',
       paint: { 'raster-opacity': 0.7 },
     });
+    reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'landcover');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle]);
+  }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle, reconcileLayerOrder]);
 
   const displayedAoi = isAoiEditing
     ? null
@@ -819,6 +919,7 @@ function MapContainer() {
     const outlineLayerId = 'analysis-aoi-outline';
 
     removeAoiLayers(map);
+    reconcileLayerOrder(map);
 
     if (!displayedAoi?.geojson) {
       lastFittedAoiRef.current = null;
@@ -854,13 +955,15 @@ function MapContainer() {
       },
     });
 
+    reconcileLayerOrder(map);
+
     const boundsKey = JSON.stringify(displayedAoi.bounds || {});
     if (displayedAoi.bounds && boundsKey !== lastFittedAoiRef.current) {
       const { west, south, east, north } = displayedAoi.bounds;
       map.fitBounds([[west, south], [east, north]], { padding: 50 });
       lastFittedAoiRef.current = boundsKey;
     }
-  }, [displayedAoi, removeAoiLayers]);
+  }, [displayedAoi, reconcileLayerOrder, removeAoiLayers]);
 
   return (
     <div 
