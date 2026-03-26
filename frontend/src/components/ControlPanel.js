@@ -23,7 +23,6 @@ function ControlPanel() {
     geeCodeUrl,
     setActiveModal,
     setCountries,
-    mapInstance,
     selectedAOI,
     appMode,
     resetAskSession,
@@ -50,30 +49,7 @@ function ControlPanel() {
 
   const handleDataTypeChange = (type) => {
     if (type === dataType) return; // Already selected
-    
-    // Clear previous layers from map
-    if (mapInstance) {
-      // Remove EE tile layers
-      ['water-layer', 'flood-layer', 'lclu-layer', 'populationDensity-layer', 'soilTexture-layer', 'healthCareAccess-layer'].forEach(layerId => {
-        if (mapInstance.getLayer(layerId)) {
-          mapInstance.removeLayer(layerId);
-        }
-      });
-      ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'].forEach(sourceId => {
-        if (mapInstance.getSource(sourceId)) {
-          mapInstance.removeSource(sourceId);
-        }
-      });
-      ['analysis-aoi-fill', 'analysis-aoi-outline'].forEach((layerId) => {
-        if (mapInstance.getLayer(layerId)) {
-          mapInstance.removeLayer(layerId);
-        }
-      });
-      if (mapInstance.getSource('analysis-aoi')) {
-        mapInstance.removeSource('analysis-aoi');
-      }
-    }
-    
+
     resetAskSession();
     
     // Set new data type
