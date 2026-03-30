@@ -41,8 +41,6 @@ function ControlPanel() {
       .catch((err) => console.error('Error loading countries:', err));
   }, [setCountries]);
 
-  if (!isPanelVisible) return null;
-
   const handleCollapsePanel = () => {
     setIsPanelVisible(false);
   };
@@ -84,13 +82,25 @@ function ControlPanel() {
     }
   };
 
+  const activeLayerOrder = getAskLayerOrder(dataType);
+
   // Get visible layers for dropdown
-  const visibleLayers = Object.entries(layerVisibility)
-    .filter(([_, visible]) => visible)
-    .map(([name]) => ({
-      name: name,
+  const visibleLayers = activeLayerOrder
+    .filter((name) => layerVisibility[name])
+    .map((name) => ({
+      name,
       label: getLayerLabel(name),
     }));
+
+  useEffect(() => {
+    if (!selectedLayer) return;
+    const isLayerStillAvailable = activeLayerOrder.includes(selectedLayer) && layerVisibility[selectedLayer];
+    if (!isLayerStillAvailable) {
+      setSelectedLayer('');
+    }
+  }, [activeLayerOrder, layerVisibility, selectedLayer]);
+
+  if (!isPanelVisible) return null;
 
   return (
     <div className="panel">
@@ -138,6 +148,16 @@ function ControlPanel() {
               onChange={() => handleDataTypeChange('floodHotspot')}
             />
             <span>Inundation Hotspot</span>
+          </div>
+          <div>
+            <input
+              type="checkbox"
+              className="select-box"
+              id="waterRegimeChangeCheckbox"
+              checked={dataType === 'waterRegimeChange'}
+              onChange={() => handleDataTypeChange('waterRegimeChange')}
+            />
+            <span>Water Regime Change</span>
           </div>
         </div>
       </div>
@@ -202,14 +222,22 @@ function ControlPanel() {
           <h1>Legend</h1>
         </div>
         <div className="water-legends">
-          <div className="legend-value">
-            <div className="legend-block" style={{ backgroundColor: '#00008B' }}></div>
-            <span>Permanent Water Body</span>
-          </div>
-          <div className="legend-value">
-            <div className="legend-block" style={{ backgroundColor: '#FD0303' }}></div>
-            <span>Inundated Area</span>
-          </div>
+          {dataType === 'waterRegimeChange' ? (
+            <span style={{ fontSize: '13px', color: '#555' }}>
+              Water regime transition classes are shown in the map legend.
+            </span>
+          ) : (
+            <>
+              <div className="legend-value">
+                <div className="legend-block" style={{ backgroundColor: '#00008B' }}></div>
+                <span>Permanent Water Body</span>
+              </div>
+              <div className="legend-value">
+                <div className="legend-block" style={{ backgroundColor: '#FD0303' }}></div>
+                <span>Inundated Area</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -218,44 +246,26 @@ function ControlPanel() {
         <h4>Layers</h4>
         <div style={{ display: 'flex', flexDirection: 'row', paddingLeft: '10px' }}>
           <div style={{ width: '50%' }}>
-            <LayerCheckbox
-              name="flood"
-              label="Inundated Area"
-              checked={layerVisibility.flood}
-              onChange={() => handleLayerChange('flood')}
-            />
-            <LayerCheckbox
-              name="water"
-              label="Permanent Water"
-              checked={layerVisibility.water}
-              onChange={() => handleLayerChange('water')}
-            />
-            <LayerCheckbox
-              name="lclu"
-              label="LCLU"
-              checked={layerVisibility.lclu}
-              onChange={() => handleLayerChange('lclu')}
-            />
-            <LayerCheckbox
-              name="populationDensity"
-              label="Population Density"
-              checked={layerVisibility.populationDensity}
-              onChange={() => handleLayerChange('populationDensity')}
-            />
+            {getLeftColumnLayers(dataType).map((layerName) => (
+              <LayerCheckbox
+                key={layerName}
+                name={layerName}
+                label={getLayerLabel(layerName)}
+                checked={layerVisibility[layerName]}
+                onChange={() => handleLayerChange(layerName)}
+              />
+            ))}
           </div>
           <div style={{ width: '50%' }}>
-            <LayerCheckbox
-              name="soilTexture"
-              label="Soil Texture"
-              checked={layerVisibility.soilTexture}
-              onChange={() => handleLayerChange('soilTexture')}
-            />
-            <LayerCheckbox
-              name="healthCareAccess"
-              label="Healthcare Access"
-              checked={layerVisibility.healthCareAccess}
-              onChange={() => handleLayerChange('healthCareAccess')}
-            />
+            {getRightColumnLayers(dataType).map((layerName) => (
+              <LayerCheckbox
+                key={layerName}
+                name={layerName}
+                label={getLayerLabel(layerName)}
+                checked={layerVisibility[layerName]}
+                onChange={() => handleLayerChange(layerName)}
+              />
+            ))}
           </div>
         </div>
       </div>
@@ -362,6 +372,8 @@ function LayerCheckbox({ name, label, checked, onChange }) {
 
 function getLayerLabel(name) {
   const labels = {
+    regimeChange: 'Regime Change',
+    seasonality: 'Seasonality',
     flood: 'Inundated Area',
     water: 'Permanent Water',
     lclu: 'LCLU',
@@ -370,6 +382,26 @@ function getLayerLabel(name) {
     healthCareAccess: 'Healthcare Access',
   };
   return labels[name] || name;
+}
+
+function getAskLayerOrder(dataType) {
+  if (dataType === 'waterRegimeChange') {
+    return ['regimeChange', 'seasonality', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+  }
+
+  return ['flood', 'water', 'seasonality', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+}
+
+function getLeftColumnLayers(dataType) {
+  if (dataType === 'waterRegimeChange') {
+    return ['regimeChange', 'seasonality', 'lclu', 'populationDensity'];
+  }
+
+  return ['flood', 'water', 'seasonality', 'lclu', 'populationDensity'];
+}
+
+function getRightColumnLayers(dataType) {
+  return ['soilTexture', 'healthCareAccess'];
 }
 
 export default ControlPanel;

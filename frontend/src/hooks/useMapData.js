@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
+import { getHistoricalMap, getFloodHotspotMap, getWaterRegimeChangeMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams } from '../utils/aoi';
 
 const FLOOD_HOTSPOT_YEAR_FROM = 1988;
@@ -47,6 +47,8 @@ export const useMapData = () => {
       
       if (dataType === 'historical') {
         data = await getHistoricalMap(params);
+      } else if (dataType === 'waterRegimeChange') {
+        data = await getWaterRegimeChangeMap(params);
       } else {
         // Flood hotspot
         params.year_from = FLOOD_HOTSPOT_YEAR_FROM;
@@ -62,7 +64,11 @@ export const useMapData = () => {
       updateLayerData(data);
 
       // Create GEE code snippet and download URL
-      const codeType = dataType === 'historical' ? 'historical' : 'flood_hotspot';
+      const codeType = dataType === 'historical'
+        ? 'historical'
+        : dataType === 'waterRegimeChange'
+        ? 'water_regime_change'
+        : 'flood_hotspot';
       const codeSnippet = createCodeSnippet(params, codeType);
       if (codeSnippet) {
         const blob = new Blob([codeSnippet], { type: 'text/javascript' });

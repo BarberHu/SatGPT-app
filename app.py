@@ -85,6 +85,10 @@ LAYER_CATALOG = load_layer_catalog()
 BASIC_LAYER_CATALOG = LAYER_CATALOG["basic"]
 
 
+def get_basic_layer_catalog():
+    return load_layer_catalog()["basic"]
+
+
 def get_bounds_from_ring(coordinates):
     lngs = [point[0] for point in coordinates]
     lats = [point[1] for point in coordinates]
@@ -217,6 +221,8 @@ def getUnsupervisedHandler():
     payload = get_request_payload()
     aoi = parse_aoi_from_request_args(payload)
     region = aoi_to_ee_geometry(aoi)
+    unsupervised_catalog = get_basic_layer_catalog()["unsupervised"]
+    permanent_water_catalog = unsupervised_catalog["globalSurfaceWater"]
 
     time_start   = payload.get('time_start')
     time_end     = payload.get('time_end')
@@ -229,9 +235,9 @@ def getUnsupervisedHandler():
     
     landsatNDWI = collection.map(computeNDWI)
     medianNDWI = landsatNDWI.median().clip(region)
-    gsw = ee.Image('JRC/GSW1_2/GlobalSurfaceWater')
-    occurence = gsw.select('occurrence')
-    waterMask = occurence.gte(90)
+    gsw = ee.Image(permanent_water_catalog["dataset"])
+    occurrence = gsw.select(permanent_water_catalog["band"])
+    waterMask = occurrence.gte(permanent_water_catalog["threshold"])
     maskedResult = medianNDWI.updateMask(waterMask)
     training = maskedResult.select('NDWI').sample(
         region=region,
@@ -268,8 +274,9 @@ def getHistoricalHandler():
     payload = get_request_payload()
     aoi = parse_aoi_from_request_args(payload)
     region = aoi_to_ee_geometry(aoi)
-    historical_catalog = BASIC_LAYER_CATALOG["historical"]
-    supplementary_catalog = BASIC_LAYER_CATALOG["supplementary"]
+    basic_layer_catalog = get_basic_layer_catalog()
+    historical_catalog = basic_layer_catalog["historical"]
+    supplementary_catalog = basic_layer_catalog["supplementary"]
 
     time_start   = payload.get('time_start')
     time_end     = payload.get('time_end')
@@ -293,6 +300,10 @@ def getHistoricalHandler():
     jrcSurfaceFlood = jrcSurfaceFlood.updateMask(jrcSurfaceFlood.gt(0)) 
     jrcSurfaceFlood = visualize_image(jrcSurfaceFlood, historical_catalog["flood"]["visualization"])
 
+    Seasonality = ee.Image(supplementary_catalog["seasonality"]["dataset"]).select(supplementary_catalog["seasonality"]["band"]).clip(region)
+    Seasonality = Seasonality.updateMask(Seasonality.gt(0))
+    Seasonality = visualize_image(Seasonality, supplementary_catalog["seasonality"]["visualization"])
+
     LCLU = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
 
     PopulationDensity = ee.Image(supplementary_catalog["populationDensity"]["dataset"]).clip(region);
@@ -306,6 +317,7 @@ def getHistoricalHandler():
     
     mapIdWater = jrcSurfaceWater.getMapId()
     mapIdFlood = jrcSurfaceFlood.getMapId()
+    mapIdSeasonality = Seasonality.getMapId()
     mapIdLCLU = LCLU.getMapId()
     mapIdPopulationDensity = PopulationDensity.getMapId()
     mapIdSoilTexture = SoilTexture.getMapId()
@@ -316,6 +328,7 @@ def getHistoricalHandler():
     }
     attach_map_id(content, 'Flood', mapIdFlood)
     attach_map_id(content, 'Water', mapIdWater)
+    attach_map_id(content, 'Seasonality', mapIdSeasonality)
     attach_map_id(content, 'LCLU', mapIdLCLU)
     attach_map_id(content, 'PopulationDensity', mapIdPopulationDensity)
     attach_map_id(content, 'SoilTexture', mapIdSoilTexture)
@@ -332,8 +345,9 @@ def getFloodHotspotHandler():
     payload = get_request_payload()
     aoi = parse_aoi_from_request_args(payload)
     region = aoi_to_ee_geometry(aoi)
-    hotspot_catalog = BASIC_LAYER_CATALOG["hotspot"]
-    supplementary_catalog = BASIC_LAYER_CATALOG["supplementary"]
+    basic_layer_catalog = get_basic_layer_catalog()
+    hotspot_catalog = basic_layer_catalog["hotspot"]
+    supplementary_catalog = basic_layer_catalog["supplementary"]
     year_from = int(payload.get('year_from'))
     year_count = int(payload.get('year_count'))
     year_to = year_from + year_count 
@@ -360,6 +374,10 @@ def getFloodHotspotHandler():
     permanentWaterLayer = visualize_image(PermanentWaterLayer.select('waterClass'), hotspot_catalog["water"]["visualization"])
     floodLayer = visualize_image(floodFrequencyMap.select('waterClass'), hotspot_catalog["floodFrequency"]["visualization"])
 
+    Seasonality = ee.Image(supplementary_catalog["seasonality"]["dataset"]).select(supplementary_catalog["seasonality"]["band"]).clip(region)
+    Seasonality = Seasonality.updateMask(Seasonality.gt(0))
+    Seasonality = visualize_image(Seasonality, supplementary_catalog["seasonality"]["visualization"])
+
     LCLU = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
 
     PopulationDensity = ee.Image(supplementary_catalog["populationDensity"]["dataset"]).clip(region);
@@ -373,6 +391,7 @@ def getFloodHotspotHandler():
 
     mapIdWater = permanentWaterLayer.getMapId()
     mapIdFlood = floodLayer.getMapId()
+    mapIdSeasonality = Seasonality.getMapId()
     mapIdLCLU = LCLU.getMapId()
     mapIdPopulationDensity = PopulationDensity.getMapId()
     mapIdSoilTexture = SoilTexture.getMapId()
@@ -381,12 +400,69 @@ def getFloodHotspotHandler():
     content = {}
     attach_map_id(content, 'Flood', mapIdFlood)
     attach_map_id(content, 'Water', mapIdWater)
+    attach_map_id(content, 'Seasonality', mapIdSeasonality)
     attach_map_id(content, 'LCLU', mapIdLCLU)
     attach_map_id(content, 'PopulationDensity', mapIdPopulationDensity)
     attach_map_id(content, 'SoilTexture', mapIdSoilTexture)
     attach_map_id(content, 'HealthCareAccess', mapIdHealthCareAccess)
 
     # send content using json
+    response = Response()
+    response.headers['Content-Type'] = 'application/json'
+    response.data = json.dumps(content)
+    return response
+
+@app.route('/get_water_regime_change_map', methods=['GET', 'POST'])
+def getWaterRegimeChangeHandler():
+    payload = get_request_payload()
+    aoi = parse_aoi_from_request_args(payload)
+    region = aoi_to_ee_geometry(aoi)
+    basic_layer_catalog = get_basic_layer_catalog()
+    regime_catalog = basic_layer_catalog["waterRegimeChange"]
+    supplementary_catalog = basic_layer_catalog["supplementary"]
+
+    transition = ee.Image(regime_catalog["jrcGlobalSurfaceWater"]["dataset"]) \
+        .select(regime_catalog["jrcGlobalSurfaceWater"]["band"]) \
+        .clip(region)
+
+    transition_classes = regime_catalog["transitionClasses"]
+    regimeChange = transition.remap(
+        transition_classes["sourceValues"],
+        transition_classes["displayValues"]
+    )
+    regimeChange = regimeChange.updateMask(regimeChange.gt(0))
+    regimeChange = visualize_image(regimeChange, regime_catalog["visualization"])
+
+    Seasonality = ee.Image(supplementary_catalog["seasonality"]["dataset"]).select(supplementary_catalog["seasonality"]["band"]).clip(region)
+    Seasonality = Seasonality.updateMask(Seasonality.gt(0))
+    Seasonality = visualize_image(Seasonality, supplementary_catalog["seasonality"]["visualization"])
+
+    LCLU = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
+
+    PopulationDensity = ee.Image(supplementary_catalog["populationDensity"]["dataset"]).clip(region)
+    PopulationDensity = visualize_image(PopulationDensity, supplementary_catalog["populationDensity"]["visualization"])
+
+    SoilTexture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(supplementary_catalog["soilTexture"]["band"])
+    SoilTexture = visualize_image(SoilTexture, supplementary_catalog["soilTexture"]["visualization"])
+
+    HealthCareAccess = ee.Image(supplementary_catalog["healthCareAccess"]["dataset"]).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
+    HealthCareAccess = visualize_image(HealthCareAccess, supplementary_catalog["healthCareAccess"]["visualization"])
+
+    mapIdRegimeChange = regimeChange.getMapId()
+    mapIdSeasonality = Seasonality.getMapId()
+    mapIdLCLU = LCLU.getMapId()
+    mapIdPopulationDensity = PopulationDensity.getMapId()
+    mapIdSoilTexture = SoilTexture.getMapId()
+    mapIdHealthCareAccess = HealthCareAccess.getMapId()
+
+    content = {}
+    attach_map_id(content, 'RegimeChange', mapIdRegimeChange)
+    attach_map_id(content, 'Seasonality', mapIdSeasonality)
+    attach_map_id(content, 'LCLU', mapIdLCLU)
+    attach_map_id(content, 'PopulationDensity', mapIdPopulationDensity)
+    attach_map_id(content, 'SoilTexture', mapIdSoilTexture)
+    attach_map_id(content, 'HealthCareAccess', mapIdHealthCareAccess)
+
     response = Response()
     response.headers['Content-Type'] = 'application/json'
     response.data = json.dumps(content)

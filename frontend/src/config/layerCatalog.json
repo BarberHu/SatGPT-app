@@ -1,5 +1,13 @@
 {
   "basic": {
+    "unsupervised": {
+      "globalSurfaceWater": {
+        "dataset": "JRC/GSW1_4/GlobalSurfaceWater",
+        "version": "1.4",
+        "band": "occurrence",
+        "threshold": 90
+      }
+    },
     "historical": {
       "jrcYearlyHistory": {
         "dataset": "JRC/GSW1_4/YearlyHistory",
@@ -64,7 +72,44 @@
         }
       }
     },
+    "waterRegimeChange": {
+      "jrcGlobalSurfaceWater": {
+        "dataset": "JRC/GSW1_4/GlobalSurfaceWater",
+        "band": "transition",
+        "version": "1.4"
+      },
+      "transitionClasses": {
+        "sourceValues": [2, 3, 5, 6, 7, 8],
+        "displayValues": [1, 2, 3, 4, 1, 2],
+        "labels": [
+          "New Permanent Water",
+          "Lost Permanent Water",
+          "New Seasonal Water",
+          "Lost Seasonal Water"
+        ]
+      },
+      "visualization": {
+        "min": 1,
+        "max": 4,
+        "palette": [
+          "#00008B",
+          "#f4a261",
+          "#FD0303",
+          "#ffa9bb"
+        ]
+      }
+    },
     "supplementary": {
+      "seasonality": {
+        "dataset": "JRC/GSW1_4/GlobalSurfaceWater",
+        "band": "seasonality",
+        "version": "1.4",
+        "visualization": {
+          "min": 1,
+          "max": 12,
+          "palette": ["#f7fcf0", "#ccebc5", "#7bccc4", "#2b8cbe", "#084081"]
+        }
+      },
       "landcover": {
         "dataset": "ESA/WorldCover/v200",
         "version": "v200"

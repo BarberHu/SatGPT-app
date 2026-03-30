@@ -12,7 +12,7 @@ const DEFAULT_ZOOM = 5;
 
 // Custom Mapbox style (same as original project)
 const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
-const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+const ASK_LAYER_NAMES = ['seasonality', 'water', 'flood', 'regimeChange', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
 const AGENT_BASE_LAYER_IDS = [
   'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
   'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',

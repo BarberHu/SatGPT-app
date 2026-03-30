@@ -63,7 +63,7 @@ export const AppProvider = ({ children }) => {
   const [gridClickEnabled, setGridClickEnabled] = useState(true);
   
   // Layer State
-  const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot'
+  const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot', 'waterRegimeChange'
   const [yearControl, setYearControl] = useState(5);
   const [is3DEnabled, setIs3DEnabled] = useState(false);
   const [isBuildingsEnabled, setIsBuildingsEnabled] = useState(false);
@@ -72,6 +72,8 @@ export const AppProvider = ({ children }) => {
   const [layerVisibility, setLayerVisibility] = useState({
     flood: true,
     water: true,
+    regimeChange: true,
+    seasonality: false,
     lclu: false,
     populationDensity: false,
     soilTexture: false,
@@ -82,6 +84,8 @@ export const AppProvider = ({ children }) => {
   const [layerOpacity, setLayerOpacity] = useState({
     flood: 1,
     water: 1,
+    regimeChange: 1,
+    seasonality: 1,
     lclu: 1,
     populationDensity: 1,
     soilTexture: 1,
@@ -98,6 +102,8 @@ export const AppProvider = ({ children }) => {
   const [layerData, setLayerData] = useState({
     water: null,
     flood: null,
+    regimeChange: null,
+    seasonality: null,
     lclu: null,
     populationDensity: null,
     soilTexture: null,
@@ -185,6 +191,8 @@ export const AppProvider = ({ children }) => {
     setLayerOpacity({
       flood: 1,
       water: 1,
+      regimeChange: 1,
+      seasonality: 1,
       lclu: 1,
       populationDensity: 1,
       soilTexture: 1,
@@ -195,6 +203,16 @@ export const AppProvider = ({ children }) => {
   // Update layer data from API response
   const updateLayerData = useCallback((data) => {
     setLayerData({
+      regimeChange: data.eeMapURLRegimeChange ? {
+        mapId: data.eeMapIdRegimeChange,
+        token: data.eeTokenRegimeChange,
+        tileUrl: data.eeMapURLRegimeChange
+      } : null,
+      seasonality: data.eeMapURLSeasonality ? {
+        mapId: data.eeMapIdSeasonality,
+        token: data.eeTokenSeasonality,
+        tileUrl: data.eeMapURLSeasonality
+      } : null,
       water: data.eeMapURLWater ? { 
         mapId: data.eeMapIdWater, 
         token: data.eeTokenWater, 
@@ -234,8 +252,10 @@ export const AppProvider = ({ children }) => {
     setIsResultVisible(true);
     setWarning('');
     setLayerData({
+      seasonality: null,
       water: null,
       flood: null,
+      regimeChange: null,
       lclu: null,
       populationDensity: null,
       soilTexture: null,

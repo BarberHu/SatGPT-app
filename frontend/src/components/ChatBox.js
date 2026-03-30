@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
+import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, getWaterRegimeChangeMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams } from '../utils/aoi';
 import { CopilotChat } from "@copilotkit/react-ui";
 import { useCopilotContext } from "@copilotkit/react-core";
@@ -23,6 +23,12 @@ const SUGGESTIONS_HOTSPOT = [
   'Tell me about the 2010 to 2020 Bangkok floods',
   'Provide information regarding floods occurring in North India between 2015 and 2021',
   'Inform me about the floods in Jakarta spanning from 2007 to 2020',
+];
+
+const SUGGESTIONS_REGIME_CHANGE = [
+  'Show long-term water regime changes around Tonle Sap',
+  'Diagnose historical water regime transitions in the Nile Delta',
+  'Map permanent and seasonal water changes for this AOI',
 ];
 
 function ChatBox() {
@@ -61,7 +67,12 @@ function ChatBox() {
     trackUxEvent('agent_new_chat', { mode: chatMode });
   };
 
-  const suggestions = dataType === 'floodHotspot' ? SUGGESTIONS_HOTSPOT : SUGGESTIONS;
+  const suggestions =
+    dataType === 'floodHotspot'
+      ? SUGGESTIONS_HOTSPOT
+      : dataType === 'waterRegimeChange'
+      ? SUGGESTIONS_REGIME_CHANGE
+      : SUGGESTIONS;
 
   const handleInputChange = (e) => {
     setChatInput(e.target.value);
@@ -89,7 +100,7 @@ function ChatBox() {
   };
 
   const handleSubmit = async () => {
-    if (!chatInput.trim()) {
+    if (!chatInput.trim() && dataType !== 'waterRegimeChange') {
       setError('* Please Enter the Valid Prompt to Proceed');
       return;
     }
@@ -104,6 +115,30 @@ function ChatBox() {
     setError('');
 
     try {
+      if (dataType === 'waterRegimeChange') {
+        const params = buildAskMapRequestParams(selectedAOI, {
+          time_start: '1984-03-16',
+          time_end: '2021-12-31',
+        });
+
+        const mapData = await getWaterRegimeChangeMap(params);
+        updateLayerData(mapData);
+        setGptResponse(null);
+        setResultText('Water Regime Change diagnoses long-term hydrologic transition using the JRC Global Surface Water transition classes. It highlights where water has become more permanent, more seasonal, or has been lost over the long-term record.');
+
+        const codeSnippet = createCodeSnippet(params, 'water_regime_change');
+        const blob = new Blob([codeSnippet], { type: 'text/javascript' });
+        const nextUrl = URL.createObjectURL(blob);
+        setGeeCodeUrl((previousUrl) => {
+          if (previousUrl) {
+            URL.revokeObjectURL(previousUrl);
+          }
+          return nextUrl;
+        });
+        setChatInput('');
+        return;
+      }
+
       const gptResult = await sendChatMessage(chatInput);
       const parsedResponse = JSON.parse(gptResult.message);
       const responseData = parsedResponse.response[0];

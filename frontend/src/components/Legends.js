@@ -19,6 +19,8 @@ function Legends() {
 
       {/* LCLU and Color Range Panel */}
       <div className="lclu-color-range-container">
+        {dataType === 'waterRegimeChange' && layerVisibility.regimeChange && <RegimeChangeLegend />}
+        {layerVisibility.seasonality && <SeasonalityLegend />}
         {layerVisibility.lclu && <LCLULegend />}
         {dataType === 'floodHotspot' && <ColorRangeLegend />}
       </div>
@@ -99,6 +101,49 @@ function LCLULegend() {
         <div key={index} className="lclu-container">
           <div className="color-box" style={{ backgroundColor: lclu.color }}></div>
           <span>{lclu.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SeasonalityLegend() {
+  const ranges = [
+    { color: '#f7fcf0', label: '1-2 months' },
+    { color: '#ccebc5', label: '3-5 months' },
+    { color: '#7bccc4', label: '6-8 months' },
+    { color: '#2b8cbe', label: '9-11 months' },
+    { color: '#084081', label: '12 months' },
+  ];
+
+  return (
+    <div id="seasonalityPanel" className="color-range-panel">
+      <p><b>Seasonality (months/year)</b></p>
+      {ranges.map((range, index) => (
+        <div key={index} className="color-range-container">
+          <div className="color-box" style={{ backgroundColor: range.color }}></div>
+          <span>{range.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RegimeChangeLegend() {
+  const classes = [
+    { color: '#00008B', label: 'New Permanent Water' },
+    { color: '#f4a261', label: 'Lost Permanent Water' },
+    { color: '#FD0303', label: 'New Seasonal Water' },
+    { color: '#ffa9bb', label: 'Lost Seasonal Water' },
+  ];
+
+  return (
+    <div id="regimeChangePanel" className="color-range-panel">
+      <p><b>Water Regime Change</b></p>
+      {classes.map((item, index) => (
+        <div key={index} className="color-range-container">
+          <div className="color-box" style={{ backgroundColor: item.color }}></div>
+          <span>{item.label}</span>
         </div>
       ))}
     </div>
