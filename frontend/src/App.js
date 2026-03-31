@@ -7,7 +7,6 @@ import ResultBox from './components/ResultBox';
 import Legends from './components/Legends';
 import Modals from './components/Modals';
 import Spinner from './components/Spinner';
-import FeedbackWidget from './components/FeedbackWidget';
 import { useAppContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
 
@@ -50,7 +49,6 @@ function App() {
         </div>
         <Modals />
         <Spinner />
-        <FeedbackWidget />
       </div>
     </CopilotKit>
   );
