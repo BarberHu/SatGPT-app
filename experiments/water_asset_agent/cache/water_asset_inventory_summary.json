@@ -1,0 +1,13 @@
+{
+  "source": "https://developers.google.com/earth-engine/datasets/tags/water?hl=zh-cn",
+  "generated_at": "2026-04-07T08:36:30Z",
+  "total_assets": 89,
+  "assets_with_official_recipe": 30,
+  "assets_with_band_metadata": 15,
+  "assets_with_official_example_code": 76,
+  "by_asset_type": {
+    "FeatureCollection": 29,
+    "Image": 12,
+    "ImageCollection": 48
+  }
+}
