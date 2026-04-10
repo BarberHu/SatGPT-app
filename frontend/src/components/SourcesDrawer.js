@@ -1,8 +1,3 @@
-/**
- * 来源侧边栏组件
- * 显示洪水事件的信息来源
- */
-
 import React from 'react';
 import { X, ExternalLink, Globe } from 'lucide-react';
 import './SourcesDrawer.css';
@@ -30,16 +25,23 @@ function SourcesDrawer({ sources, isOpen, onClose }) {
                 <li key={index} className="source-item">
                   <span className="source-number">{index + 1}</span>
                   <div className="source-info">
-                    <a 
-                      href={source.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="source-title"
-                    >
-                      {source.title}
-                      <ExternalLink size={12} />
-                    </a>
-                    <span className="source-url">{source.url}</span>
+                    {source.url ? (
+                      <a
+                        href={source.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="source-title"
+                      >
+                        {source.title}
+                        <ExternalLink size={12} />
+                      </a>
+                    ) : (
+                      <span className="source-title">{source.title}</span>
+                    )}
+                    {source.asset_id && <span className="source-url">{source.asset_id}</span>}
+                    {source.url && <span className="source-url">{source.url}</span>}
+                    {source.summary && <span className="source-url">{source.summary}</span>}
+                    {source.notes && <span className="source-url">{source.notes}</span>}
                   </div>
                 </li>
               ))}

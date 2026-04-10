@@ -3,7 +3,7 @@ FastAPI 后端服务 - 集成 CopilotKit 和 LangGraph
 使用 LangGraphAGUIAgent 作为智能体与 CopilotKit 的连接方式
 """
 import os
-from typing import Optional
+from typing import Any, AsyncGenerator, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -15,6 +15,7 @@ import uvicorn
 # CopilotKit AG-UI 集成
 from copilotkit import LangGraphAGUIAgent
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
+from ag_ui_langgraph.types import State
 from ag_ui.core import RunStartedEvent
 
 # 本地模块
@@ -58,6 +59,17 @@ class PatchedLangGraphAGUIAgent(LangGraphAGUIAgent):
         # 第4步: 把修改后的结果返回给 _handle_stream_events
         # 最终事件流变成: RunStartedEvent(来自148行) → interrupt → RunFinishedEvent ✅
         return result
+
+    async def _handle_single_event(self, event: Any, state: State) -> AsyncGenerator[str, None]:
+        try:
+            async for event_str in super()._handle_single_event(event, state):
+                yield event_str
+        except AttributeError as exc:
+            error_text = str(exc)
+            if "tool_call_id" in error_text:
+                print(f"[ag-ui] skipped malformed tool event: {error_text}")
+                return
+            raise
 
 load_dotenv()
 
@@ -103,7 +115,7 @@ add_langgraph_fastapi_endpoint(
     app=app,
     agent=PatchedLangGraphAGUIAgent(
         name="flood_agent",
-        description="洪水事件分析智能体，可以查询洪水事件信息、提取关键日期、生成洪水报告",
+        description="Flood event analysis agent with integrated AOI confirmation and water layer selection.",
         graph=graph,
     ),
     path="/agent",

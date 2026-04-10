@@ -20,7 +20,7 @@ http_proxy = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
 if http_proxy:
     os.environ["HTTP_PROXY"] = http_proxy
     os.environ["HTTPS_PROXY"] = http_proxy
-    print(f"🌐 使用代理: {http_proxy}")
+    print(f"[proxy] 使用代理: {http_proxy}")
 
 
 class GEEService:
@@ -44,15 +44,15 @@ class GEEService:
                     key_file=credentials_path
                 )
                 ee.Initialize(credentials, project=self.project_id)
-                print(f"✅ Earth Engine 使用服务账户初始化成功 (project: {self.project_id})")
+                print(f"[gee] Earth Engine 使用服务账户初始化成功 (project: {self.project_id})")
             else:
                 # 使用默认认证 (需要先运行 ee.Authenticate())
                 ee.Initialize(project=self.project_id)
-                print(f"✅ Earth Engine 使用默认认证初始化成功 (project: {self.project_id})")
+                print(f"[gee] Earth Engine 使用默认认证初始化成功 (project: {self.project_id})")
             
             self.initialized = True
         except Exception as e:
-            print(f"❌ Earth Engine 初始化失败: {e}")
+            print(f"[gee] Earth Engine 初始化失败: {e}")
             print("提示: 请确保已设置 GOOGLE_APPLICATION_CREDENTIALS 或先运行 ee.Authenticate()")
             self.initialized = False
     

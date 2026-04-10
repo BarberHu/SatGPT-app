@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "defaults": {
+    "enabled": false
+  },
+  "assets": [
+    {
+      "asset_id": "GLOBAL_FLOOD_DB/MODIS_EVENTS/V1",
+      "enabled": true,
+      "title": "Global Flood Database",
+      "priority": 100,
+      "themes": ["flood", "surface_water"],
+      "keywords": ["flood", "event", "historical", "extent", "modis", "inundation"],
+      "summary": "Historical flood event archive derived from MODIS, covering recorded flood extents and timing from 2000 to 2018.",
+      "notes": "Best for retrospective flood-event lookup rather than near-real-time monitoring."
+    },
+    {
+      "asset_id": "OPERA/DSWX/L3_V1/S1",
+      "enabled": true,
+      "title": "OPERA DSWx-S1",
+      "priority": 95,
+      "themes": ["surface_water", "flood"],
+      "keywords": ["sentinel-1", "sar", "radar", "dynamic water", "recent flood"],
+      "summary": "Dynamic Surface Water Extent from Sentinel-1 SAR, suitable for recent flood and surface-water mapping under cloudy conditions.",
+      "notes": "Strong choice for near-real-time flood mapping and all-weather monitoring."
+    },
+    {
+      "asset_id": "OPERA/DSWX/L3_V1/HLS",
+      "enabled": true,
+      "title": "OPERA DSWx-HLS",
+      "priority": 90,
+      "themes": ["surface_water"],
+      "keywords": ["landsat", "sentinel-2", "optical", "dynamic water", "surface water"],
+      "summary": "Dynamic Surface Water Extent from Harmonized Landsat Sentinel imagery, useful when optical conditions are good.",
+      "notes": "Prefer this for clean optical scenes and visually interpretable water boundaries."
+    },
+    {
+      "asset_id": "JRC/GSW1_4/GlobalSurfaceWater",
+      "enabled": true,
+      "title": "JRC Global Surface Water",
+      "priority": 88,
+      "themes": ["surface_water"],
+      "keywords": ["occurrence", "seasonality", "transition", "long-term water", "history"],
+      "summary": "Long-term global surface-water statistics, including occurrence, seasonality, and transition metrics.",
+      "notes": "Use this for multi-year water persistence and long-term change patterns."
+    },
+    {
+      "asset_id": "JRC/GSW1_4/MonthlyHistory",
+      "enabled": true,
+      "title": "JRC Monthly Water History",
+      "priority": 86,
+      "themes": ["surface_water"],
+      "keywords": ["monthly", "history", "water", "surface water", "time series"],
+      "summary": "Monthly surface-water history time series for revisiting how water presence changes month by month.",
+      "notes": "Useful for monthly retrospective analysis rather than instantaneous event detection."
+    },
+    {
+      "asset_id": "JRC/GSW1_4/MonthlyRecurrence",
+      "enabled": true,
+      "title": "JRC Monthly Water Recurrence",
+      "priority": 84,
+      "themes": ["surface_water"],
+      "keywords": ["monthly", "recurrence", "water frequency", "climatology"],
+      "summary": "Monthly recurrence product describing how often water returns in each month across the historical record.",
+      "notes": "Best for understanding seasonality, recurrence, and water stability."
+    },
+    {
+      "asset_id": "JRC/GSW1_4/YearlyHistory",
+      "enabled": true,
+      "title": "JRC Yearly Water History",
+      "priority": 82,
+      "themes": ["surface_water"],
+      "keywords": ["yearly", "history", "annual", "water classification"],
+      "summary": "Annual surface-water history classes for comparing water extent and persistence across years.",
+      "notes": "A compact option when the question is framed at yearly resolution."
+    },
+    {
+      "asset_id": "GLCF/GLS_WATER",
+      "enabled": true,
+      "title": "GLCF Global Inland Water",
+      "priority": 75,
+      "themes": ["surface_water"],
+      "keywords": ["inland water", "lakes", "rivers", "reservoir"],
+      "summary": "Global inland-water product for quickly locating lakes, rivers, and reservoirs.",
+      "notes": "Useful as a broad reference layer for inland-water distribution."
+    },
+    {
+      "asset_id": "USGS/WBD/2017/HUC04",
+      "enabled": true,
+      "title": "USGS WBD HUC04",
+      "priority": 60,
+      "themes": ["watershed", "surface_water"],
+      "keywords": ["watershed", "basin", "huc", "boundary", "us"],
+      "summary": "US watershed boundary layer at the HUC04 regional basin level.",
+      "notes": "Use when the question is about basin boundaries or watershed context in the United States."
+    },
+    {
+      "asset_id": "USGS/WBD/2017/HUC10",
+      "enabled": true,
+      "title": "USGS WBD HUC10",
+      "priority": 62,
+      "themes": ["watershed", "surface_water"],
+      "keywords": ["watershed", "subbasin", "huc", "boundary", "us"],
+      "summary": "US watershed boundary layer at the HUC10 sub-basin level.",
+      "notes": "A better fit for medium-scale watershed-unit analysis in the United States."
+    },
+    {
+      "asset_id": "USGS/WBD/2017/HUC12",
+      "enabled": true,
+      "title": "USGS WBD HUC12",
+      "priority": 64,
+      "themes": ["watershed", "surface_water"],
+      "keywords": ["watershed", "subwatershed", "huc", "boundary", "us"],
+      "summary": "US watershed boundary layer at the HUC12 subwatershed level.",
+      "notes": "Use this when you need fine-grained watershed boundaries in the United States."
+    }
+  ]
+}

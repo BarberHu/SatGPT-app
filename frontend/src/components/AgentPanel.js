@@ -1,13 +1,6 @@
-/**
- * Agent Control Panel Component
- * Displays flood agent controls: date selection, imagery type, layers, etc.
- * Chat interface is now in ChatBox component
- * Supports Human-in-the-Loop (HITL)
- */
-
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useCoAgent, useLangGraphInterrupt, useCopilotMessagesContext } from "@copilotkit/react-core";
+import { useCoAgent, useCopilotMessagesContext, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import SourcesDrawer from './SourcesDrawer';
@@ -17,7 +10,6 @@ import { buildAoiFromAgentState } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 import './AgentPanel.css';
 
-// FloodAgent 默认状态
 const defaultAgentState = {
   event: null,
   event_description: null,
@@ -30,55 +22,58 @@ const defaultAgentState = {
   coordinates: null,
   bounds: null,
   geojson: null,
+  aoi_source: null,
   search_sources: null,
   gee_code: null,
   is_valid_flood_query: false,
+  agent_intent: null,
+  query_themes: [],
+  recommended_assets: [],
+  selected_asset_ids: [],
+  water_asset_layers: [],
+  token_usage: [],
+  token_cost_summary: {},
 };
 
-// Download report as Markdown file
-function downloadReport(report, eventName) {
-  const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
+const extractMessageText = (content) => {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => (typeof item === 'string' ? item : item?.text || ''))
+      .filter(Boolean)
+      .join('\n');
+  }
+  return content?.text || JSON.stringify(content || '');
+};
+
+const downloadTextFile = (content, filename, mimeType) => {
+  const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${eventName || 'flood_analysis_report'}_${new Date().toISOString().split('T')[0]}.md`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-}
+};
 
-// Download GEE JavaScript code file
-function downloadGEECode(code, eventName) {
-  const blob = new Blob([code], { type: 'text/javascript;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${(eventName || 'flood_analysis').replace(/\s+/g, '_')}_GEE_${new Date().toISOString().split('T')[0]}.js`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
+const InfoPill = ({ children, title }) => (
+  <span className="dataset-badge dataset-badge-muted" title={title || ''}>{children}</span>
+);
 
-/**
- * 影像信息图标组件
- * 显示每种影像类型在各个时期的元数据（来源、拼接、可用性等）
- */
-function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
+function DatasetInfoIcon({ asset }) {
   const [showPopover, setShowPopover] = useState(false);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
-  const [copiedId, setCopiedId] = useState(null);
   const popoverRef = useRef(null);
   const iconRef = useRef(null);
 
-  // 点击外部关闭 popover
   useEffect(() => {
-    if (!showPopover) return;
-    const handleClickOutside = (e) => {
+    if (!showPopover) return undefined;
+    const handleClickOutside = (event) => {
       if (
-        popoverRef.current && !popoverRef.current.contains(e.target) &&
-        iconRef.current && !iconRef.current.contains(e.target)
+        popoverRef.current && !popoverRef.current.contains(event.target) &&
+        iconRef.current && !iconRef.current.contains(event.target)
       ) {
         setShowPopover(false);
       }
@@ -87,386 +82,95 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showPopover]);
 
-  // 复制到剪贴板
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedId(text);
-      setTimeout(() => setCopiedId(null), 1500);
-    }).catch(() => {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopiedId(text);
-      setTimeout(() => setCopiedId(null), 1500);
-    });
-  };
-
-  // 计算 popover 位置
-  const handleTogglePopover = (e) => {
-    e.stopPropagation();
+  const handleToggle = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     if (!showPopover && iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect();
-      const popoverWidth = 290;
-      const popoverHeight = 380;
-      // 默认在图标右侧显示
+      const popoverWidth = 310;
+      const popoverHeight = 280;
       let left = rect.right + 8;
-      let top = rect.top - 10;
-      // 如果右边放不下，放到左侧
-      if (left + popoverWidth > window.innerWidth - 10) {
-        left = rect.left - popoverWidth - 8;
-      }
-      // 如果左边也放不下，居中显示
-      if (left < 10) {
-        left = Math.max(10, (window.innerWidth - popoverWidth) / 2);
-      }
-      // 如果底部超出，往上调
-      if (top + popoverHeight > window.innerHeight - 10) {
-        top = window.innerHeight - popoverHeight - 10;
-      }
+      let top = rect.top - 8;
+      if (left + popoverWidth > window.innerWidth - 10) left = rect.left - popoverWidth - 8;
+      if (left < 10) left = Math.max(10, (window.innerWidth - popoverWidth) / 2);
+      if (top + popoverHeight > window.innerHeight - 10) top = window.innerHeight - popoverHeight - 10;
       if (top < 10) top = 10;
       setPopoverPos({ top, left });
     }
-    setShowPopover(!showPopover);
+    setShowPopover((value) => !value);
   };
 
-  // 当前选中时期的影像数据
-  const currentPeriodData = imageryData?.[selectedPeriod]?.[type];
-  const hasError = currentPeriodData?.error;
-
-  // 汇总三个时期的信息
-  const allPeriodsInfo = [
-    { key: 'pre_date', label: 'Pre-Flood' },
-    { key: 'peek_date', label: 'Peak' },
-    { key: 'after_date', label: 'Post-Flood' },
-  ].map(({ key, label }) => ({
-    key,
-    label,
-    data: imageryData?.[key]?.[type],
-  }));
-
-  // 统计无影像的时期数量
-  const missingCount = allPeriodsInfo.filter(p => p.data?.error || p.data?.image_count === 0).length;
-
-  const popoverContent = showPopover ? createPortal(
+  const popover = showPopover ? createPortal(
     <div
-      className="imagery-info-popover"
+      className="dataset-info-popover"
       ref={popoverRef}
       style={{ top: popoverPos.top, left: popoverPos.left }}
     >
       <div className="popover-header">
-        <span className="popover-title">
-          {type === 'sentinel2' ? '🌍 Sentinel-2 Optical' : '📡 Sentinel-1 SAR'}
-        </span>
-        <button className="popover-close" onClick={() => setShowPopover(false)}>✕</button>
-      </div>
-      <div className="popover-body">
-        {allPeriodsInfo.map(({ key, label, data }) => (
-          <div key={key} className={`period-info-block ${selectedPeriod === key ? 'current' : ''}`}>
-            <div className="period-info-header">
-              <span className="period-info-label">{label}</span>
-              {data?.error ? (
-                <span className="period-status-badge error">N/A</span>
-              ) : (
-                <span className="period-status-badge success">Available</span>
-              )}
-            </div>
-            {data?.error ? (
-              <div className="no-imagery-detail">
-                <div className="no-imagery-msg">⚠️ {data.error}</div>
-                {data.search_range && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Search Range</span>
-                    <span className="meta-value">{data.search_range}</span>
-                  </div>
-                )}
-              </div>
-            ) : data ? (
-              <div className="imagery-detail">
-                <div className="imagery-meta-row">
-                  <span className="meta-label">Date</span>
-                  <span className="meta-value">{data.date || '-'}</span>
-                </div>
-                {data.requested_date && data.date !== data.requested_date && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Requested</span>
-                    <span className="meta-value">{data.requested_date}</span>
-                  </div>
-                )}
-                <div className="imagery-meta-row">
-                  <span className="meta-label">Satellite</span>
-                  <span className="meta-value">{data.spacecraft || data.type || (type === 'sentinel2' ? 'Sentinel-2' : 'Sentinel-1')}</span>
-                </div>
-                <div className="imagery-meta-row">
-                  <span className="meta-label">Mosaic</span>
-                  <span className="meta-value">
-                    {data.mosaic ? `Yes (${data.image_count} tiles)` : 'Single scene'}
-                  </span>
-                </div>
-                {data.actual_date_range && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Date Range</span>
-                    <span className="meta-value">{data.actual_date_range}</span>
-                  </div>
-                )}
-                {data.cloud_cover !== undefined && data.cloud_cover !== null && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Cloud</span>
-                    <span className="meta-value">{Number(data.cloud_cover).toFixed(1)}%</span>
-                  </div>
-                )}
-                {data.polarization && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Polarization</span>
-                    <span className="meta-value">{data.polarization}</span>
-                  </div>
-                )}
-                {data.orbit_pass && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Orbit</span>
-                    <span className="meta-value">{data.orbit_pass}</span>
-                  </div>
-                )}
-                {data.resolution && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Resolution</span>
-                    <span className="meta-value">{data.resolution}m</span>
-                  </div>
-                )}
-                {data.mgrs_tile && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">MGRS Tile</span>
-                    <span className="meta-value">{data.mgrs_tile}</span>
-                  </div>
-                )}
-                {data.id && data.id !== 'unknown' && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Image ID</span>
-                    <span
-                      className={`meta-value id-value clickable ${copiedId === data.id ? 'copied' : ''}`}
-                      title={`${data.id}\nClick to copy`}
-                      onClick={() => copyToClipboard(data.id)}
-                    >
-                      {copiedId === data.id ? '✓ Copied!' : data.id}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="no-imagery-detail">
-                <div className="no-imagery-msg">No data available</div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>,
-    document.body
-  ) : null;
-
-  return (
-    <div className="imagery-info-wrapper">
-      <span
-        ref={iconRef}
-        className={`imagery-info-icon ${hasError ? 'warning' : missingCount > 0 ? 'caution' : 'ok'}`}
-        onClick={handleTogglePopover}
-        title={hasError ? 'No imagery available for this period. Click for details.' : 'Click to view imagery source info'}
-      >
-        {hasError ? '!' : missingCount > 0 ? '!' : 'i'}
-      </span>
-      {popoverContent}
-    </div>
-  );
-}
-
-/**
- * Layer data source metadata (static info for each analysis layer)
- */
-const LAYER_META = {
-  flood_detection: {
-    icon: '🌊',
-    title: 'Flood Detection',
-    source: 'Sentinel-1 GRD (C-band SAR)',
-    method: 'Otsu Change Detection',
-    resolution: '10m',
-    auxiliary: 'JRC Global Surface Water v1.4',
-    description: 'Detects newly flooded areas by comparing pre-flood and peak SAR backscatter, using Otsu thresholding on the change index. Permanent water bodies are excluded via JRC occurrence data.',
-  },
-  population: {
-    icon: '👥',
-    title: 'Population Impact',
-    source: 'WorldPop — Global 100m Population',
-    method: 'Zonal Statistics',
-    resolution: '100m',
-    auxiliary: null,
-    description: 'Estimates affected population by overlaying the flood mask on WorldPop gridded population density.',
-  },
-  urban: {
-    icon: '🏙️',
-    title: 'Built-up Area',
-    source: 'GHSL Built-up Surface 2020 (JRC)',
-    method: 'Zonal Statistics',
-    resolution: '100m',
-    auxiliary: null,
-    description: 'Calculates the flooded built-up area using the Global Human Settlement Layer.',
-  },
-  landcover: {
-    icon: '🌳',
-    title: 'Land Cover',
-    source: 'ESA WorldCover 2021 (v200)',
-    method: 'Per-class Area Calculation',
-    resolution: '10m',
-    auxiliary: null,
-    description: 'Breaks down flooded area by ESA WorldCover classes (cropland, forest, built-up, grassland, etc.).',
-  },
-};
-
-/**
- * Analysis Layer info icon — shows data source & stats for each layer
- */
-function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
-  const [showPopover, setShowPopover] = useState(false);
-  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
-  const popoverRef = useRef(null);
-  const iconRef = useRef(null);
-
-  const meta = LAYER_META[layerType];
-
-  // Close popover on outside click
-  useEffect(() => {
-    if (!showPopover) return;
-    const handleClickOutside = (e) => {
-      if (
-        popoverRef.current && !popoverRef.current.contains(e.target) &&
-        iconRef.current && !iconRef.current.contains(e.target)
-      ) {
-        setShowPopover(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showPopover]);
-
-  if (!meta) return null;
-
-  // Compute popover position
-  const handleToggle = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!showPopover && iconRef.current) {
-      const rect = iconRef.current.getBoundingClientRect();
-      const pw = 300, ph = 320;
-      let left = rect.right + 8;
-      let top = rect.top - 10;
-      if (left + pw > window.innerWidth - 10) left = rect.left - pw - 8;
-      if (left < 10) left = Math.max(10, (window.innerWidth - pw) / 2);
-      if (top + ph > window.innerHeight - 10) top = window.innerHeight - ph - 10;
-      if (top < 10) top = 10;
-      setPopoverPos({ top, left });
-    }
-    setShowPopover(!showPopover);
-  };
-
-  // Build dynamic stats rows
-  const statsRows = [];
-  if (layerType === 'flood_detection' && floodDetectionData) {
-    if (floodDetectionData.stats?.flood_area_km2 != null) {
-      statsRows.push({ label: 'Flooded Area', value: `${floodDetectionData.stats.flood_area_km2} km²` });
-    }
-    if (floodDetectionData.pre_date) statsRows.push({ label: 'Pre-flood Date', value: floodDetectionData.pre_date });
-    if (floodDetectionData.peek_date) statsRows.push({ label: 'Peak Date', value: floodDetectionData.peek_date });
-  }
-  if (layerType === 'population' && impactData?.population && !impactData.population.error) {
-    const p = impactData.population;
-    statsRows.push({ label: 'Affected', value: `${(p.affected || 0).toLocaleString()} people` });
-    statsRows.push({ label: 'Total in Region', value: `${(p.total || 0).toLocaleString()} people` });
-    if (p.percentage != null) statsRows.push({ label: 'Percentage', value: `${p.percentage}%` });
-    if (p.data_source) statsRows.push({ label: 'Data Year', value: p.data_source });
-  }
-  if (layerType === 'urban' && impactData?.urban && !impactData.urban.error) {
-    const u = impactData.urban;
-    statsRows.push({ label: 'Affected Built-up', value: `${u.affected_area_km2} km²` });
-    statsRows.push({ label: 'Total Built-up', value: `${u.total_area_km2} km²` });
-    if (u.percentage != null) statsRows.push({ label: 'Percentage', value: `${u.percentage}%` });
-  }
-  if (layerType === 'landcover' && impactData?.landcover && !impactData.landcover.error) {
-    const lc = impactData.landcover;
-    if (lc.breakdown) {
-      Object.entries(lc.breakdown).forEach(([key, val]) => {
-        statsRows.push({ label: key.charAt(0).toUpperCase() + key.slice(1), value: `${val.area_km2} km²` });
-      });
-    }
-  }
-
-  const hasStats = statsRows.length > 0;
-
-  const popoverContent = showPopover ? createPortal(
-    <div
-      className="layer-info-popover"
-      ref={popoverRef}
-      style={{ top: popoverPos.top, left: popoverPos.left }}
-    >
-      <div className="popover-header">
-        <span className="popover-title">{meta.icon} {meta.title}</span>
+        <span className="popover-title">{asset.title}</span>
         <button className="popover-close" onClick={() => setShowPopover(false)}>✕</button>
       </div>
       <div className="popover-body">
         <div className="layer-meta-section">
-          <div className="layer-meta-subtitle">Data Source</div>
+          <div className="layer-meta-subtitle">Dataset</div>
           <div className="imagery-meta-row">
-            <span className="meta-label">Source</span>
-            <span className="meta-value">{meta.source}</span>
+            <span className="meta-label">Asset ID</span>
+            <span className="meta-value">{asset.asset_id}</span>
           </div>
-          <div className="imagery-meta-row">
-            <span className="meta-label">Method</span>
-            <span className="meta-value">{meta.method}</span>
-          </div>
-          <div className="imagery-meta-row">
-            <span className="meta-label">Resolution</span>
-            <span className="meta-value">{meta.resolution}</span>
-          </div>
-          {meta.auxiliary && (
+          {asset.asset_type && (
             <div className="imagery-meta-row">
-              <span className="meta-label">Auxiliary</span>
-              <span className="meta-value">{meta.auxiliary}</span>
+              <span className="meta-label">Type</span>
+              <span className="meta-value">{asset.asset_type}</span>
+            </div>
+          )}
+          {asset.temporal_type && (
+            <div className="imagery-meta-row">
+              <span className="meta-label">Temporal</span>
+              <span className="meta-value">{asset.temporal_type}</span>
+            </div>
+          )}
+          {!!asset.themes?.length && (
+            <div className="imagery-meta-row">
+              <span className="meta-label">Themes</span>
+              <span className="meta-value">{asset.themes.join(', ')}</span>
             </div>
           )}
         </div>
-        {hasStats && (
+        {asset.summary && (
           <div className="layer-meta-section">
-            <div className="layer-meta-subtitle">Statistics</div>
-            {statsRows.map((row, i) => (
-              <div key={i} className="imagery-meta-row">
-                <span className="meta-label">{row.label}</span>
-                <span className="meta-value">{row.value}</span>
-              </div>
-            ))}
+            <div className="layer-meta-subtitle">Summary</div>
+            <div className="layer-meta-description dataset-popover-copy">{asset.summary}</div>
           </div>
         )}
-        <div className="layer-meta-description">{meta.description}</div>
+        {asset.notes && (
+          <div className="layer-meta-section">
+            <div className="layer-meta-subtitle">Notes</div>
+            <div className="layer-meta-description dataset-popover-copy">{asset.notes}</div>
+          </div>
+        )}
       </div>
     </div>,
     document.body
   ) : null;
 
   return (
-    <span
-      ref={iconRef}
-      className="layer-info-icon"
-      onClick={handleToggle}
-      title="Click to view data source info"
-    >
-      ⓘ
-      {popoverContent}
-    </span>
+    <>
+      <span
+        ref={iconRef}
+        className="dataset-info-icon"
+        onClick={handleToggle}
+        title="View dataset details"
+      >
+        !
+      </span>
+      {popover}
+    </>
   );
 }
 
 function AgentPanel() {
-  const { 
-    setFloodAgentState, 
+  const {
+    setFloodAgentState,
     floodAgentState,
     selectedAOI,
     setWarning,
@@ -474,7 +178,6 @@ function AgentPanel() {
     setAgentImageryLoading,
     agentImagery,
     agentImageryLoading,
-    // Agent control states from context
     agentSelectedPeriod,
     setAgentSelectedPeriod,
     agentSelectedType,
@@ -492,44 +195,62 @@ function AgentPanel() {
     agentImpactLoading,
     setAgentImpactLoading,
     agentLayerLoading,
-    agentTileError,
     setAgentTileError,
+    agentTileError,
   } = useAppContext();
-  
-  // Get chat messages from CopilotKit (with safety check)
+
   const messagesContext = useCopilotMessagesContext();
   const messages = messagesContext?.messages || [];
-  
-  // Local UI state (for section expansion only)
-  const [sourcesDrawerOpen, setSourcesDrawerOpen] = useState(false);
+  const { state } = useCoAgent({ name: "flood_agent", initialState: defaultAgentState });
+
+  const [drawerState, setDrawerState] = useState({ open: false, mode: 'search' });
   const [expandedSections, setExpandedSections] = useState({
     event: true,
+    datasets: true,
+    impact: false,
     dates: false,
     imagery: false,
     layers: false,
-    impact: false,
     chatHistory: false,
-  });
-
-  const { state } = useCoAgent({
-    name: "flood_agent",
-    initialState: defaultAgentState,
   });
 
   const imageryRequestKeyRef = useRef(null);
   const impactRequestKeyRef = useRef(null);
 
   useEffect(() => {
-    if (state) {
-      setFloodAgentState(state);
-    }
-  }, [state, setFloodAgentState]);
+    if (state) setFloodAgentState(state);
+  }, [setFloodAgentState, state]);
 
   const currentState = state || floodAgentState;
   const effectiveAoi = selectedAOI || buildAoiFromAgentState(currentState, {
     source: 'agent_geocode',
     label: currentState.location || 'Agent-derived boundary',
   });
+
+  const recommendedAssets = useMemo(() => currentState.recommended_assets || [], [currentState.recommended_assets]);
+  const selectedAssetIds = useMemo(() => currentState.selected_asset_ids || [], [currentState.selected_asset_ids]);
+  const selectedAssetSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds]);
+  const waterLayers = currentState.water_asset_layers || [];
+
+  const drawerSources = useMemo(() => {
+    if (drawerState.mode === 'datasets') {
+      return recommendedAssets.map((asset) => ({
+        title: asset.title,
+        url: asset.official_url,
+        asset_id: asset.asset_id,
+        summary: asset.summary,
+        notes: asset.notes,
+      }));
+    }
+    return currentState.search_sources || [];
+  }, [currentState.search_sources, drawerState.mode, recommendedAssets]);
+
+  useEffect(() => {
+    const summary = currentState.token_cost_summary;
+    if (summary?.total_tokens) {
+      console.log('[water-agent-token-summary]', summary);
+    }
+  }, [currentState.token_cost_summary]);
 
   const fetchAgentImagery = useCallback(async (agentState, aoi) => {
     const requestKey = JSON.stringify({
@@ -540,10 +261,7 @@ function AgentPanel() {
       geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
       coordinates: agentState.coordinates || null,
     });
-
-    if (imageryRequestKeyRef.current === requestKey) {
-      return;
-    }
+    if (imageryRequestKeyRef.current === requestKey) return;
 
     imageryRequestKeyRef.current = requestKey;
     impactRequestKeyRef.current = null;
@@ -563,38 +281,16 @@ function AgentPanel() {
         bounds: aoi?.bounds || agentState.bounds || null,
         geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
       });
-
-      if (imageryRequestKeyRef.current !== requestKey) {
-        return;
-      }
-
-      if (result?.success) {
-        setAgentImagery(result.data);
-        setWarning('');
-        trackUxEvent('imagery_request_success', {
-          source: aoi?.source || 'agent',
-          mode: 'agent',
-        });
-      } else {
-        throw new Error('Flood imagery response was not successful.');
-      }
+      if (imageryRequestKeyRef.current !== requestKey) return;
+      if (!result?.success) throw new Error('Flood imagery response was not successful.');
+      setAgentImagery(result.data);
+      setWarning('');
     } catch (error) {
-      console.error('Failed to fetch imagery:', error);
-      if (imageryRequestKeyRef.current !== requestKey) {
-        return;
-      }
-      if (imageryRequestKeyRef.current === requestKey) {
-        imageryRequestKeyRef.current = null;
-      }
+      if (imageryRequestKeyRef.current !== requestKey) return;
+      imageryRequestKeyRef.current = null;
       setWarning(error?.message || 'Flood imagery request failed.');
-      trackUxEvent('imagery_request_fail', {
-        mode: 'agent',
-        error: error?.message || 'Unknown imagery error',
-      });
     } finally {
-      if (imageryRequestKeyRef.current === requestKey) {
-        setAgentImageryLoading(false);
-      }
+      if (imageryRequestKeyRef.current === requestKey) setAgentImageryLoading(false);
     }
   }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentTileError, setWarning]);
 
@@ -603,35 +299,21 @@ function AgentPanel() {
       imageryRequestKeyRef.current = null;
       return;
     }
-
     if (effectiveAoi || currentState.coordinates) {
       fetchAgentImagery(currentState, effectiveAoi);
     }
-  }, [
-    currentState,
-    currentState.pre_date,
-    currentState.peek_date,
-    currentState.after_date,
-    currentState.coordinates,
-    effectiveAoi,
-    fetchAgentImagery,
-  ]);
+  }, [currentState, currentState.pre_date, currentState.peek_date, currentState.after_date, currentState.coordinates, effectiveAoi, fetchAgentImagery]);
 
-  // Fetch flood impact assessment data
   const fetchImpactData = useCallback(async () => {
     if (!currentState.pre_date || !currentState.peek_date) return;
-
     const requestKey = JSON.stringify({
       pre_date: currentState.pre_date,
       peek_date: currentState.peek_date,
       bounds: effectiveAoi?.bounds || currentState.bounds || null,
       geojson: effectiveAoi?.geojson?.geometry || currentState.geojson?.geometry || currentState.geojson || null,
     });
+    if (impactRequestKeyRef.current === requestKey && agentImpactData) return;
 
-    if (impactRequestKeyRef.current === requestKey && agentImpactData) {
-      return;
-    }
-    
     impactRequestKeyRef.current = requestKey;
     setAgentImpactLoading(true);
     setWarning('');
@@ -642,64 +324,35 @@ function AgentPanel() {
         bounds: effectiveAoi?.bounds || currentState.bounds || null,
         geojson: effectiveAoi?.geojson?.geometry || currentState.geojson || null,
       });
-
-      if (impactRequestKeyRef.current !== requestKey) {
-        return;
-      }
-
-      if (result.success) {
-        setAgentImpactData(result.data);
-        setWarning('');
-        trackUxEvent('impact_request_success', {
-          mode: 'agent',
-          source: effectiveAoi?.source || 'agent',
-        });
-      }
+      if (impactRequestKeyRef.current !== requestKey) return;
+      if (result?.success) setAgentImpactData(result.data);
     } catch (error) {
-      console.error('Failed to fetch impact data:', error);
-      if (impactRequestKeyRef.current !== requestKey) {
-        return;
-      }
-      if (impactRequestKeyRef.current === requestKey) {
-        impactRequestKeyRef.current = null;
-      }
+      if (impactRequestKeyRef.current !== requestKey) return;
+      impactRequestKeyRef.current = null;
       setWarning(error?.message || 'Flood impact request failed.');
-      trackUxEvent('impact_request_fail', {
-        mode: 'agent',
-        error: error?.message || 'Unknown impact error',
-      });
     } finally {
-      if (impactRequestKeyRef.current === requestKey) {
-        setAgentImpactLoading(false);
-      }
+      if (impactRequestKeyRef.current === requestKey) setAgentImpactLoading(false);
     }
   }, [agentImpactData, currentState, effectiveAoi, setAgentImpactData, setAgentImpactLoading, setWarning]);
 
-  // Auto-fetch impact data in background as soon as imagery arrives
   useEffect(() => {
     if (!currentState.pre_date || !currentState.peek_date) {
       impactRequestKeyRef.current = null;
       return;
     }
-
-    if (agentImagery && !agentImpactData && !agentImpactLoading) {
-      fetchImpactData();
-    }
+    if (agentImagery && !agentImpactData && !agentImpactLoading) fetchImpactData();
   }, [agentImagery, agentImpactData, agentImpactLoading, currentState.pre_date, currentState.peek_date, fetchImpactData]);
 
-  // Also fetch if user enables an impact layer before data arrived
   useEffect(() => {
     if ((agentShowPopulationLayer || agentShowUrbanLayer || agentShowLandcoverLayer) && !agentImpactData && !agentImpactLoading) {
       fetchImpactData();
     }
   }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, fetchImpactData]);
 
-  // Human-in-the-Loop: Handle LangGraph interrupt events
   useLangGraphInterrupt({
     enabled: ({ eventValue }) => eventValue?.type === "confirm_flood_event",
     render: ({ event, resolve }) => {
       const interruptData = event.value;
-
       return (
         <EventConfirmation
           data={interruptData.data}
@@ -707,13 +360,12 @@ function AgentPanel() {
           onConfirm={(confirmedData) => {
             trackUxEvent('agent_confirmation_confirm', {
               event: confirmedData?.event || interruptData.data?.event || null,
+              selected_count: confirmedData?.selected_asset_ids?.length || 0,
             });
             resolve(JSON.stringify(confirmedData));
           }}
           onCancel={() => {
-            trackUxEvent('agent_confirmation_cancel', {
-              event: interruptData.data?.event || null,
-            });
+            trackUxEvent('agent_confirmation_cancel', { event: interruptData.data?.event || null });
             resolve(JSON.stringify({ cancelled: true }));
           }}
         />
@@ -721,14 +373,11 @@ function AgentPanel() {
     },
   });
 
-  const hasValidDates = currentState.pre_date && currentState.peek_date && currentState.after_date;
-
-  // Toggle section expansion
   const toggleSection = (section) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+    setExpandedSections((previous) => ({ ...previous, [section]: !previous[section] }));
   };
 
-  // Date periods for display
+  const hasValidDates = currentState.pre_date && currentState.peek_date && currentState.after_date;
   const periods = [
     { key: 'pre_date', label: 'Pre-Flood', date: currentState.pre_date },
     { key: 'peek_date', label: 'Peak', date: currentState.peek_date },
@@ -737,14 +386,12 @@ function AgentPanel() {
 
   return (
     <div className="agent-panel-controls">
-      {/* Sources Drawer */}
       <SourcesDrawer
-        sources={currentState.search_sources || []}
-        isOpen={sourcesDrawerOpen}
-        onClose={() => setSourcesDrawerOpen(false)}
+        sources={drawerSources}
+        isOpen={drawerState.open}
+        onClose={() => setDrawerState((previous) => ({ ...previous, open: false }))}
       />
 
-      {/* Event Info Section */}
       <div className={`control-section ${expandedSections.event ? 'expanded' : ''}`}>
         <div className="section-header" onClick={() => toggleSection('event')}>
           <span className="section-icon">📍</span>
@@ -755,58 +402,88 @@ function AgentPanel() {
           <div className="section-body">
             {currentState.event ? (
               <>
-                <div className="info-row">
-                  <span className="info-label">Event:</span>
-                  <span className="info-value">{currentState.event}</span>
+                <div className="info-row"><span className="info-label">Event:</span><span className="info-value">{currentState.event}</span></div>
+                {currentState.location && <div className="info-row"><span className="info-label">Location:</span><span className="info-value">{currentState.location}</span></div>}
+                {currentState.event_description && <div className="info-row description"><span className="info-value">{currentState.event_description}</span></div>}
+                <div className="action-buttons">
+                  {currentState.search_sources?.length > 0 && <button className="action-btn" onClick={() => setDrawerState({ open: true, mode: 'search' })}>Sources ({currentState.search_sources.length})</button>}
+                  {recommendedAssets.length > 0 && <button className="action-btn" onClick={() => setDrawerState({ open: true, mode: 'datasets' })}>Dataset Sources</button>}
+                  {currentState.flood_report && (
+                    <button
+                      className="action-btn"
+                      onClick={() => downloadTextFile(
+                        currentState.flood_report,
+                        `${currentState.event || 'flood_analysis_report'}_${new Date().toISOString().split('T')[0]}.md`,
+                        'text/markdown;charset=utf-8'
+                      )}
+                    >
+                      Download Report
+                    </button>
+                  )}
                 </div>
-                {currentState.location && (
-                  <div className="info-row">
-                    <span className="info-label">Location:</span>
-                    <span className="info-value">{currentState.location}</span>
-                  </div>
-                )}
-                {currentState.event_description && (
-                  <div className="info-row description">
-                    <span className="info-value">{currentState.event_description}</span>
-                  </div>
-                )}
-                {(currentState.search_sources?.length > 0 || currentState.flood_report) && (
-                  <div className="action-buttons">
-                    {currentState.search_sources?.length > 0 && (
-                      <button 
-                        className="action-btn"
-                        onClick={() => setSourcesDrawerOpen(true)}
-                      >
-                        🌐 Sources ({currentState.search_sources.length})
-                      </button>
-                    )}
-                    {currentState.flood_report && (
-                      <button 
-                        className="action-btn"
-                        onClick={() => {
-                          trackUxEvent('export_report', {
-                            event: currentState.event || null,
-                            mode: 'agent',
-                          });
-                          downloadReport(currentState.flood_report, currentState.event);
-                        }}
-                      >
-                        📥 Download Report
-                      </button>
-                    )}
-                  </div>
-                )}
               </>
             ) : (
-              <div className="no-data-hint">
-                <span>💬 Ask about a flood event in the chat below</span>
-              </div>
+              <div className="no-data-hint"><span>Ask about a flood event in the chat first.</span></div>
             )}
           </div>
         )}
       </div>
 
-      {/* Impact Assessment Section */}
+      <div className={`control-section ${expandedSections.datasets ? 'expanded' : ''}`}>
+        <div className="section-header" onClick={() => toggleSection('datasets')}>
+          <span className="section-icon">🗂️</span>
+          <span className="section-title">Recommended Datasets</span>
+          <span className={`expand-icon ${expandedSections.datasets ? 'expanded' : ''}`}>▼</span>
+        </div>
+        {expandedSections.datasets && (
+          <div className="section-body">
+            {recommendedAssets.length > 0 ? (
+              <>
+                <div className="dataset-panel-actions">
+                  <button className="action-btn" onClick={() => setDrawerState({ open: true, mode: 'datasets' })}>View Official Sources</button>
+                </div>
+                <div className="dataset-list compact-dataset-list">
+                  {recommendedAssets.map((asset) => (
+                    <div key={asset.asset_id} className={`dataset-card compact-dataset-card ${selectedAssetSet.has(asset.asset_id) ? 'selected' : ''}`}>
+                      <div className="dataset-card-header">
+                        <div className="dataset-title">{asset.title}</div>
+                        <div className="dataset-header-actions">
+                          <DatasetInfoIcon asset={asset} />
+                          {selectedAssetSet.has(asset.asset_id) && <span className="dataset-status">Selected</span>}
+                        </div>
+                      </div>
+                      <div className="dataset-compact-meta">
+                        {asset.temporal_type && <InfoPill>{asset.temporal_type}</InfoPill>}
+                        {asset.asset_type && <InfoPill>{asset.asset_type}</InfoPill>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {waterLayers.length > 0 && (
+                  <div className="dataset-loaded-group">
+                    <div className="layer-meta-subtitle">Loaded Dataset Layers</div>
+                    <div className="dataset-list">
+                      {waterLayers.map((layer) => (
+                        <div key={layer.layer_id} className="dataset-card selected">
+                          <div className="dataset-card-header">
+                            <div className="dataset-title">{layer.title}</div>
+                            <span className="dataset-status">Loaded</span>
+                          </div>
+                          <div className="dataset-id">{layer.asset_id}</div>
+                          {layer.location && <div className="dataset-note">Focus area: {layer.location}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="no-data-hint"><span>Recommended datasets will appear after the event is confirmed.</span></div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className={`control-section ${expandedSections.impact ? 'expanded' : ''}`}>
         <div className="section-header" onClick={() => toggleSection('impact')}>
           <span className="section-icon">📊</span>
@@ -816,59 +493,24 @@ function AgentPanel() {
         {expandedSections.impact && (
           <div className="section-body">
             {agentImpactLoading ? (
-              <div className="loading-indicator">
-                <span className="spinner">⏳</span> Calculating impact assessment...
-              </div>
+              <div className="loading-indicator"><span className="spinner">⏳</span><span>Calculating impact assessment...</span></div>
             ) : agentImpactData ? (
               <div className="impact-stats">
-                <div className="impact-stat-item">
-                  <span className="impact-icon">🌊</span>
-                  <span className="impact-label">Flooded Area</span>
-                  <span className="impact-value">
-                    {agentImagery?.flood_detection?.stats?.flood_area_km2 || agentImpactData.flood_area?.value?.toFixed(2) || 0} km²
-                  </span>
-                </div>
-                <div className="impact-stat-item">
-                  <span className="impact-icon">👥</span>
-                  <span className="impact-label">Affected Population</span>
-                  <span className="impact-value">
-                    {(agentImpactData.population?.affected || 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="impact-stat-item">
-                  <span className="impact-icon">🏙️</span>
-                  <span className="impact-label">Built-up Flooded</span>
-                  <span className="impact-value">
-                    {agentImpactData.urban?.affected_area_km2?.toFixed(2) || 0} km²
-                  </span>
-                </div>
-                <div className="impact-source">
-                  Data: WorldPop · ESA WorldCover · GHSL
-                </div>
+                <div className="impact-stat-item"><span className="impact-icon">🌊</span><span className="impact-label">Flooded Area</span><span className="impact-value">{agentImagery?.flood_detection?.stats?.flood_area_km2 || agentImpactData.flood_area?.value?.toFixed(2) || 0} km²</span></div>
+                <div className="impact-stat-item"><span className="impact-icon">👥</span><span className="impact-label">Affected Population</span><span className="impact-value">{(agentImpactData.population?.affected || 0).toLocaleString()}</span></div>
+                <div className="impact-stat-item"><span className="impact-icon">🏙️</span><span className="impact-label">Built-up Flooded</span><span className="impact-value">{agentImpactData.urban?.affected_area_km2?.toFixed(2) || 0} km²</span></div>
+                <div className="impact-source">Data: WorldPop · ESA WorldCover · GHSL</div>
               </div>
             ) : (
               <div className="no-impact-data">
-                <p>Enable analysis layers to calculate impact</p>
-                <button 
-                  className="load-impact-btn"
-                  onClick={() => {
-                    trackUxEvent('impact_request_manual', {
-                      mode: 'agent',
-                      event: currentState.event || null,
-                    });
-                    fetchImpactData();
-                  }}
-                  disabled={!currentState?.pre_date || !currentState?.peek_date}
-                >
-                  Calculate Now
-                </button>
+                <p>Enable analysis layers to calculate impact.</p>
+                <button className="load-impact-btn" onClick={fetchImpactData} disabled={!currentState?.pre_date || !currentState?.peek_date}>Calculate Now</button>
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* Date Selection Section */}
       <div className={`control-section ${expandedSections.dates ? 'expanded' : ''}`}>
         <div className="section-header" onClick={() => toggleSection('dates')}>
           <span className="section-icon">📅</span>
@@ -879,29 +521,22 @@ function AgentPanel() {
           <div className="section-body">
             {hasValidDates ? (
               <div className="date-timeline">
-                {periods.map((p, i) => (
-                  <div key={p.key} className="timeline-item">
-                    <button
-                      className={`date-btn ${agentSelectedPeriod === p.key ? 'active' : ''}`}
-                      onClick={() => setAgentSelectedPeriod(p.key)}
-                      disabled={agentLayerLoading['base-imagery']}
-                    >
-                      <span className="period-label">{p.label}</span>
-                      <span className="period-date">{p.date || '-'}</span>
+                {periods.map((period) => (
+                  <div key={period.key} className="timeline-item">
+                    <button className={`date-btn ${agentSelectedPeriod === period.key ? 'active' : ''}`} onClick={() => setAgentSelectedPeriod(period.key)} disabled={agentLayerLoading['base-imagery']}>
+                      <span className="period-label">{period.label}</span>
+                      <span className="period-date">{period.date || '-'}</span>
                     </button>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="no-data-hint">
-                <span>Dates will appear after analyzing an event</span>
-              </div>
+              <div className="no-data-hint"><span>Dates will appear after the event is confirmed.</span></div>
             )}
           </div>
         )}
       </div>
 
-      {/* Imagery Type Section */}
       <div className={`control-section ${expandedSections.imagery ? 'expanded' : ''}`}>
         <div className="section-header" onClick={() => toggleSection('imagery')}>
           <span className="section-icon">🛰️</span>
@@ -912,49 +547,18 @@ function AgentPanel() {
           <div className="section-body">
             <div className="imagery-type-buttons">
               <div className="imagery-type-item">
-                <button
-                  className={`type-btn ${agentSelectedType === 'sentinel2' ? 'active' : ''}`}
-                  onClick={() => setAgentSelectedType('sentinel2')}
-                  disabled={agentLayerLoading['base-imagery']}
-                >
-                  🌍 Optical (S2)
-                </button>
-                {(agentImageryLoading || (agentLayerLoading['base-imagery'] && agentSelectedType === 'sentinel2')) ? (
-                  <span className="imagery-spinner" title="Loading..." />
-                ) : agentImagery ? (
-                  <ImageryInfoIcon
-                    imageryData={agentImagery}
-                    type="sentinel2"
-                    selectedPeriod={agentSelectedPeriod}
-                  />
-                ) : null}
+                <button className={`type-btn ${agentSelectedType === 'sentinel2' ? 'active' : ''}`} onClick={() => setAgentSelectedType('sentinel2')} disabled={agentLayerLoading['base-imagery']}>Optical (S2)</button>
+                {(agentImageryLoading || (agentLayerLoading['base-imagery'] && agentSelectedType === 'sentinel2')) ? <span className="imagery-spinner" title="Loading..." /> : agentImagery?.[agentSelectedPeriod]?.sentinel2?.date ? <InfoPill title={agentImagery?.[agentSelectedPeriod]?.sentinel2?.date}>date</InfoPill> : null}
               </div>
               <div className="imagery-type-item">
-                <button
-                  className={`type-btn ${agentSelectedType === 'sentinel1' ? 'active' : ''}`}
-                  onClick={() => setAgentSelectedType('sentinel1')}
-                  disabled={agentLayerLoading['base-imagery']}
-                >
-                  📡 SAR Radar (S1)
-                </button>
-                {(agentImageryLoading || (agentLayerLoading['base-imagery'] && agentSelectedType === 'sentinel1')) ? (
-                  <span className="imagery-spinner" title="Loading..." />
-                ) : agentImagery ? (
-                  <ImageryInfoIcon
-                    imageryData={agentImagery}
-                    type="sentinel1"
-                    selectedPeriod={agentSelectedPeriod}
-                  />
-                ) : null}
+                <button className={`type-btn ${agentSelectedType === 'sentinel1' ? 'active' : ''}`} onClick={() => setAgentSelectedType('sentinel1')} disabled={agentLayerLoading['base-imagery']}>SAR Radar (S1)</button>
+                {(agentImageryLoading || (agentLayerLoading['base-imagery'] && agentSelectedType === 'sentinel1')) ? <span className="imagery-spinner" title="Loading..." /> : agentImagery?.[agentSelectedPeriod]?.sentinel1?.date ? <InfoPill title={agentImagery?.[agentSelectedPeriod]?.sentinel1?.date}>date</InfoPill> : null}
               </div>
             </div>
-
-    
           </div>
         )}
       </div>
 
-      {/* Analysis Layers Section */}
       <div className={`control-section ${expandedSections.layers ? 'expanded' : ''}`}>
         <div className="section-header" onClick={() => toggleSection('layers')}>
           <span className="section-icon">🗺️</span>
@@ -964,134 +568,19 @@ function AgentPanel() {
         {expandedSections.layers && (
           <div className="section-body">
             <div className="layer-toggles">
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowFloodDetection}
-                    onChange={() => setAgentShowFloodDetection(!agentShowFloodDetection)}
-                  />
-                  <span className="layer-icon">🌊</span>
-                  <span>Flood Detection</span>
-                </label>
-                {agentLayerLoading['flood-detection'] ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="flood_detection"
-                    floodDetectionData={agentImagery?.flood_detection}
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
-              
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowPopulationLayer}
-                    onChange={() => setAgentShowPopulationLayer(!agentShowPopulationLayer)}
-                  />
-                  <span className="layer-icon">👥</span>
-                  <span>Population Impact</span>
-                </label>
-                {(agentLayerLoading['population'] || (agentShowPopulationLayer && agentImpactLoading)) ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="population"
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
-              
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowUrbanLayer}
-                    onChange={() => setAgentShowUrbanLayer(!agentShowUrbanLayer)}
-                  />
-                  <span className="layer-icon">🏙️</span>
-                  <span>Built-up Area</span>
-                </label>
-                {(agentLayerLoading['urban'] || (agentShowUrbanLayer && agentImpactLoading)) ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="urban"
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
-              
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowLandcoverLayer}
-                    onChange={() => setAgentShowLandcoverLayer(!agentShowLandcoverLayer)}
-                  />
-                  <span className="layer-icon">🌳</span>
-                  <span>Land Cover</span>
-                </label>
-                {(agentLayerLoading['landcover'] || (agentShowLandcoverLayer && agentImpactLoading)) ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="landcover"
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
+              <div className="layer-toggle-row"><label className="layer-toggle"><input type="checkbox" checked={agentShowFloodDetection} onChange={() => setAgentShowFloodDetection(!agentShowFloodDetection)} /><span className="layer-icon">🌊</span><span>Flood Detection</span></label></div>
+              <div className="layer-toggle-row"><label className="layer-toggle"><input type="checkbox" checked={agentShowPopulationLayer} onChange={() => setAgentShowPopulationLayer(!agentShowPopulationLayer)} /><span className="layer-icon">👥</span><span>Population Impact</span></label></div>
+              <div className="layer-toggle-row"><label className="layer-toggle"><input type="checkbox" checked={agentShowUrbanLayer} onChange={() => setAgentShowUrbanLayer(!agentShowUrbanLayer)} /><span className="layer-icon">🏙️</span><span>Built-up Area</span></label></div>
+              <div className="layer-toggle-row"><label className="layer-toggle"><input type="checkbox" checked={agentShowLandcoverLayer} onChange={() => setAgentShowLandcoverLayer(!agentShowLandcoverLayer)} /><span className="layer-icon">🌳</span><span>Land Cover</span></label></div>
             </div>
-
-            {/* Tile Error Warning */}
-            {agentTileError && (
-              <div className="tile-error-banner">
-                <span className="tile-error-icon">⚠️</span>
-                <span className="tile-error-msg">{agentTileError.message}</span>
-              </div>
-            )}
-            
-            {/* Layer Legend */}
+            {agentTileError && <div className="tile-error-banner"><span className="tile-error-icon">⚠️</span><span className="tile-error-msg">{agentTileError.message}</span></div>}
             <div className="layer-legend">
               <h5>Legend</h5>
               <div className="legend-items">
-                {agentShowFloodDetection && (
-                  <div className="legend-item">
-                    <span className="legend-color" style={{ background: '#ff4444' }}></span>
-                    <span>Flooded Area</span>
-                  </div>
-                )}
-                {agentShowPopulationLayer && (
-                  <div className="legend-item">
-                    <span className="legend-gradient population"></span>
-                    <span>Population Density</span>
-                  </div>
-                )}
-                {agentShowUrbanLayer && (
-                  <div className="legend-item">
-                    <span className="legend-color" style={{ background: '#ff6600' }}></span>
-                    <span>Built-up</span>
-                  </div>
-                )}
-                {agentShowLandcoverLayer && (
-                  <div className="legend-row">
-                    <div className="legend-item-small">
-                      <span className="legend-dot" style={{ background: '#006400' }}></span>
-                      <span>Forest</span>
-                    </div>
-                    <div className="legend-item-small">
-                      <span className="legend-dot" style={{ background: '#ffbb22' }}></span>
-                      <span>Crop</span>
-                    </div>
-                    <div className="legend-item-small">
-                      <span className="legend-dot" style={{ background: '#0064c8' }}></span>
-                      <span>Water</span>
-                    </div>
-                  </div>
-                )}
+                {agentShowFloodDetection && <div className="legend-item"><span className="legend-color" style={{ background: '#ff4444' }}></span><span>Flooded Area</span></div>}
+                {agentShowPopulationLayer && <div className="legend-item"><span className="legend-gradient population"></span><span>Population Density</span></div>}
+                {agentShowUrbanLayer && <div className="legend-item"><span className="legend-color" style={{ background: '#ff6600' }}></span><span>Built-up</span></div>}
+                {agentShowLandcoverLayer && <div className="legend-row"><div className="legend-item-small"><span className="legend-dot" style={{ background: '#006400' }}></span><span>Forest</span></div><div className="legend-item-small"><span className="legend-dot" style={{ background: '#ffbb22' }}></span><span>Crop</span></div><div className="legend-item-small"><span className="legend-dot" style={{ background: '#0064c8' }}></span><span>Water</span></div></div>}
               </div>
             </div>
           </div>
@@ -1100,7 +589,6 @@ function AgentPanel() {
 
       <AoiUploadPanel variant="agent" />
 
-      {/* Chat History Section */}
       <div className="control-section">
         <div className="section-header" onClick={() => toggleSection('chatHistory')}>
           <span className="section-icon">💬</span>
@@ -1109,54 +597,36 @@ function AgentPanel() {
         </div>
         {expandedSections.chatHistory && (
           <div className="section-body chat-history-section">
-            {messages && messages.length > 0 ? (
+            {messages.length > 0 ? (
               <div className="chat-history-list">
-                {messages.map((msg, index) => (
-                  <div 
-                    key={msg.id || index} 
-                    className={`chat-history-item ${msg.role === 'user' ? 'user-msg' : 'assistant-msg'}`}
-                  >
-                    <div className="msg-role">
-                      {msg.role === 'user' ? '👤 You' : '🤖 Agent'}
-                    </div>
-                    <div className="msg-content">
-                      {typeof msg.content === 'string' 
-                        ? msg.content 
-                        : (msg.content?.text || JSON.stringify(msg.content))}
-                    </div>
+                {messages.map((message, index) => (
+                  <div key={message.id || index} className={`chat-history-item ${message.role === 'user' ? 'user-msg' : 'assistant-msg'}`}>
+                    <div className="msg-role">{message.role === 'user' ? 'You' : 'Agent'}</div>
+                    <div className="msg-content">{extractMessageText(message.content)}</div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="no-messages">
-                <span className="empty-icon">💭</span>
-                <p>No conversation yet. Start chatting with the agent!</p>
-              </div>
+              <div className="no-messages"><span className="empty-icon">💭</span><p>No conversation yet. Start chatting with the agent.</p></div>
             )}
           </div>
         )}
       </div>
 
-      {/* GEE Code Download - bottom of panel, same style as Ask mode */}
-      <div className="download-btn-div">
+      <div className="agent-download-bar">
         <button
           type="button"
-          className={`submit btn download ${!currentState.gee_code ? 'disabled' : ''}`}
+          className={`action-btn primary agent-download-btn ${!currentState.gee_code ? 'disabled' : ''}`}
           onClick={() => {
-            if (!currentState.gee_code) {
-              return;
-            }
-            trackUxEvent('export_gee_code', {
-              event: currentState.event || null,
-              mode: 'agent',
-            });
-            downloadGEECode(currentState.gee_code, currentState.event);
+            if (!currentState.gee_code) return;
+            trackUxEvent('export_gee_code', { event: currentState.event || null, mode: 'agent' });
+            downloadTextFile(
+              currentState.gee_code,
+              `${(currentState.event || 'flood_analysis').replace(/\s+/g, '_')}_GEE_${new Date().toISOString().split('T')[0]}.js`,
+              'text/javascript;charset=utf-8'
+            );
           }}
-          style={{ 
-            cursor: currentState.gee_code ? 'pointer' : 'not-allowed',
-            opacity: currentState.gee_code ? 1 : 0.5,
-            pointerEvents: currentState.gee_code ? 'auto' : 'none',
-          }}
+          style={{ cursor: currentState.gee_code ? 'pointer' : 'not-allowed', opacity: currentState.gee_code ? 1 : 0.5, pointerEvents: currentState.gee_code ? 'auto' : 'none' }}
         >
           DOWNLOAD GEE CODE
         </button>

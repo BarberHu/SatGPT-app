@@ -114,6 +114,15 @@
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
 }
 
+.agent-download-bar {
+  display: flex;
+}
+
+.agent-download-btn {
+  width: 100%;
+  justify-content: center;
+}
+
 
 
 /* No Data Hint */
@@ -318,6 +327,261 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.dataset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dataset-panel-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.dataset-loaded-group {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.dataset-card {
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.dataset-card.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.dataset-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dataset-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dataset-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.dataset-status {
+  font-size: 11px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.dataset-id {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.dataset-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #334155;
+}
+
+.dataset-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dataset-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 11px;
+}
+
+.dataset-badge-muted {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.dataset-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #475569;
+}
+
+.compact-dataset-list {
+  gap: 8px;
+}
+
+.compact-dataset-card {
+  padding: 10px 12px;
+}
+
+.dataset-compact-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dataset-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fcd34d;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s;
+}
+
+.dataset-info-icon:hover {
+  background: #fde68a;
+  border-color: #f59e0b;
+  transform: scale(1.06);
+}
+
+.dataset-info-popover {
+  position: fixed;
+  z-index: 10000;
+  width: 310px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  animation: popover-enter 0.15s ease-out;
+}
+
+.dataset-popover-copy {
+  padding: 0;
+  margin-top: 0;
+  border-top: none;
+}
+
+.water-select-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 16px;
+}
+
+.water-select-modal {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.water-select-header {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.water-select-header h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.water-select-header p {
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+}
+
+.water-select-list {
+  padding: 14px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.water-select-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.water-select-item.checked {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.water-select-item input {
+  margin-top: 3px;
+}
+
+.water-select-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.water-select-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.water-select-id {
+  font-size: 11px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.water-select-summary {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.water-select-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px 18px;
+  border-top: 1px solid #e2e8f0;
 }
 
 .popover-header {

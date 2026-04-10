@@ -58,6 +58,9 @@ class FloodAgentState(CopilotKitState, total=False):
     
     # GeoJSON 边界 (不传递给 LLM，仅用于 GEE 服务)
     geojson: Dict[str, Any]
+
+    # AOI source label, for example: location_geocode / query_bounds / user_drawn
+    aoi_source: str
     
     # 地理编码原始数据 (不传递给 LLM，用于存储 Nominatim 返回的完整数据)
     geo_data: Dict[str, Any]
@@ -67,3 +70,13 @@ class FloodAgentState(CopilotKitState, total=False):
     
     # GEE JavaScript 代码（生成的可下载代码）
     gee_code: str
+
+    # Water-only agent intent and recommendation state
+    agent_intent: str
+    query_themes: List[str]
+    recommended_assets: List[Dict[str, Any]]
+    selected_asset_ids: List[str]
+    water_asset_layers: List[Dict[str, Any]]
+    token_usage: List[Dict[str, Any]]
+    token_cost_summary: Dict[str, Any]
+    pending_extraction_payload: str

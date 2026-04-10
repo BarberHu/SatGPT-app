@@ -24,8 +24,16 @@ const defaultFloodAgentState = {
   coordinates: null,
   bounds: null,
   geojson: null,
+  aoi_source: null,
   search_sources: null,
   is_valid_flood_query: false,
+  agent_intent: null,
+  query_themes: [],
+  recommended_assets: [],
+  selected_asset_ids: [],
+  water_asset_layers: [],
+  token_usage: [],
+  token_cost_summary: {},
 };
 
 const defaultAgentLayerVisibility = {
@@ -288,12 +296,12 @@ export const AppProvider = ({ children }) => {
     });
 
     if (!editableAoi) {
-      setWarning('请先通过鱼网、上传文件或 Agent 分析获得一个边界。');
+      setWarning('Create a boundary first from the grid, an uploaded file, or the agent result.');
       return false;
     }
 
     if (editableAoi.kind === 'multipolygon') {
-      setWarning('当前边界是 MultiPolygon，第一版暂不支持直接编辑。请重新绘制一个单 Polygon。');
+      setWarning('The current boundary is a MultiPolygon. Direct editing is not supported yet. Draw a single Polygon instead.');
       return false;
     }
 
@@ -305,7 +313,7 @@ export const AppProvider = ({ children }) => {
 
   const applyDraftAoi = useCallback(() => {
     if (!draftAOI?.geojson) {
-      setWarning('请先绘制或编辑出一个有效的 Polygon 边界。');
+      setWarning('Draw or edit a valid Polygon boundary first.');
       return false;
     }
 

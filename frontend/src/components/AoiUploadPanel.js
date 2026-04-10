@@ -46,7 +46,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file.'));
       reader.readAsText(file);
     });
 
@@ -54,7 +54,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file.'));
       reader.readAsArrayBuffer(file);
     });
 
@@ -204,7 +204,9 @@ function AoiUploadPanel({ variant = 'ask' }) {
 
   return (
     <>
-      {variant === 'agent' ? (
+      {variant === 'modal' ? (
+        <div className="aoi-upload-inline-body modal">{actionRow}</div>
+      ) : variant === 'agent' ? (
         <div className="control-section aoi-upload-inline-shell agent">
           <div className="section-header" onClick={() => setIsExpanded((value) => !value)}>
             <span className="section-title">Analysis Boundary</span>

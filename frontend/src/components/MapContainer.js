@@ -24,6 +24,8 @@ const AGENT_SOURCE_IDS = [
   ...AGENT_BASE_LAYER_IDS,
   ...AGENT_ANALYSIS_LAYER_IDS,
 ];
+const WATER_ASSET_LAYER_PREFIX = 'agent-water-layer-';
+const WATER_ASSET_SOURCE_PREFIX = 'agent-water-source-';
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
 const DRAW_BLUE = '#2563eb';
@@ -238,7 +240,35 @@ function MapContainer() {
         map.removeSource(id);
       }
     });
+
+    const style = map.getStyle();
+    const dynamicLayerIds = (style?.layers || [])
+      .map((layer) => layer.id)
+      .filter((id) => id.startsWith(WATER_ASSET_LAYER_PREFIX));
+    dynamicLayerIds.forEach((id) => {
+      if (map.getLayer(id)) {
+        map.removeLayer(id);
+      }
+    });
+
+    Object.keys(style?.sources || {})
+      .filter((id) => id.startsWith(WATER_ASSET_SOURCE_PREFIX))
+      .forEach((id) => {
+        if (map.getSource(id)) {
+          map.removeSource(id);
+        }
+      });
   }, []);
+
+  const getWaterAssetSourceId = useCallback(
+    (layerId) => `${WATER_ASSET_SOURCE_PREFIX}${String(layerId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+    []
+  );
+
+  const getWaterAssetLayerId = useCallback(
+    (layerId) => `${WATER_ASSET_LAYER_PREFIX}${String(layerId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+    []
+  );
 
   const removeAoiLayers = useCallback((map) => {
     AOI_LAYER_IDS.forEach((id) => {
@@ -414,7 +444,7 @@ function MapContainer() {
 
     if (!nextDraftAoi) {
       setDraftAOI(null);
-      setWarning('当前绘制结果不是有效的单 Polygon，请重新绘制。');
+      setWarning('The current drawing is not a valid single Polygon. Please draw it again.');
       return;
     }
 
@@ -431,7 +461,7 @@ function MapContainer() {
       const createdFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon');
       if (!createdFeature) {
         setDraftAOI(null);
-        setWarning('请绘制一个有效的 Polygon 边界。');
+        setWarning('Please draw a valid Polygon boundary.');
         return;
       }
 
@@ -513,7 +543,7 @@ function MapContainer() {
     if (aoiEditorMode === 'edit') {
       const editableFeature = editableGeojsonRef.current;
       if (!editableFeature?.geometry || editableFeature.geometry.type !== 'Polygon') {
-        setWarning('当前边界无法进入编辑模式，请先选择或绘制一个单 Polygon。');
+        setWarning('The current boundary cannot enter edit mode. Select or draw a single Polygon first.');
         return;
       }
 
@@ -612,6 +642,60 @@ function MapContainer() {
 
     reconcileLayerOrder(map);
   }, [appMode, selectedAOI, reconcileLayerOrder, removeAgentLayers, removeAskLayers, setAgentTileError]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+
+    const currentLayers = floodAgentState?.water_asset_layers || [];
+    const desiredLayerIds = new Set(currentLayers.map((layer) => getWaterAssetLayerId(layer.layer_id)));
+    const desiredSourceIds = new Set(currentLayers.map((layer) => getWaterAssetSourceId(layer.layer_id)));
+    const style = map.getStyle();
+
+    (style?.layers || [])
+      .map((layer) => layer.id)
+      .filter((id) => id.startsWith(WATER_ASSET_LAYER_PREFIX) && !desiredLayerIds.has(id))
+      .forEach((id) => {
+        if (map.getLayer(id)) {
+          map.removeLayer(id);
+        }
+      });
+
+    Object.keys(style?.sources || {})
+      .filter((id) => id.startsWith(WATER_ASSET_SOURCE_PREFIX) && !desiredSourceIds.has(id))
+      .forEach((id) => {
+        if (map.getSource(id)) {
+          map.removeSource(id);
+        }
+      });
+
+    currentLayers.forEach((layer, index) => {
+      if (!layer?.tile_url) return;
+      const sourceId = getWaterAssetSourceId(layer.layer_id);
+      const layerId = getWaterAssetLayerId(layer.layer_id);
+
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, {
+          type: 'raster',
+          tiles: [layer.tile_url],
+          tileSize: 256,
+        });
+      }
+
+      if (!map.getLayer(layerId)) {
+        map.addLayer({
+          id: layerId,
+          type: 'raster',
+          source: sourceId,
+          paint: {
+            'raster-opacity': index === 0 ? 1 : 0.78,
+          },
+        });
+      }
+    });
+
+    reconcileLayerOrder(map);
+  }, [appMode, floodAgentState, selectedAOI, getWaterAssetLayerId, getWaterAssetSourceId, reconcileLayerOrder]);
 
   useEffect(() => {
     const map = mapRef.current;
