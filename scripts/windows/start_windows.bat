@@ -55,25 +55,25 @@ for %%P in (5001 8000 5000 3000) do (
 echo.
 echo [2/4] Starting Flask backend on 5001...
 if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "Flask Backend" cmd /k "cd /d \"%ROOT_DIR%\" ^&^& \"%PYTHON_EXE%\" app.py"
+    echo DRY-RUN: start "Flask Backend" cmd /k cd /d "%ROOT_DIR%" ^&^& "%PYTHON_EXE%" app.py
 ) else (
-    start "Flask Backend" cmd /k "cd /d \"%ROOT_DIR%\" && \"%PYTHON_EXE%\" app.py"
+    start "Flask Backend" cmd /k cd /d "%ROOT_DIR%" ^&^& "%PYTHON_EXE%" app.py
 )
 
 echo [3/4] Starting FastAPI agent on 8000...
 if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "FastAPI Agent" cmd /k "cd /d \"%ROOT_DIR%\agent\" ^&^& \"%PYTHON_EXE%\" -m uvicorn server:app --host 0.0.0.0 --port 8000"
+    echo DRY-RUN: start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" -m uvicorn server:app --host 0.0.0.0 --port 8000
 ) else (
-    start "FastAPI Agent" cmd /k "cd /d \"%ROOT_DIR%\agent\" && \"%PYTHON_EXE%\" -m uvicorn server:app --host 0.0.0.0 --port 8000"
+    start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" -m uvicorn server:app --host 0.0.0.0 --port 8000
 )
 
 echo [4/4] Starting Node services...
 if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "CopilotKit Runtime" cmd /k "cd /d \"%ROOT_DIR%\runtime\" ^&^& npm run dev"
-    echo DRY-RUN: start "React Frontend" cmd /k "cd /d \"%ROOT_DIR%\frontend\" ^&^& npm start"
+    echo DRY-RUN: start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& npm run dev
+    echo DRY-RUN: start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& npm start
 ) else (
-    start "CopilotKit Runtime" cmd /k "cd /d \"%ROOT_DIR%\runtime\" && npm run dev"
-    start "React Frontend" cmd /k "cd /d \"%ROOT_DIR%\frontend\" && npm start"
+    start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& npm run dev
+    start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& npm start
 )
 
 echo.
