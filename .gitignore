@@ -60,3 +60,16 @@ Thumbs.db
 *.log
 test_output.txt
 .cache/
+
+# =====================
+# Local notes / helper files
+# =====================
+docs/
+MIGRATION_README.md
+Transfer.md
+2.0
+E
+
+# Legacy local launcher scripts
+start_*.bat
+stop_*.bat
