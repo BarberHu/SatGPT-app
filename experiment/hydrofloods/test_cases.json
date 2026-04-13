@@ -1,0 +1,115 @@
+[
+  {
+    "id": "catalog_overview",
+    "category": "catalog",
+    "description": "查询当前智能体挂载了哪些 HYDRAFloods 本地工具",
+    "query": "列一下现在有哪些本地工具可以给智能体调用。",
+    "expected_tool": "describe_hydrafloods_tools",
+    "expected_action": "describe_tools",
+    "expect_status": "ok",
+    "expected_artifact": "registry"
+  },
+  {
+    "id": "catalog_boundaries",
+    "category": "catalog",
+    "description": "查询当前实验的能力边界和工程约束",
+    "query": "请告诉我这个 HYDRAFloods 智能体实验当前的能力边界是什么，哪些事情它不适合做？",
+    "expected_tool": "describe_hydrafloods_tools",
+    "expected_action": "describe_tools",
+    "expect_status": "ok",
+    "expected_artifact": "registry"
+  },
+  {
+    "id": "water_landsat_natural",
+    "category": "water",
+    "description": "自然语言积水图请求，测试 LLM 路由到光学水体工具",
+    "query": "帮我给这个区域做一层可以直接挂在线地图上的积水图，时间是2020-07-01到2020-07-15，bbox=[90.30,23.60,90.50,23.80]，数据用Landsat 8。",
+    "expected_tool": "get_water_extent_tile",
+    "expected_action": "water_mapping",
+    "expect_status": "ok",
+    "expected_dataset": "Landsat8",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "water_landsat_bmax",
+    "category": "water",
+    "description": "显式要求 bmax_otsu 的光学水体提取",
+    "query": "请用 Landsat 8 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 用 bmax otsu 生成水体图层。",
+    "expected_tool": "get_water_extent_tile",
+    "expected_action": "water_mapping",
+    "expect_status": "ok",
+    "expected_dataset": "Landsat8",
+    "expected_algorithm": "bmax_otsu",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "water_sentinel2",
+    "category": "water",
+    "description": "Sentinel-2 水体提取",
+    "query": "请用 Sentinel-2 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做水体提取。",
+    "expected_tool": "get_water_extent_tile",
+    "expected_action": "water_mapping",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel2",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "water_sentinel1_radar",
+    "category": "water",
+    "description": "用 Sentinel-1 雷达做积水图层，覆盖 SAR 水体提取链路",
+    "query": "请用 Sentinel-1 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做积水图层。",
+    "expected_tool": "get_water_extent_tile",
+    "expected_action": "water_mapping",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel1",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "flood_sentinel1_default",
+    "category": "flood",
+    "description": "Sentinel-1 洪水范围提取",
+    "query": "我想看同一块区域在2020-07-01到2020-07-15之间的淹没范围图层，bbox=[90.30,23.60,90.50,23.80]，用哨兵1。",
+    "expected_tool": "get_flood_extent_tile",
+    "expected_action": "flood_extent",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel1",
+    "expected_reference": "seasonal",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "flood_sentinel1_yearly",
+    "category": "flood",
+    "description": "洪水范围提取并指定 yearly 参考水体",
+    "query": "请用 Sentinel-1 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做洪水范围提取，永久水体参考用 yearly。",
+    "expected_tool": "get_flood_extent_tile",
+    "expected_action": "flood_extent",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel1",
+    "expected_reference": "yearly",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "flood_sentinel1_occurrence",
+    "category": "flood",
+    "description": "洪水范围提取并指定 occurrence 参考水体",
+    "query": "请用哨兵1在 bbox=[90.30,23.60,90.50,23.80] 上对 2020-07-01 到 2020-07-15 生成洪水范围图层，参考水体请使用 occurrence。",
+    "expected_tool": "get_flood_extent_tile",
+    "expected_action": "flood_extent",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel1",
+    "expected_reference": "occurrence",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "depth_sentinel1_fwdet",
+    "category": "depth",
+    "description": "Sentinel-1 FwDET 水深估算",
+    "query": "请生成这片区域的洪水水深图，bbox=[90.30,23.60,90.50,23.80]，时间是2020-07-01到2020-07-15，数据用哨兵1。",
+    "expected_tool": "estimate_flood_depth_tile",
+    "expected_action": "depth_estimation",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel1",
+    "expected_reference": "seasonal",
+    "expected_artifact": "tile"
+  }
+]

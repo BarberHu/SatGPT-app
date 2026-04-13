@@ -134,9 +134,12 @@ React Frontend (3000) → CopilotKit Runtime (5000) → FastAPI Agent (8000)
 
 MIT License
 
-## 👤 Author
 
-**Wang Yang**
+# feature summary
+## updated and timely dataset: 将GEE数据链接到SATGPT，作为可调用的数据
+
+## 
+
 
 ---
 
