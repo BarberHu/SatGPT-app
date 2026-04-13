@@ -1,7 +1,7 @@
 {
   "source": "https://developers.google.com/earth-engine/datasets/tags/water?hl=zh-cn",
-  "schema_version": 2,
-  "refreshed_at": "2026-04-07T08:31:11Z",
+  "schema_version": 3,
+  "refreshed_at": "2026-04-10T12:46:51Z",
   "asset_count": 89,
   "assets": [
     {
@@ -844,6 +844,21 @@
         "min": 192.0,
         "max": 339.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "u-component_of_wind_hybrid",
+        "palette": [
+          "blue",
+          "purple",
+          "cyan",
+          "green",
+          "yellow",
+          "red"
+        ],
+        "min": 192.0,
+        "max": 339.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -88.6,
         "lat": 26.4,
@@ -982,6 +997,18 @@
       ],
       "official_example_code": "var dataset = ee.ImageCollection('NASA/ORNL/DAYMET_V4')\n                  .filter(ee.Filter.date('2017-04-01', '2017-04-30'));\nvar maximumTemperature = dataset.select('tmax');\nvar maximumTemperatureVis = {\n  min: -40.0,\n  max: 30.0,\n  palette: ['1621A2', 'white', 'cyan', 'green', 'yellow', 'orange', 'red'],\n};\nMap.setCenter(-110.21, 35.1, 4);\nMap.addLayer(maximumTemperature, maximumTemperatureVis, 'Maximum Temperature');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "dayl",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -110.21,
         "lat": 35.1,
@@ -1051,6 +1078,11 @@
       "official_example_vis": {
         "min": 0.0,
         "max": 5.0
+      },
+      "legend_spec": {
+        "type": "text",
+        "label": "Dynamic Surface Water Extent from Harmonized Landsat Sentinel-2 (DSWx-HLS) V1 | Earth Engine Data Catalog | Google for Developers",
+        "reason": "missing_palette_or_vector_style"
       },
       "default_map_view": {
         "lon": -93.0,
@@ -1124,6 +1156,11 @@
         "min": 0.0,
         "max": 5.0
       },
+      "legend_spec": {
+        "type": "text",
+        "label": "Dynamic Surface Water Extent from Sentinel-1 (DSWx-S1) V1 | Earth Engine Data Catalog | Google for Developers",
+        "reason": "missing_palette_or_vector_style"
+      },
       "default_map_view": {
         "lon": 13.1921,
         "lat": 55.7069,
@@ -1194,6 +1231,18 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.ImageCollection('GLCF/GLS_WATER');\nvar water = dataset.select('water');\nvar waterVis = {\n  min: 1.0,\n  max: 4.0,\n  palette: ['fafafa', '00c5ff', 'df73ff', '828282', 'cccccc'],\n};\nMap.setCenter(-79.3094, 44.5693, 8);\nMap.addLayer(water, waterVis, 'Water');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "GLCF: Landsat Global Inland Water | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -79.3094,
         "lat": 44.5693,
@@ -1315,6 +1364,11 @@
         "min": 0.0,
         "max": 1.0
       },
+      "legend_spec": {
+        "type": "text",
+        "label": "flooded",
+        "reason": "missing_palette_or_vector_style"
+      },
       "default_map_view": {
         "lon": -90.2922,
         "lat": 29.4064,
@@ -1382,6 +1436,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('USGS/WBD/2017/HUC02');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-105.861, 39.529, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "HUC02: USGS Watershed Boundary Dataset of Regions | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -105.861,
         "lat": 39.529,
@@ -1446,6 +1509,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('USGS/WBD/2017/HUC04');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-105.861, 39.529, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "HUC04: USGS Watershed Boundary Dataset of Subregions | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -105.861,
         "lat": 39.529,
@@ -1510,6 +1582,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('USGS/WBD/2017/HUC06');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-105.861, 39.529, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "HUC06: USGS Watershed Boundary Dataset of Basins | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -105.861,
         "lat": 39.529,
@@ -1574,6 +1655,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('USGS/WBD/2017/HUC08');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-105.861, 39.529, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "HUC08: USGS Watershed Boundary Dataset of Subbasins | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -105.861,
         "lat": 39.529,
@@ -1638,6 +1728,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('USGS/WBD/2017/HUC10');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-105.861, 39.529, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "HUC10: USGS Watershed Boundary Dataset of Watersheds | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -105.861,
         "lat": 39.529,
@@ -1702,6 +1801,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('USGS/WBD/2017/HUC12');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-105.861, 39.529, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "HUC12: USGS Watershed Boundary Dataset of Subwatersheds | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -105.861,
         "lat": 39.529,
@@ -2434,6 +2542,20 @@
         "min": -2.0,
         "max": 34.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "water_temp_0",
+        "palette": [
+          "#000000",
+          "#005aff",
+          "#43c8c8",
+          "#fff700",
+          "#ff0000"
+        ],
+        "min": -2.0,
+        "max": 34.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -88.6,
         "lat": 26.4,
@@ -3157,6 +3279,18 @@
       ],
       "official_example_code": "var velocity = ee.Image('HYCOM/sea_water_velocity/2014040700').divide(1000);\n\n// Compute speed from velocity.\nMap.addLayer(\n    velocity.select('velocity_u_0').hypot(velocity.select('velocity_v_0')));\n\nMap.setCenter(-60, 33, 5);",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "velocity_u_0",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -60.0,
         "lat": 33.0,
@@ -3310,6 +3444,20 @@
         "min": 0.0,
         "max": 100.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "occurrence",
+        "palette": [
+          "ffffff",
+          "ffbbbb",
+          "#0000ff"
+        ],
+        "min": 0.0,
+        "max": 100.0,
+        "bands": [
+          "occurrence"
+        ]
+      },
       "default_map_view": {
         "lon": 59.414,
         "lat": 45.182,
@@ -3460,6 +3608,20 @@
         "min": 0.0,
         "max": 100.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "occurrence",
+        "palette": [
+          "ffffff",
+          "ffbbbb",
+          "#0000ff"
+        ],
+        "min": 0.0,
+        "max": 100.0,
+        "bands": [
+          "occurrence"
+        ]
+      },
       "default_map_view": {
         "lon": 59.414,
         "lat": 45.182,
@@ -3532,6 +3694,11 @@
         ],
         "min": 100.0,
         "max": 900.0
+      },
+      "legend_spec": {
+        "type": "text",
+        "label": "detections, valid_obs, total_obs",
+        "reason": "missing_palette_or_vector_style"
       },
       "default_map_view": {
         "lon": 71.72,
@@ -3611,6 +3778,27 @@
         ],
         "min": 0.0,
         "max": 2.0
+      },
+      "legend_spec": {
+        "type": "categorical",
+        "label": "Monthly water class",
+        "items": [
+          {
+            "value": 0,
+            "label": "No data",
+            "color": "#ffffff"
+          },
+          {
+            "value": 1,
+            "label": "Land",
+            "color": "#fffcb8"
+          },
+          {
+            "value": 2,
+            "label": "Water",
+            "color": "#0905ff"
+          }
+        ]
       },
       "default_map_view": {
         "lon": -121.234,
@@ -3716,6 +3904,20 @@
         "min": 0.0,
         "max": 100.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "monthly_recurrence",
+        "palette": [
+          "ffffff",
+          "ffbbbb",
+          "#0000ff"
+        ],
+        "min": 0.0,
+        "max": 100.0,
+        "bands": [
+          "monthly_recurrence"
+        ]
+      },
       "default_map_view": {
         "lon": -51.482,
         "lat": -0.835,
@@ -3801,6 +4003,32 @@
         "min": 0.0,
         "max": 3.0
       },
+      "legend_spec": {
+        "type": "categorical",
+        "label": "Yearly water class",
+        "items": [
+          {
+            "value": 0,
+            "label": "No data",
+            "color": "#cccccc"
+          },
+          {
+            "value": 1,
+            "label": "Land",
+            "color": "#ffffff"
+          },
+          {
+            "value": 2,
+            "label": "Seasonal water",
+            "color": "#99d9ea"
+          },
+          {
+            "value": 3,
+            "label": "Permanent water",
+            "color": "#0000ff"
+          }
+        ]
+      },
       "default_map_view": {
         "lon": 59.414,
         "lat": 45.182,
@@ -3876,6 +4104,18 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.ImageCollection('NASA/GSFC/MERRA/slv/2')\n                  .filter(ee.Filter.date('2022-02-01', '2022-02-02'));\nvar surface_pressure = dataset.select('PS');\nvar surface_pressure_vis = {\n  min: 81100,\n  max: 117000,\n  palette: ['001137', '01abab', 'e7eb05', '620500']\n};\nMap.setCenter(-95.62, 39.91, 2);\nMap.addLayer(surface_pressure, surface_pressure_vis);",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "MERRA-2 M2T1NXSLV: Single-Level Diagnostics V5.12.4 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -95.62,
         "lat": 39.91,
@@ -3979,6 +4219,25 @@
         ],
         "min": -0.061,
         "max": 0.636
+      },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "SoilGrids250m 2.0 - Volumetric Water Content | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#440154",
+          "#482878",
+          "#3E4A89",
+          "#31688E",
+          "#26828E",
+          "#1F9E89",
+          "#35B779",
+          "#6DCD59",
+          "#B4DE2C",
+          "#FDE725"
+        ],
+        "min": -0.061,
+        "max": 0.636,
+        "bands": []
       },
       "default_map_view": {
         "lon": -105.25,
@@ -4253,6 +4512,21 @@
         "min": 220.0,
         "max": 310.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "Downward_Long-Wave_Radp_Flux_surface_6_Hour_Average",
+        "palette": [
+          "blue",
+          "purple",
+          "cyan",
+          "green",
+          "yellow",
+          "red"
+        ],
+        "min": 220.0,
+        "max": 310.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -88.6,
         "lat": 26.4,
@@ -4358,6 +4632,18 @@
       ],
       "official_example_code": "var dataset = ee.ImageCollection('NASA/GRACE/MASS_GRIDS/OCEAN_EOFR')\n                  .filter(ee.Filter.date('2016-08-01', '2016-08-30'));\nvar equivalentWaterThicknessCsr = dataset.select('lwe_thickness_csr');\nvar equivalentWaterThicknessCsrVis = {\n  min: -10.0,\n  max: 10.0,\n};\nMap.setCenter(6.746, 46.529, 1);\nMap.addLayer(\n    equivalentWaterThicknessCsr, equivalentWaterThicknessCsrVis,\n    'Equivalent Water Thickness CSR');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "lwe_thickness_csr",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 6.746,
         "lat": 46.529,
@@ -4449,6 +4735,20 @@
       ],
       "official_example_code": "var dataset = ee.ImageCollection('HYCOM/sea_surface_elevation')\n                  .filter(ee.Filter.date('2018-08-01', '2018-08-15'));\nvar surfaceElevation = dataset.select('surface_elevation');\nvar surfaceElevationVis = {\n  min: -2000.0,\n  max: 2000.0,\n  palette: ['blue', 'cyan', 'yellow', 'red'],\n};\nMap.setCenter(-28.1, 28.3, 1);\nMap.addLayer(surfaceElevation, surfaceElevationVis, 'Surface Elevation');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "surface_elevation",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": null,
+        "max": null,
+        "bands": [
+          "surface_elevation"
+        ]
+      },
       "default_map_view": {
         "lon": -28.1,
         "lat": 28.3,
@@ -4525,6 +4825,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET DisALEXI Monthly Evapotranspiration v2.1 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -4635,6 +4947,35 @@
         "min": 0.0,
         "max": 1400.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET eeMETRIC Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#9e6212",
+          "#ac7d1d",
+          "#ba9829",
+          "#c8b434",
+          "#d6cf40",
+          "#bed44b",
+          "#9fcb51",
+          "#80c256",
+          "#61b95c",
+          "#42b062",
+          "#45b677",
+          "#49bc8d",
+          "#4dc2a2",
+          "#51c8b8",
+          "#55cece",
+          "#4db4ba",
+          "#459aa7",
+          "#3d8094",
+          "#356681",
+          "#2d4c6e"
+        ],
+        "min": 0.0,
+        "max": 1400.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -100.0,
         "lat": 38.0,
@@ -4711,6 +5052,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET eeMETRIC Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -4782,6 +5135,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET eeMETRIC Monthly Evapotranspiration v2.1 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -4846,6 +5211,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET Ensemble Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -4950,6 +5327,35 @@
         "min": 0.0,
         "max": 1400.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET Ensemble Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#9e6212",
+          "#ac7d1d",
+          "#ba9829",
+          "#c8b434",
+          "#d6cf40",
+          "#bed44b",
+          "#9fcb51",
+          "#80c256",
+          "#61b95c",
+          "#42b062",
+          "#45b677",
+          "#49bc8d",
+          "#4dc2a2",
+          "#51c8b8",
+          "#55cece",
+          "#4db4ba",
+          "#459aa7",
+          "#3d8094",
+          "#356681",
+          "#2d4c6e"
+        ],
+        "min": 0.0,
+        "max": 1400.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -100.0,
         "lat": 38.0,
@@ -5019,6 +5425,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET Ensemble Monthly Evapotranspiration v2.1 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -5130,6 +5548,35 @@
         "min": 0.0,
         "max": 1400.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET geeSEBAL Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#9e6212",
+          "#ac7d1d",
+          "#ba9829",
+          "#c8b434",
+          "#d6cf40",
+          "#bed44b",
+          "#9fcb51",
+          "#80c256",
+          "#61b95c",
+          "#42b062",
+          "#45b677",
+          "#49bc8d",
+          "#4dc2a2",
+          "#51c8b8",
+          "#55cece",
+          "#4db4ba",
+          "#459aa7",
+          "#3d8094",
+          "#356681",
+          "#2d4c6e"
+        ],
+        "min": 0.0,
+        "max": 1400.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -100.0,
         "lat": 38.0,
@@ -5210,6 +5657,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET geeSEBAL Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -5285,6 +5744,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET geeSEBAL Monthly Evapotranspiration v2.1 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -5358,6 +5829,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET PT-JPL Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -5469,6 +5952,35 @@
         "min": 0.0,
         "max": 1400.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET PT-JPL Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#9e6212",
+          "#ac7d1d",
+          "#ba9829",
+          "#c8b434",
+          "#d6cf40",
+          "#bed44b",
+          "#9fcb51",
+          "#80c256",
+          "#61b95c",
+          "#42b062",
+          "#45b677",
+          "#49bc8d",
+          "#4dc2a2",
+          "#51c8b8",
+          "#55cece",
+          "#4db4ba",
+          "#459aa7",
+          "#3d8094",
+          "#356681",
+          "#2d4c6e"
+        ],
+        "min": 0.0,
+        "max": 1400.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -100.0,
         "lat": 38.0,
@@ -5547,6 +6059,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET PT-JPL Monthly Evapotranspiration v2.1 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -5615,6 +6139,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET SIMS Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -5720,6 +6256,35 @@
         "min": 0.0,
         "max": 1400.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET SIMS Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#9e6212",
+          "#ac7d1d",
+          "#ba9829",
+          "#c8b434",
+          "#d6cf40",
+          "#bed44b",
+          "#9fcb51",
+          "#80c256",
+          "#61b95c",
+          "#42b062",
+          "#45b677",
+          "#49bc8d",
+          "#4dc2a2",
+          "#51c8b8",
+          "#55cece",
+          "#4db4ba",
+          "#459aa7",
+          "#3d8094",
+          "#356681",
+          "#2d4c6e"
+        ],
+        "min": 0.0,
+        "max": 1400.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -100.0,
         "lat": 38.0,
@@ -5793,6 +6358,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET SIMS Monthly Evapotranspiration v2.1 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -5899,6 +6476,35 @@
         "min": 0.0,
         "max": 1400.0
       },
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET SSEBop Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#9e6212",
+          "#ac7d1d",
+          "#ba9829",
+          "#c8b434",
+          "#d6cf40",
+          "#bed44b",
+          "#9fcb51",
+          "#80c256",
+          "#61b95c",
+          "#42b062",
+          "#45b677",
+          "#49bc8d",
+          "#4dc2a2",
+          "#51c8b8",
+          "#55cece",
+          "#4db4ba",
+          "#459aa7",
+          "#3d8094",
+          "#356681",
+          "#2d4c6e"
+        ],
+        "min": 0.0,
+        "max": 1400.0,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -100.0,
         "lat": 38.0,
@@ -5976,6 +6582,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET SSEBop Monthly Evapotranspiration v2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -6048,6 +6666,18 @@
       "band_metadata": [],
       "official_example_code": "",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "OpenET SSEBop Monthly Evapotranspiration v2.1 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {},
       "collection_processing_hints": {
         "reducer": "median",
@@ -6110,6 +6740,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/2/L1_AETI_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 50});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Actual Evapotranspiration and Interception 2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6176,6 +6818,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/3/L1_AETI_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 50});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Actual Evapotranspiration and Interception 3.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6237,6 +6891,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/2/L1_RET_E');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 100});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Daily Reference Evapotranspiration 2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6298,6 +6964,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/3/L1_RET_E');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 100});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Daily Reference Evapotranspiration 3.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6359,6 +7037,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/2/L1_E_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 10});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Evaporation 2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6420,6 +7110,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/3/L1_E_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 10});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Evaporation 3.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6483,6 +7185,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/2/L1_I_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 50});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Interception 2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6546,6 +7260,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/3/L1_I_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 50});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Interception 3.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6607,6 +7333,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/2/L1_NPP_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 5000});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Net Primary Production 2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6667,6 +7405,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/2/L1_RET_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 100});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Reference Evapotranspiration 2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6727,6 +7477,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/3/L1_RET_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 100});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Reference Evapotranspiration 3.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6788,6 +7550,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/2/L1_T_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 50});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Transpiration 2.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6849,6 +7623,18 @@
       "band_metadata": [],
       "official_example_code": "var coll = ee.ImageCollection('FAO/WAPOR/3/L1_T_D');\nvar image = coll.first();\nMap.setCenter(17.5, 20, 3);\nMap.addLayer(image, {min: 0, max: 50});",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WAPOR Dekadal Transpiration 3.0 | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": 17.5,
         "lat": 20.0,
@@ -6920,6 +7706,15 @@
       "official_example_vis": {
         "max": 4.0
       },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 03 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -43.5,
         "lat": -24.7,
@@ -6987,6 +7782,15 @@
       "official_example_code": "// Load the HydroATLAS dataset.\nvar basinATLAS = ee.FeatureCollection('WWF/HydroATLAS/v1/Basins/level04');\n\n// Set visualization to show upstream drainage area.\nvar upstreamDrainageArea = ee.Image().byte().paint({\n  featureCollection: basinATLAS,\n  color: 'UP_AREA',\n});\n\n// Set map extent to show the Nile and surrounding basins.\nMap.setCenter(-43.50, -24.70, 6);\n\n// Create a viridis colormap.\nvar viridis = [\n  '481567', '482677', '453781', '404788', '39568c', '33638d', '2d708e',\n  '287d8e', '238a8d', '1f968b', '20a387', '29af7f', '3cbb75', '55c667',\n  '73d055', '95d840', 'b8de29', 'dce319', 'fde725'];\n\n// View the continent of South America.\nvar region = ee.Geometry.BBox(-80, -60, -20, 20);\nMap.addLayer(upstreamDrainageArea.clip(region), {palette: viridis, max: 4e6},\n             'Upstream Drainage Area [mm]', true, 0.8);",
       "official_example_vis": {
         "max": 4.0
+      },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 04 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
       },
       "default_map_view": {
         "lon": -43.5,
@@ -7056,6 +7860,15 @@
       "official_example_vis": {
         "max": 2.6
       },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 05 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -43.5,
         "lat": -24.7,
@@ -7123,6 +7936,15 @@
       "official_example_code": "// Load the HydroATLAS dataset.\nvar basinATLAS = ee.FeatureCollection('WWF/HydroATLAS/v1/Basins/level06');\n\n// Set visualization to show upstream drainage area.\nvar upstreamDrainageArea = ee.Image().byte().paint({\n  featureCollection: basinATLAS,\n  color: 'UP_AREA',\n});\n\n// Set map extent to show the Nile and surrounding basins.\nMap.setCenter(-43.50, -24.70, 6);\n\n// Create a viridis colormap.\nvar viridis = [\n  '481567', '482677', '453781', '404788', '39568c', '33638d', '2d708e',\n  '287d8e', '238a8d', '1f968b', '20a387', '29af7f', '3cbb75', '55c667',\n  '73d055', '95d840', 'b8de29', 'dce319', 'fde725'];\n\n// View the continent of South America.\nvar region = ee.Geometry.BBox(-80, -60, -20, 20);\nMap.addLayer(upstreamDrainageArea.clip(region), {palette: viridis, max: 5e5},\n             'Upstream Drainage Area [mm]', true, 0.8);",
       "official_example_vis": {
         "max": 5.0
+      },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 06 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
       },
       "default_map_view": {
         "lon": -43.5,
@@ -7192,6 +8014,15 @@
       "official_example_vis": {
         "max": 1.0
       },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 07 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -43.5,
         "lat": -24.7,
@@ -7259,6 +8090,15 @@
       "official_example_code": "// Load the HydroATLAS dataset.\nvar basinATLAS = ee.FeatureCollection('WWF/HydroATLAS/v1/Basins/level08');\n\n// Set visualization to show upstream drainage area.\nvar upstreamDrainageArea = ee.Image().byte().paint({\n  featureCollection: basinATLAS,\n  color: 'UP_AREA',\n});\n\n// Set map extent to show the Nile and surrounding basins.\nMap.setCenter(-43.50, -24.70, 6);\n\n// Create a viridis colormap.\nvar viridis = [\n  '481567', '482677', '453781', '404788', '39568c', '33638d', '2d708e',\n  '287d8e', '238a8d', '1f968b', '20a387', '29af7f', '3cbb75', '55c667',\n  '73d055', '95d840', 'b8de29', 'dce319', 'fde725'];\n\n// View the continent of South America.\nvar region = ee.Geometry.BBox(-80, -60, -20, 20);\nMap.addLayer(upstreamDrainageArea.clip(region), {palette: viridis, max: 5e4},\n             'Upstream Drainage Area [mm]', true, 0.8);",
       "official_example_vis": {
         "max": 5.0
+      },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 08 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
       },
       "default_map_view": {
         "lon": -43.5,
@@ -7328,6 +8168,15 @@
       "official_example_vis": {
         "max": 1.0
       },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 09 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -43.5,
         "lat": -24.7,
@@ -7395,6 +8244,15 @@
       "official_example_code": "// Load the HydroATLAS dataset.\nvar basinATLAS = ee.FeatureCollection('WWF/HydroATLAS/v1/Basins/level10');\n\n// Set visualization to show upstream drainage area.\nvar upstreamDrainageArea = ee.Image().byte().paint({\n  featureCollection: basinATLAS,\n  color: 'UP_AREA',\n});\n\n// Set map extent to show the Nile and surrounding basins.\nMap.setCenter(-43.50, -24.70, 6);\n\n// Create a viridis colormap.\nvar viridis = [\n  '481567', '482677', '453781', '404788', '39568c', '33638d', '2d708e',\n  '287d8e', '238a8d', '1f968b', '20a387', '29af7f', '3cbb75', '55c667',\n  '73d055', '95d840', 'b8de29', 'dce319', 'fde725'];\n\n// View the continent of South America.\nvar region = ee.Geometry.BBox(-80, -60, -20, 20);\nMap.addLayer(upstreamDrainageArea.clip(region), {palette: viridis, max: 1e4},\n             'Upstream Drainage Area [mm]', true, 0.8);",
       "official_example_vis": {
         "max": 1.0
+      },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 10 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
       },
       "default_map_view": {
         "lon": -43.5,
@@ -7464,6 +8322,15 @@
       "official_example_vis": {
         "max": 1.0
       },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 11 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -43.5,
         "lat": -24.7,
@@ -7532,6 +8399,15 @@
       "official_example_vis": {
         "max": 1.0
       },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroATLAS Basins Level 12 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -46.25,
         "lat": -23.57,
@@ -7593,6 +8469,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_1');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 1 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -7655,6 +8540,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_10');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 10 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -7717,6 +8611,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_11');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 11 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -7779,6 +8682,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_12');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 12 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -7840,6 +8752,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_2');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 2 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -7901,6 +8822,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_3');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 3 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -7962,6 +8892,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_4');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 4 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -8023,6 +8962,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_5');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 5 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -8084,6 +9032,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_6');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 6 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -8145,6 +9102,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_7');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 7 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -8206,6 +9172,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_8');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 8 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -8267,6 +9242,15 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_9');\n\nvar visualization = {\n  color: '808080',\n  strokeWidth: 1\n};\n\ndataset = dataset.draw(visualization);\n\nMap.setCenter(-117.731, 53.033, 7);\nMap.addLayer(dataset, null, 'Basins');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Basins Level 9 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
+      },
       "default_map_view": {
         "lon": -117.731,
         "lat": 53.033,
@@ -8331,6 +9315,18 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/15DIR');\nvar drainageDirection = dataset.select('b1');\nvar drainageDirectionVis = {\n  min: 1.0,\n  max: 128.0,\n  palette: [\n    '000000', '023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b',\n    'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'\n  ],\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(drainageDirection, drainageDirectionVis, 'Drainage Direction');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WWF HydroSHEDS Drainage Direction, 15 Arc-Seconds | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8394,6 +9390,18 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/03DIR');\nvar drainageDirection = dataset.select('b1');\nvar drainageDirectionVis = {\n  min: 1.0,\n  max: 128.0,\n  palette: [\n    '000000', '023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b',\n    'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'\n  ],\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(drainageDirection, drainageDirectionVis, 'Drainage Direction');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WWF HydroSHEDS Drainage Direction, 3 Arc-Seconds | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8458,6 +9466,18 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/30DIR');\nvar drainageDirection = dataset.select('b1');\nvar drainageDirectionVis = {\n  min: 1.0,\n  max: 128.0,\n  palette: [\n    '000000', '023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b',\n    'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'\n  ],\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(drainageDirection, drainageDirectionVis, 'Drainage Direction');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WWF HydroSHEDS Drainage Direction, 30 Arc-Seconds | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8522,6 +9542,18 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/15ACC');\nvar flowAccumulation = dataset.select('b1');\nvar flowAccumulationVis = {\n  min: 0.0,\n  max: 500.0,\n  palette: [\n    '000000', '023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b',\n    'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'\n  ],\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(flowAccumulation, flowAccumulationVis, 'Flow Accumulation');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WWF HydroSHEDS Flow Accumulation, 15 Arc-Seconds | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8586,6 +9618,18 @@
       "band_metadata": [],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/30ACC');\nvar flowAccumulation = dataset.select('b1');\nvar flowAccumulationVis = {\n  min: 0.0,\n  max: 500.0,\n  palette: [\n    '000000', '023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b',\n    'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'\n  ],\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(flowAccumulation, flowAccumulationVis, 'Flow Accumulation');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "WWF HydroSHEDS Flow Accumulation, 30 Arc-Seconds | Earth Engine Data Catalog | Google for Developers",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": 0,
+        "max": 1,
+        "bands": []
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8658,6 +9702,15 @@
         ],
         "min": 1.0,
         "max": 10.0
+      },
+      "legend_spec": {
+        "type": "vector",
+        "label": "WWF HydroSHEDS Free Flowing Rivers Network v1 | Earth Engine Data Catalog | Google for Developers",
+        "style": {
+          "color": "#00bcd4",
+          "fillColor": "#00000000",
+          "width": 2
+        }
       },
       "default_map_view": {
         "lon": -122.348,
@@ -8736,6 +9789,20 @@
       ],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/15CONDEM');\nvar elevation = dataset.select('b1');\nvar elevationVis = {\n  min: -50.0,\n  max: 3000.0,\n  gamma: 2.0,\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(elevation, elevationVis, 'Elevation');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "b1",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": null,
+        "max": null,
+        "bands": [
+          "b1"
+        ]
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8812,6 +9879,20 @@
       ],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/03CONDEM');\nvar elevation = dataset.select('b1');\nvar elevationVis = {\n  min: -50.0,\n  max: 3000.0,\n  gamma: 2.0,\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(elevation, elevationVis, 'Elevation');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "b1",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": null,
+        "max": null,
+        "bands": [
+          "b1"
+        ]
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8889,6 +9970,20 @@
       ],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/30CONDEM');\nvar elevation = dataset.select('b1');\nvar elevationVis = {\n  min: -50.0,\n  max: 3000.0,\n  gamma: 2.0,\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(elevation, elevationVis, 'Elevation');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "b1",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": null,
+        "max": null,
+        "bands": [
+          "b1"
+        ]
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,
@@ -8965,6 +10060,20 @@
       ],
       "official_example_code": "var dataset = ee.Image('WWF/HydroSHEDS/03VFDEM');\nvar elevation = dataset.select('b1');\nvar elevationVis = {\n  min: -50.0,\n  max: 3000.0,\n  gamma: 2.0,\n};\nMap.setCenter(-121.652, 38.022, 8);\nMap.addLayer(elevation, elevationVis, 'Elevation');",
       "official_example_vis": {},
+      "legend_spec": {
+        "type": "continuous",
+        "label": "b1",
+        "palette": [
+          "#f7fbff",
+          "#6baed6",
+          "#08306b"
+        ],
+        "min": null,
+        "max": null,
+        "bands": [
+          "b1"
+        ]
+      },
       "default_map_view": {
         "lon": -121.652,
         "lat": 38.022,

@@ -28,6 +28,8 @@ from langgraph.types import Command, interrupt
 from state import FloodAgentState
 from prompts import SYSTEM_PROMPT, FLOOD_REPORT_TEMPLATE, REPORT_GENERATION_PROMPT
 from gee_code_generator import generate_flood_gee_code
+from flood_aoi import aoi_to_legacy_fields
+from flood_dataset_service import build_confirmation_context
 
 load_dotenv()
 
@@ -523,7 +525,7 @@ tools = [search_flood_event]
 # ============== 节点定义 ==============
 
 # 定义节点路由类型
-NodeType = Literal["chat_node", "tool_node", "extraction_node", "confirmation_node", "processing_node", "__end__"]
+NodeType = Literal["chat_node", "tool_node", "extraction_node", "pre_confirmation_node", "confirmation_node", "processing_node", "__end__"]
 
 
 async def entry_node(
@@ -558,6 +560,12 @@ async def entry_node(
                 "location": None,
                 "bounds": None,
                 "geojson": None,
+                "resolved_aoi": None,
+                "aoi_resolution_meta": None,
+                "confirmed_aoi": None,
+                "recommended_layers": [],
+                "selected_layer_ids": [],
+                "confirmation_version": 0,
                 "geo_data": None,
                 "search_sources": [],
                 "gee_code": None,
@@ -663,7 +671,7 @@ async def extraction_node(
     # 如果有完整信息且未确认，进入确认节点
     if has_complete_info and not user_confirmed and current_stage != "completed":
         return Command(
-            goto="confirmation_node",
+            goto="pre_confirmation_node",
             update={
                 "event": event,
                 "event_description": event_description,
@@ -689,6 +697,36 @@ async def extraction_node(
     )
 
 
+async def pre_confirmation_node(
+    state: FloodAgentState, config: RunnableConfig
+) -> Command[NodeType]:
+    confirmation_context = build_confirmation_context(
+        event=state.get("event"),
+        event_description=state.get("event_description"),
+        location=state.get("location"),
+        pre_date=state.get("pre_date"),
+        peek_date=state.get("peek_date"),
+        after_date=state.get("after_date"),
+        confirmation_version=(state.get("confirmation_version") or 0) + 1,
+    )
+
+    return Command(
+        goto="confirmation_node",
+        update={
+            "resolved_aoi": confirmation_context.get("resolved_aoi"),
+            "aoi_resolution_meta": confirmation_context.get("aoi_resolution_meta"),
+            "confirmed_aoi": confirmation_context.get("confirmed_aoi"),
+            "recommended_layers": confirmation_context.get("recommended_layers", []),
+            "selected_layer_ids": confirmation_context.get("selected_layer_ids", []),
+            "confirmation_version": confirmation_context.get("confirmation_version", 1),
+            "coordinates": confirmation_context.get("coordinates"),
+            "bounds": confirmation_context.get("bounds"),
+            "geojson": confirmation_context.get("geojson"),
+            "geo_data": confirmation_context.get("geo_data"),
+        }
+    )
+
+
 async def confirmation_node(
     state: FloodAgentState, config: RunnableConfig
 ) -> Command[NodeType]:
@@ -706,6 +744,12 @@ async def confirmation_node(
     pre_date = state.get("pre_date")
     peek_date = state.get("peek_date")
     after_date = state.get("after_date")
+    resolved_aoi = state.get("resolved_aoi")
+    aoi_resolution_meta = state.get("aoi_resolution_meta")
+    recommended_layers = state.get("recommended_layers") or []
+    selected_layer_ids = state.get("selected_layer_ids") or []
+    confirmed_aoi = state.get("confirmed_aoi") or resolved_aoi
+    confirmation_version = state.get("confirmation_version") or 1
     
     # 使用 interrupt 暂停执行，等待用户确认
     confirmed_data_raw = interrupt({
@@ -718,6 +762,12 @@ async def confirmation_node(
             "pre_date": pre_date,
             "peek_date": peek_date,
             "after_date": after_date,
+            "resolved_aoi": resolved_aoi,
+            "aoi_resolution_meta": aoi_resolution_meta,
+            "recommended_layers": recommended_layers,
+            "selected_layer_ids": selected_layer_ids,
+            "confirmed_aoi": confirmed_aoi,
+            "confirmation_version": confirmation_version,
         }
     })
     
@@ -755,6 +805,12 @@ async def confirmation_node(
             "pre_date": confirmed_data.get("pre_date", pre_date),
             "peek_date": confirmed_data.get("peek_date", peek_date),
             "after_date": confirmed_data.get("after_date", after_date),
+            "resolved_aoi": confirmed_data.get("resolved_aoi", resolved_aoi),
+            "aoi_resolution_meta": confirmed_data.get("aoi_resolution_meta", aoi_resolution_meta),
+            "recommended_layers": confirmed_data.get("recommended_layers", recommended_layers),
+            "selected_layer_ids": confirmed_data.get("selected_layer_ids", selected_layer_ids),
+            "confirmed_aoi": confirmed_data.get("confirmed_aoi", confirmed_aoi),
+            "confirmation_version": confirmed_data.get("confirmation_version", confirmation_version),
             "stage": "confirmed",
             "user_confirmed": True,
         }
@@ -780,11 +836,23 @@ async def processing_node(
     pre_date = state.get("pre_date")
     peek_date = state.get("peek_date")
     after_date = state.get("after_date")
+    confirmed_aoi = state.get("confirmed_aoi") or state.get("resolved_aoi")
     
     print(f"📍 正在获取地理坐标: {location}")
     
     # 获取地理坐标
-    geo_data = _get_location_coordinates_internal(location) if location else None
+    existing_geo_data = dict(state.get("geo_data") or {})
+    geo_data = existing_geo_data
+
+    if confirmed_aoi:
+        geo_data.update(aoi_to_legacy_fields(confirmed_aoi))
+    else:
+        if state.get("coordinates") is not None:
+            geo_data["coordinates"] = state.get("coordinates")
+        if state.get("bounds") is not None:
+            geo_data["bounds"] = state.get("bounds")
+        if state.get("geojson") is not None:
+            geo_data["geojson"] = state.get("geojson")
     
     if geo_data:
         coordinates = geo_data.get("coordinates")
@@ -897,6 +965,12 @@ This flood event has caused certain impacts. Further information collection is n
             "coordinates": coordinates,
             "bounds": bounds,
             "geojson": geojson,
+            "resolved_aoi": state.get("resolved_aoi"),
+            "aoi_resolution_meta": state.get("aoi_resolution_meta"),
+            "confirmed_aoi": confirmed_aoi,
+            "recommended_layers": state.get("recommended_layers") or [],
+            "selected_layer_ids": state.get("selected_layer_ids") or [],
+            "confirmation_version": state.get("confirmation_version") or 1,
             "geo_data": geo_data,
             "search_sources": search_sources,
             "gee_code": gee_code,
@@ -916,6 +990,7 @@ workflow.add_node("entry_node", entry_node)           # 入口路由
 workflow.add_node("chat_node", chat_node)             # LLM 对话 + 工具调用
 workflow.add_node("tool_node", ToolNode(tools=tools)) # 工具执行
 workflow.add_node("extraction_node", extraction_node) # 信息提取
+workflow.add_node("pre_confirmation_node", pre_confirmation_node)
 workflow.add_node("confirmation_node", confirmation_node)  # 用户确认 (HITL)
 workflow.add_node("processing_node", processing_node) # 地理编码 + 报告生成
 # workflow.add_node("__end__", lambda state, config: None)

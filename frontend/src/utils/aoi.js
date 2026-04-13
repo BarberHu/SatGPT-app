@@ -188,6 +188,64 @@ export const buildAoiFromGeoJSON = (input, overrides = {}) => {
 };
 
 export const buildAoiFromDrawFeature = (feature, overrides = {}) => {
+  return buildAoiFromDrawFeatures(feature ? [feature] : [], overrides);
+};
+
+export const buildAoiFromDrawFeatures = (features = [], overrides = {}) => {
+  if (!Array.isArray(features) || !features.length) {
+    return null;
+  }
+
+  const collection = {
+    type: 'FeatureCollection',
+    features: features
+      .map((feature) => (feature?.type === 'Feature' ? feature : {
+        type: 'Feature',
+        properties: feature?.properties || {},
+        geometry: feature?.geometry || feature,
+      }))
+      .filter((feature) => feature?.geometry?.type === 'Polygon'),
+  };
+
+  if (!collection.features.length) {
+    return null;
+  }
+
+  return buildAoiFromGeoJSON(collection, {
+    source: overrides.source || 'draw',
+    label: overrides.label || 'Drawn boundary',
+  });
+};
+
+export const getDrawFeaturesFromAoi = (aoi) => {
+  const geometry = getAoiGeometry(aoi);
+  if (!geometry) {
+    return [];
+  }
+
+  if (geometry.type === 'Polygon') {
+    return [{
+      type: 'Feature',
+      properties: {},
+      geometry,
+    }];
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    return (geometry.coordinates || []).map((polygon, index) => ({
+      type: 'Feature',
+      properties: { polygonIndex: index },
+      geometry: {
+        type: 'Polygon',
+        coordinates: polygon,
+      },
+    }));
+  }
+
+  return [];
+};
+
+export const buildAoiFromDrawFeatureLegacy = (feature, overrides = {}) => {
   if (!feature || typeof feature !== 'object') {
     return null;
   }
@@ -279,6 +337,12 @@ export const buildAoiFromLegacyCoords = (coordinates) => {
 export const buildAoiFromAgentState = (state, overrides = {}) => {
   if (!state) {
     return null;
+  }
+
+  const preferredAoi = state.confirmed_aoi || state.resolved_aoi || null;
+
+  if (preferredAoi?.geojson) {
+    return parseSerializedAoi(preferredAoi);
   }
 
   if (state.geojson) {

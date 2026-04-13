@@ -3,12 +3,14 @@ FastAPI 后端服务 - 集成 CopilotKit 和 LangGraph
 使用 LangGraphAGUIAgent 作为智能体与 CopilotKit 的连接方式
 """
 import os
+import warnings
 from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from pydantic.warnings import UnsupportedFieldAttributeWarning
 from dotenv import load_dotenv
 import uvicorn
 
@@ -21,6 +23,7 @@ from ag_ui.core import RunStartedEvent
 from flood_agent import graph
 from gee_service import gee_service, get_flood_images
 from gee_code_generator import generate_flood_gee_code
+from flood_dataset_service import build_confirmation_context, renderer
 
 
 # 继承 LangGraphAGUIAgent，只覆写 prepare_stream 一个方法来修 bug
@@ -60,6 +63,7 @@ class PatchedLangGraphAGUIAgent(LangGraphAGUIAgent):
         return result
 
 load_dotenv()
+warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
 # 配置代理
 http_proxy = os.getenv("HTTP_PROXY")
@@ -145,6 +149,12 @@ class FloodState(BaseModel):
     latitude: Optional[float] = None
     bounds: Optional[GeoBounds] = None
     geojson: Optional[dict] = None
+    resolved_aoi: Optional[dict] = None
+    aoi_resolution_meta: Optional[dict] = None
+    confirmed_aoi: Optional[dict] = None
+    recommended_layers: Optional[list[dict]] = None
+    selected_layer_ids: Optional[list[str]] = None
+    confirmation_version: Optional[int] = None
 
 
 # ============== API 端点 ==============
@@ -285,6 +295,25 @@ class FloodImpactRequest(BaseModel):
     geojson: Optional[dict] = None
 
 
+class FloodConfirmationRefreshRequest(BaseModel):
+    event: Optional[str] = None
+    event_description: Optional[str] = None
+    location: Optional[str] = None
+    pre_date: Optional[str] = None
+    peek_date: Optional[str] = None
+    after_date: Optional[str] = None
+    confirmation_version: Optional[int] = 1
+
+
+class RecommendedLayerRenderRequest(BaseModel):
+    layer_id: str
+    recommended_layers: list[dict]
+    confirmed_aoi: dict
+    pre_date: Optional[str] = None
+    peek_date: Optional[str] = None
+    after_date: Optional[str] = None
+
+
 @app.post("/api/flood-impact")
 async def get_flood_impact(request: FloodImpactRequest):
     """
@@ -339,6 +368,39 @@ async def get_flood_impact(request: FloodImpactRequest):
         }
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/flood-confirmation/refresh")
+async def refresh_flood_confirmation(request: FloodConfirmationRefreshRequest):
+    try:
+        context = build_confirmation_context(
+            event=request.event,
+            event_description=request.event_description,
+            location=request.location,
+            pre_date=request.pre_date,
+            peek_date=request.peek_date,
+            after_date=request.after_date,
+            confirmation_version=request.confirmation_version or 1,
+        )
+        return {"success": True, "data": context}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/recommended-layer-render")
+async def render_recommended_layer(request: RecommendedLayerRenderRequest):
+    try:
+        rendered = renderer.render_layer(
+            layer_id=request.layer_id,
+            recommended_layers=request.recommended_layers,
+            confirmed_aoi=request.confirmed_aoi,
+            pre_date=request.pre_date,
+            peek_date=request.peek_date,
+            after_date=request.after_date,
+        )
+        return {"success": True, "data": rendered}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

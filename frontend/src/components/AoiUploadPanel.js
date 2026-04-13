@@ -4,7 +4,7 @@ import { useAppContext } from '../context/AppContext';
 import { buildAoiFromAgentState, buildAoiFromGeoJSON } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 
-function AoiUploadPanel({ variant = 'ask' }) {
+function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
   const fileInputRef = useRef(null);
   const [isParsing, setIsParsing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -39,6 +39,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
 
   const clearAoi = () => {
     clearAoiState();
+    onAoiChange?.(null, { action: 'clear' });
     trackUxEvent('aoi_clear', { mode: variant });
   };
 
@@ -99,6 +100,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
       setSelectedAOI(aoi);
       cancelDraftAoi();
       resetAgentSession({ preserveSelectedAoi: true });
+      onAoiChange?.(aoi, { action: 'upload' });
       trackUxEvent('aoi_upload_success', {
         mode: variant,
         fileName: file.name,
@@ -138,6 +140,7 @@ function AoiUploadPanel({ variant = 'ask' }) {
   const handleApply = () => {
     const applied = applyDraftAoi();
     if (applied) {
+      onAoiChange?.(applied, { action: 'apply' });
       trackUxEvent('aoi_edit_apply', { mode: variant });
     }
   };

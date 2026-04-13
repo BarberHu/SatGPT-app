@@ -4,6 +4,7 @@ import csv
 import json
 import re
 import time
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from html import unescape
@@ -15,7 +16,62 @@ import requests
 OFFICIAL_WATER_TAG_URL = "https://developers.google.com/earth-engine/datasets/tags/water?hl=zh-cn"
 OFFICIAL_DATASET_URL_TEMPLATE = "https://developers.google.com/earth-engine/datasets/catalog/{slug}?hl=zh-cn"
 USER_AGENT = "SatGPT-Water-Asset-Agent/0.1"
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
+
+
+LEGEND_SPEC_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "JRC/GSW1_2/MonthlyHistory": {
+        "type": "categorical",
+        "label": "Monthly water class",
+        "items": [
+            {"value": 0, "label": "No data", "color": "#ffffff"},
+            {"value": 1, "label": "Land", "color": "#fffcb8"},
+            {"value": 2, "label": "Water", "color": "#0905ff"},
+        ],
+    },
+    "JRC/GSW1_2/YearlyHistory": {
+        "type": "categorical",
+        "label": "Yearly water class",
+        "items": [
+            {"value": 0, "label": "No data", "color": "#cccccc"},
+            {"value": 1, "label": "Land", "color": "#ffffff"},
+            {"value": 2, "label": "Seasonal water", "color": "#99d9ea"},
+            {"value": 3, "label": "Permanent water", "color": "#0000ff"},
+        ],
+    },
+    "JRC/GSW1_4/MonthlyHistory": {
+        "type": "categorical",
+        "label": "Monthly water class",
+        "items": [
+            {"value": 0, "label": "No data", "color": "#ffffff"},
+            {"value": 1, "label": "Land", "color": "#fffcb8"},
+            {"value": 2, "label": "Water", "color": "#0905ff"},
+        ],
+    },
+    "JRC/GSW1_4/YearlyHistory": {
+        "type": "categorical",
+        "label": "Yearly water class",
+        "items": [
+            {"value": 0, "label": "No data", "color": "#cccccc"},
+            {"value": 1, "label": "Land", "color": "#ffffff"},
+            {"value": 2, "label": "Seasonal water", "color": "#99d9ea"},
+            {"value": 3, "label": "Permanent water", "color": "#0000ff"},
+        ],
+    },
+}
+
+CATEGORICAL_HINT_TOKENS = (
+    "class",
+    "classification",
+    "history",
+    "extent",
+    "mask",
+    "transition",
+    "seasonal",
+    "monthlyhistory",
+    "yearlyhistory",
+    "waterclass",
+)
 
 
 @dataclass
@@ -37,6 +93,7 @@ class AssetRecord:
     band_metadata: List[Dict[str, Any]] = field(default_factory=list)
     official_example_code: str = ""
     official_example_vis: Dict[str, Any] = field(default_factory=dict)
+    legend_spec: Dict[str, Any] = field(default_factory=dict)
     default_map_view: Dict[str, Any] = field(default_factory=dict)
     collection_processing_hints: Dict[str, Any] = field(default_factory=dict)
 
@@ -76,6 +133,19 @@ def _coerce_float(raw: Optional[str]) -> Optional[float]:
         return float(text)
     except ValueError:
         return None
+
+
+def _normalize_color(raw: Any, fallback: str = "#0ea5e9") -> str:
+    if not isinstance(raw, str):
+        return fallback
+    value = raw.strip()
+    if not value:
+        return fallback
+    if value.startswith("#") or re.fullmatch(r"[a-zA-Z]+", value):
+        return value
+    if re.fullmatch(r"[0-9a-fA-F]{3,8}", value):
+        return f"#{value}"
+    return value
 
 
 def _infer_themes(text: str) -> List[str]:
@@ -285,6 +355,151 @@ def _default_vis_params(
     return {"min": 0, "max": 1, "palette": ["f7fbff", "6baed6", "08306b"]}
 
 
+def _legend_label(asset: AssetRecord) -> str:
+    vis = asset.official_example_vis or asset.default_vis_params or {}
+    if vis.get("bands"):
+        return ", ".join(str(item) for item in vis["bands"])
+    primary_band = next(
+        (
+            band.get("name")
+            for band in asset.band_metadata
+            if isinstance(band, dict) and band.get("name")
+        ),
+        None,
+    )
+    if primary_band and len(asset.band_metadata) == 1:
+        return primary_band
+    return asset.title
+
+
+def _categorical_text(asset: AssetRecord, vis: Dict[str, Any]) -> str:
+    return " ".join(
+        [
+            asset.asset_id.lower(),
+            asset.title.lower(),
+            asset.summary.lower(),
+            " ".join(str(item).lower() for item in vis.get("bands", [])),
+            " ".join(
+                f"{band.get('name', '')} {band.get('description', '')}".lower()
+                for band in asset.band_metadata
+                if isinstance(band, dict)
+            ),
+        ]
+    )
+
+
+def _should_use_categorical(asset: AssetRecord, vis: Dict[str, Any], palette: List[str]) -> bool:
+    min_value = vis.get("min")
+    max_value = vis.get("max")
+    if min_value is None or max_value is None:
+        return False
+    if not isinstance(min_value, (int, float)) or not isinstance(max_value, (int, float)):
+        return False
+    if not float(min_value).is_integer() or not float(max_value).is_integer():
+        return False
+
+    span = int(max_value - min_value)
+    if span < 0 or span > 12 or len(palette) != span + 1:
+        return False
+
+    text = _categorical_text(asset, vis)
+    if any(token in text for token in CATEGORICAL_HINT_TOKENS):
+        return True
+
+    return asset.asset_id in LEGEND_SPEC_OVERRIDES
+
+
+def _generic_category_label(value: int) -> str:
+    return f"Class {value}"
+
+
+def _build_categorical_legend(asset: AssetRecord, vis: Dict[str, Any], palette: List[str]) -> Optional[Dict[str, Any]]:
+    override = LEGEND_SPEC_OVERRIDES.get(asset.asset_id)
+    if override:
+        payload = deepcopy(override)
+        payload["items"] = [
+            {**item, "color": _normalize_color(item.get("color"))}
+            for item in payload.get("items", [])
+        ]
+        return payload
+
+    min_value = vis.get("min")
+    max_value = vis.get("max")
+    if min_value is None or max_value is None:
+        return None
+
+    start = int(min_value)
+    end = int(max_value)
+    items = []
+    for offset, value in enumerate(range(start, end + 1)):
+        items.append(
+            {
+                "value": value,
+                "label": _generic_category_label(value),
+                "color": _normalize_color(palette[offset]),
+            }
+        )
+    return {
+        "type": "categorical",
+        "label": _legend_label(asset),
+        "items": items,
+    }
+
+
+def _build_continuous_legend(asset: AssetRecord, vis: Dict[str, Any], palette: List[str]) -> Dict[str, Any]:
+    return {
+        "type": "continuous",
+        "label": _legend_label(asset),
+        "palette": [_normalize_color(color) for color in palette],
+        "min": vis.get("min"),
+        "max": vis.get("max"),
+        "bands": [str(item) for item in vis.get("bands", [])],
+    }
+
+
+def _build_vector_legend(asset: AssetRecord, style: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "vector",
+        "label": asset.title,
+        "style": {
+            "color": _normalize_color(style.get("color"), "#00bcd4"),
+            "fillColor": _normalize_color(style.get("fillColor"), "#00000000"),
+            "width": style.get("width", 2),
+        },
+    }
+
+
+def _build_text_legend(asset: AssetRecord, reason: str) -> Dict[str, Any]:
+    return {
+        "type": "text",
+        "label": _legend_label(asset),
+        "reason": reason,
+    }
+
+
+def _infer_legend_spec(asset: AssetRecord) -> Dict[str, Any]:
+    vis = asset.official_example_vis or asset.default_vis_params or {}
+
+    if asset.asset_type == "FeatureCollection":
+        style = vis.get("style") or asset.default_vis_params.get("style") or {}
+        return _build_vector_legend(asset, style)
+
+    style = vis.get("style")
+    if isinstance(style, dict) and style:
+        return _build_vector_legend(asset, style)
+
+    palette = [str(item) for item in (vis.get("palette") or []) if item]
+    if palette and _should_use_categorical(asset, vis, palette):
+        categorical = _build_categorical_legend(asset, vis, palette)
+        if categorical:
+            return categorical
+
+    if palette:
+        return _build_continuous_legend(asset, vis, palette)
+
+    return _build_text_legend(asset, "missing_palette_or_vector_style")
+
+
 def _constraints(asset_type: str, temporal_type: str, spatial_scope: str) -> List[str]:
     constraints: List[str] = []
     if asset_type == "ImageCollection":
@@ -304,9 +519,20 @@ def _coerce_asset_record(item: Dict[str, Any]) -> AssetRecord:
     payload.setdefault("band_metadata", [])
     payload.setdefault("official_example_code", "")
     payload.setdefault("official_example_vis", {})
+    payload.setdefault("legend_spec", {})
     payload.setdefault("default_map_view", {})
     payload.setdefault("collection_processing_hints", {})
-    return AssetRecord(**payload)
+    record = AssetRecord(**payload)
+    if not record.default_vis_params:
+        record.default_vis_params = _default_vis_params(
+            record.asset_id,
+            record.asset_type,
+            record.band_metadata,
+            record.official_example_vis,
+        )
+    if not record.legend_spec:
+        record.legend_spec = _infer_legend_spec(record)
+    return record
 
 
 class WaterAssetCatalogBuilder:
@@ -315,27 +541,32 @@ class WaterAssetCatalogBuilder:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.inventory_csv_path = self.cache_path.with_name("water_asset_inventory.csv")
         self.inventory_summary_path = self.cache_path.with_name("water_asset_inventory_summary.json")
+        self.legend_summary_path = self.cache_path.with_name("water_asset_legend_summary.json")
 
-    def load(self, force_refresh: bool = False) -> List[AssetRecord]:
-        if not force_refresh and self.cache_path.exists():
-            payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            assets_payload = payload.get("assets", [])
-            needs_refresh = payload.get("schema_version", 0) < CACHE_SCHEMA_VERSION or any(
-                "band_metadata" not in item or "official_example_vis" not in item for item in assets_payload
-            )
-            if not needs_refresh:
-                assets = [_coerce_asset_record(item) for item in assets_payload]
-                self._write_inventory_files(assets)
-                return assets
-        assets = self.refresh()
+    def _write_cache_payload(self, assets: List[AssetRecord], source: Optional[str] = None) -> None:
         payload = {
-            "source": OFFICIAL_WATER_TAG_URL,
+            "source": source or OFFICIAL_WATER_TAG_URL,
             "schema_version": CACHE_SCHEMA_VERSION,
             "refreshed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
             "asset_count": len(assets),
             "assets": [asdict(item) for item in assets],
         }
         self.cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def load(self, force_refresh: bool = False) -> List[AssetRecord]:
+        if not force_refresh and self.cache_path.exists():
+            payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
+            assets_payload = payload.get("assets", [])
+            assets = [_coerce_asset_record(item) for item in assets_payload]
+            needs_rewrite = payload.get("schema_version", 0) < CACHE_SCHEMA_VERSION or any(
+                "legend_spec" not in item for item in assets_payload
+            )
+            if needs_rewrite:
+                self._write_cache_payload(assets, source=payload.get("source"))
+            self._write_inventory_files(assets)
+            return assets
+        assets = self.refresh()
+        self._write_cache_payload(assets)
         self._write_inventory_files(assets)
         return assets
 
@@ -422,6 +653,26 @@ class WaterAssetCatalogBuilder:
             band_metadata=band_metadata,
             official_example_code=example_code,
             official_example_vis=official_example_vis,
+            legend_spec=_infer_legend_spec(
+                AssetRecord(
+                    slug=slug,
+                    title=title,
+                    asset_id=asset_id,
+                    asset_type=asset_type,
+                    summary=summary,
+                    official_url=url,
+                    themes=themes,
+                    spatial_scope=spatial_scope,
+                    temporal_type=temporal_type,
+                    query_keywords=query_keywords,
+                    default_vis_params=default_vis,
+                    constraints=constraints,
+                    priority=priority,
+                    band_metadata=band_metadata,
+                    official_example_code=example_code,
+                    official_example_vis=official_example_vis,
+                )
+            ),
             default_map_view=default_map_view,
             collection_processing_hints=collection_hints,
         )
@@ -475,8 +726,35 @@ class WaterAssetCatalogBuilder:
                 asset_type: sum(1 for asset in assets if asset.asset_type == asset_type)
                 for asset_type in sorted({asset.asset_type for asset in assets})
             },
+            "by_legend_type": {
+                legend_type: sum(1 for asset in assets if asset.legend_spec.get("type") == legend_type)
+                for legend_type in sorted({asset.legend_spec.get("type", "unknown") for asset in assets})
+            },
+            "text_fallback_assets": [
+                {
+                    "asset_id": asset.asset_id,
+                    "title": asset.title,
+                    "official_url": asset.official_url,
+                    "reason": asset.legend_spec.get("reason"),
+                }
+                for asset in assets
+                if asset.legend_spec.get("type") == "text"
+            ],
         }
         self.inventory_summary_path.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self.legend_summary_path.write_text(
+            json.dumps(
+                {
+                    "generated_at": summary["generated_at"],
+                    "total_assets": len(assets),
+                    "by_legend_type": summary["by_legend_type"],
+                    "text_fallback_assets": summary["text_fallback_assets"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
