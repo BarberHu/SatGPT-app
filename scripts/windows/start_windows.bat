@@ -33,9 +33,21 @@ if not exist "%ROOT_DIR%\frontend\node_modules" (
     exit /b 1
 )
 
+if not exist "%ROOT_DIR%\frontend\node_modules\react-scripts\bin\react-scripts.js" (
+    echo [ERROR] Frontend dependencies are incomplete: react-scripts is missing.
+    echo Run "scripts\windows\setup_windows.bat" or reinstall frontend dependencies.
+    exit /b 1
+)
+
 if not exist "%ROOT_DIR%\runtime\node_modules" (
     echo [ERROR] Missing runtime\node_modules.
     echo Run "scripts\windows\setup_windows.bat" first.
+    exit /b 1
+)
+
+if not exist "%ROOT_DIR%\runtime\node_modules\.bin\tsx.cmd" (
+    echo [ERROR] Runtime dependencies are incomplete: tsx is missing.
+    echo Run "scripts\windows\setup_windows.bat" or reinstall runtime dependencies.
     exit /b 1
 )
 
@@ -69,11 +81,11 @@ if "%DRY_RUN%"=="1" (
 
 echo [4/4] Starting Node services...
 if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& npm run dev
-    echo DRY-RUN: start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& npm start
+    echo DRY-RUN: start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& call npm start
+    echo DRY-RUN: start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
 ) else (
-    start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& npm run dev
-    start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& npm start
+    start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& call npm start
+    start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
 )
 
 echo.

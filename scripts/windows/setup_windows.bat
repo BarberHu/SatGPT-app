@@ -60,10 +60,10 @@ if "%DRY_RUN%"=="1" (
 
 echo [4/5] Installing frontend dependencies...
 if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: cd /d "%ROOT_DIR%\frontend" ^&^& npm install
+    echo DRY-RUN: cd /d "%ROOT_DIR%\frontend" ^&^& call npm install
 ) else (
     pushd "%ROOT_DIR%\frontend"
-    npm install
+    call npm install
     if errorlevel 1 (
         popd
         exit /b 1
@@ -73,15 +73,33 @@ if "%DRY_RUN%"=="1" (
 
 echo [5/5] Installing runtime dependencies...
 if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: cd /d "%ROOT_DIR%\runtime" ^&^& npm install
+    echo DRY-RUN: cd /d "%ROOT_DIR%\runtime" ^&^& call npm install
 ) else (
     pushd "%ROOT_DIR%\runtime"
-    npm install
+    call npm install
     if errorlevel 1 (
         popd
         exit /b 1
     )
     popd
+)
+
+echo.
+echo Validating installed dependencies...
+if "%DRY_RUN%"=="1" (
+    echo DRY-RUN: check "%ROOT_DIR%\frontend\node_modules\react-scripts\bin\react-scripts.js"
+    echo DRY-RUN: check "%ROOT_DIR%\runtime\node_modules\.bin\tsx.cmd"
+) else (
+    if not exist "%ROOT_DIR%\frontend\node_modules\react-scripts\bin\react-scripts.js" (
+        echo [ERROR] Frontend dependency check failed: react-scripts is missing.
+        echo Try running: cd /d "%ROOT_DIR%\frontend" ^&^& npm install
+        exit /b 1
+    )
+    if not exist "%ROOT_DIR%\runtime\node_modules\.bin\tsx.cmd" (
+        echo [ERROR] Runtime dependency check failed: tsx is missing.
+        echo Try running: cd /d "%ROOT_DIR%\runtime" ^&^& npm install
+        exit /b 1
+    )
 )
 
 if not exist "%ROOT_DIR%\.env" (
