@@ -5,14 +5,14 @@
  * Supports Human-in-the-Loop (HITL)
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt, useCopilotMessagesContext } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import SourcesDrawer from './SourcesDrawer';
 import AoiUploadPanel from './AoiUploadPanel';
-import { getFloodImages, getFloodImpact } from '../services/agentApi';
+import { getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
 import { buildAoiFromAgentState } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 import './AgentPanel.css';
@@ -30,10 +30,185 @@ const defaultAgentState = {
   coordinates: null,
   bounds: null,
   geojson: null,
+  resolved_aoi: null,
+  aoi_resolution_meta: null,
+  confirmed_aoi: null,
+  recommended_layers: [],
+  selected_layer_ids: [],
+  confirmation_version: 0,
   search_sources: null,
   gee_code: null,
   is_valid_flood_query: false,
 };
+
+const buildRecommendedLayerContextKey = (state, aoi) => JSON.stringify({
+  confirmation_version: state?.confirmation_version || 0,
+  pre_date: state?.pre_date || null,
+  peek_date: state?.peek_date || null,
+  after_date: state?.after_date || null,
+  bounds: aoi?.bounds || null,
+  geojson: aoi?.geojson?.geometry || aoi?.geojson || null,
+});
+
+const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
+
+const normalizeLegendColor = (value) => {
+  if (!value || typeof value !== 'string') {
+    return '#0ea5e9';
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '#0ea5e9';
+  }
+
+  if (trimmed.startsWith('#') || /^[a-z]+$/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/^[0-9a-f]{3,8}$/i.test(trimmed)) {
+    return `#${trimmed}`;
+  }
+
+  return trimmed;
+};
+
+const buildRecommendedLegendModel = (descriptor, fallbackTitle) => {
+  if (!descriptor) {
+    return null;
+  }
+
+  const legend = descriptor.legend || {};
+  const visRecipe = descriptor.vis_recipe || {};
+  const legendSpec = descriptor.source_meta?.legend_spec || descriptor.legend_spec || null;
+  const fallbackLabel = legend.label || descriptor.source_meta?.title || fallbackTitle || 'Recommended layer';
+
+  if (legendSpec?.type === 'categorical' && Array.isArray(legendSpec.items)) {
+    return {
+      type: 'classes',
+      label: legendSpec.label || fallbackLabel,
+      items: legendSpec.items.map((item) => ({
+        ...item,
+        color: normalizeLegendColor(item.color),
+      })),
+    };
+  }
+
+  if (legendSpec?.type === 'continuous' && Array.isArray(legendSpec.palette) && legendSpec.palette.length) {
+    return {
+      type: 'palette',
+      label: legendSpec.label || fallbackLabel,
+      palette: legendSpec.palette.map(normalizeLegendColor),
+      min: legendSpec.min,
+      max: legendSpec.max,
+    };
+  }
+
+  if (legendSpec?.type === 'vector' && legendSpec.style) {
+    return {
+      type: 'solid',
+      label: legendSpec.label || fallbackLabel,
+      color: normalizeLegendColor(legendSpec.style.color || legendSpec.style.fillColor),
+    };
+  }
+
+  if (legendSpec?.type === 'text') {
+    return {
+      type: 'text',
+      label: legendSpec.label || fallbackLabel,
+    };
+  }
+
+  if (Array.isArray(legend.palette) && legend.palette.length) {
+    return {
+      type: 'palette',
+      label: fallbackLabel,
+      palette: legend.palette.map(normalizeLegendColor),
+      min: legend.min,
+      max: legend.max,
+    };
+  }
+
+  const solidColor =
+    visRecipe?.style?.color
+    || visRecipe?.style?.fillColor
+    || (Array.isArray(visRecipe?.palette) && visRecipe.palette[visRecipe.palette.length - 1])
+    || '#0ea5e9';
+
+  return {
+    type: 'solid',
+    label: fallbackLabel,
+    color: normalizeLegendColor(solidColor),
+  };
+};
+
+function RecommendedLegendPreview({ legendModel }) {
+  if (!legendModel) {
+    return null;
+  }
+
+  if (legendModel.type === 'text') {
+    return (
+      <div className="recommended-legend-preview text-only">
+        <div className="recommended-legend-meta">
+          <span className="recommended-legend-label">{legendModel.label}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (legendModel.type === 'classes') {
+    return (
+      <div className="recommended-legend-preview classes">
+        <div className="recommended-legend-class-row">
+          {legendModel.items.map((item) => (
+            <div className="recommended-legend-class-chip" key={`${legendModel.label}-${item.value}`}>
+              <span
+                className="recommended-legend-class-color"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="recommended-legend-class-text">{item.value}</span>
+            </div>
+          ))}
+        </div>
+        <div className="recommended-legend-meta">
+          <span className="recommended-legend-range">{legendModel.label}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (legendModel.type === 'palette') {
+    return (
+      <div className="recommended-legend-preview">
+        <div
+          className="recommended-legend-swatch gradient"
+          style={{
+            backgroundImage: `linear-gradient(90deg, ${legendModel.palette.join(', ')})`,
+          }}
+        />
+        <div className="recommended-legend-meta">
+          <span className="recommended-legend-label">{legendModel.label}</span>
+          {(legendModel.min !== undefined && legendModel.max !== undefined) ? (
+            <span className="recommended-legend-range">{legendModel.min} - {legendModel.max}</span>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="recommended-legend-preview">
+      <div
+        className="recommended-legend-swatch solid"
+        style={{ backgroundColor: legendModel.color }}
+      />
+      <div className="recommended-legend-meta">
+        <span className="recommended-legend-label">{legendModel.label}</span>
+      </div>
+    </div>
+  );
+}
 
 // Download report as Markdown file
 function downloadReport(report, eventName) {
@@ -491,7 +666,12 @@ function AgentPanel() {
     setAgentImpactData,
     agentImpactLoading,
     setAgentImpactLoading,
+    agentRecommendedLayerData,
+    setAgentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
+    setAgentRecommendedLayerVisibility,
     agentLayerLoading,
+    setAgentLayerLoading,
     agentTileError,
     setAgentTileError,
   } = useAppContext();
@@ -518,6 +698,7 @@ function AgentPanel() {
 
   const imageryRequestKeyRef = useRef(null);
   const impactRequestKeyRef = useRef(null);
+  const pendingRecommendedLayerRequestsRef = useRef(new Set());
 
   useEffect(() => {
     if (state) {
@@ -530,6 +711,68 @@ function AgentPanel() {
     source: 'agent_geocode',
     label: currentState.location || 'Agent-derived boundary',
   });
+  const recommendedCatalogLayers = useMemo(
+    () => (currentState.recommended_layers || []).filter((layer) => layer.layer_family === 'catalog'),
+    [currentState.recommended_layers]
+  );
+  const confirmedRecommendedCatalogLayers = useMemo(() => {
+    const confirmedIds = new Set(currentState.selected_layer_ids || []);
+    return recommendedCatalogLayers.filter((layer) => confirmedIds.has(layer.id));
+  }, [currentState.selected_layer_ids, recommendedCatalogLayers]);
+  const recommendedLayerContextKey = buildRecommendedLayerContextKey(currentState, effectiveAoi);
+  const recommendedLegendEntries = useMemo(
+    () => confirmedRecommendedCatalogLayers
+      .filter((layer) => agentRecommendedLayerVisibility[layer.id])
+      .map((layer) => ({
+        id: layer.id,
+        title: layer.title,
+        descriptor: agentRecommendedLayerData?.[layer.id] || null,
+        legendModel: buildRecommendedLegendModel(agentRecommendedLayerData?.[layer.id], layer.title),
+      }))
+      .filter((item) => item.descriptor?.tile_url && item.legendModel),
+    [agentRecommendedLayerData, agentRecommendedLayerVisibility, confirmedRecommendedCatalogLayers]
+  );
+
+  useEffect(() => {
+    if (!(currentState.recommended_layers || []).length) {
+      setAgentRecommendedLayerVisibility({});
+      setAgentRecommendedLayerData({});
+      return;
+    }
+
+    setAgentRecommendedLayerVisibility(() => {
+      const next = {};
+      (currentState.recommended_layers || []).forEach((layer) => {
+        next[layer.id] = (currentState.selected_layer_ids || []).includes(layer.id);
+      });
+      return next;
+    });
+  }, [
+    currentState.confirmation_version,
+    currentState.recommended_layers,
+    currentState.selected_layer_ids,
+    setAgentRecommendedLayerData,
+    setAgentRecommendedLayerVisibility,
+  ]);
+
+  useEffect(() => {
+    const selectedIds = currentState.selected_layer_ids || [];
+    setAgentShowFloodDetection(selectedIds.includes('core:flood_detection'));
+    setAgentShowPopulationLayer(selectedIds.includes('core:population'));
+    setAgentShowUrbanLayer(selectedIds.includes('core:urban'));
+    setAgentShowLandcoverLayer(selectedIds.includes('core:landcover'));
+  }, [
+    currentState.selected_layer_ids,
+    setAgentShowFloodDetection,
+    setAgentShowLandcoverLayer,
+    setAgentShowPopulationLayer,
+    setAgentShowUrbanLayer,
+  ]);
+
+  useEffect(() => {
+    setAgentRecommendedLayerData({});
+    pendingRecommendedLayerRequestsRef.current.clear();
+  }, [recommendedLayerContextKey, setAgentRecommendedLayerData]);
 
   const fetchAgentImagery = useCallback(async (agentState, aoi) => {
     const requestKey = JSON.stringify({
@@ -693,6 +936,92 @@ function AgentPanel() {
       fetchImpactData();
     }
   }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, fetchImpactData]);
+
+  useEffect(() => {
+    const visibleCatalogLayers = recommendedCatalogLayers.filter((layer) => agentRecommendedLayerVisibility[layer.id]);
+    if (!visibleCatalogLayers.length || !effectiveAoi) {
+      return;
+    }
+
+    let cancelled = false;
+    const layersToRender = visibleCatalogLayers.filter((layer) => {
+      const cached = agentRecommendedLayerData?.[layer.id];
+      const requestToken = `${recommendedLayerContextKey}:${layer.id}`;
+      return !(
+        (cached?.tile_url && cached?.context_key === recommendedLayerContextKey)
+        || pendingRecommendedLayerRequestsRef.current.has(requestToken)
+      );
+    });
+
+    if (!layersToRender.length) {
+      return undefined;
+    }
+
+    const processLayer = async (layer) => {
+      const requestToken = `${recommendedLayerContextKey}:${layer.id}`;
+
+      pendingRecommendedLayerRequestsRef.current.add(requestToken);
+      setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: true }));
+
+      try {
+        const result = await renderRecommendedLayer({
+          layer_id: layer.id,
+          recommended_layers: currentState.recommended_layers || [],
+          confirmed_aoi: effectiveAoi,
+          pre_date: currentState.pre_date,
+          peek_date: currentState.peek_date,
+          after_date: currentState.after_date,
+        });
+
+        if (cancelled || !result?.success) {
+          return;
+        }
+
+        setAgentRecommendedLayerData((previous) => ({
+          ...previous,
+          [layer.id]: {
+            ...result.data,
+            context_key: recommendedLayerContextKey,
+          },
+        }));
+      } catch (error) {
+        if (!cancelled) {
+          setWarning(error?.message || 'Failed to render recommended layer.');
+        }
+      } finally {
+        pendingRecommendedLayerRequestsRef.current.delete(requestToken);
+        if (!cancelled) {
+          setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: false }));
+        }
+      }
+    };
+
+    const runRenderQueue = async () => {
+      for (let index = 0; index < layersToRender.length && !cancelled; index += RECOMMENDED_LAYER_MAX_CONCURRENCY) {
+        const batch = layersToRender.slice(index, index + RECOMMENDED_LAYER_MAX_CONCURRENCY);
+        await Promise.allSettled(batch.map((layer) => processLayer(layer)));
+      }
+    };
+
+    runRenderQueue();
+    
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    agentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
+    currentState.after_date,
+    currentState.peek_date,
+    currentState.pre_date,
+    currentState.recommended_layers,
+    effectiveAoi,
+    recommendedCatalogLayers,
+    recommendedLayerContextKey,
+    setAgentLayerLoading,
+    setAgentRecommendedLayerData,
+    setWarning,
+  ]);
 
   // Human-in-the-Loop: Handle LangGraph interrupt events
   useLangGraphInterrupt({
@@ -1046,6 +1375,47 @@ function AgentPanel() {
               </div>
             </div>
 
+            {confirmedRecommendedCatalogLayers.length > 0 && (
+              <div className="recommended-layer-panel">
+                <h5>Recommended Datasets</h5>
+                <div className="layer-toggles">
+                  {confirmedRecommendedCatalogLayers.map((layer) => (
+                    <div className="layer-toggle-row recommended-row" key={layer.id}>
+                      <label className="layer-toggle">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(agentRecommendedLayerVisibility[layer.id])}
+                          onChange={() => {
+                            setAgentRecommendedLayerVisibility((previous) => ({
+                              ...previous,
+                              [layer.id]: !previous[layer.id],
+                            }));
+                          }}
+                        />
+                        <div className="recommended-layer-copy">
+                          <span>{layer.title}</span>
+                          {agentRecommendedLayerVisibility[layer.id] && agentRecommendedLayerData?.[layer.id]?.tile_url ? (
+                            <RecommendedLegendPreview
+                              legendModel={buildRecommendedLegendModel(agentRecommendedLayerData?.[layer.id], layer.title)}
+                            />
+                          ) : null}
+                        </div>
+                      </label>
+                      {agentLayerLoading[layer.id] ? (
+                        <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
+                      ) : agentRecommendedLayerVisibility[layer.id] && agentRecommendedLayerData?.[layer.id]?.tile_url ? (
+                        <span className="recommended-layer-status ready">Tile ready</span>
+                      ) : agentRecommendedLayerVisibility[layer.id] ? (
+                        <span className="recommended-layer-status pending">Pending</span>
+                      ) : (
+                        <span className="recommended-layer-status idle">Not loaded</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Tile Error Warning */}
             {agentTileError && (
               <div className="tile-error-banner">
@@ -1092,6 +1462,50 @@ function AgentPanel() {
                     </div>
                   </div>
                 )}
+                {recommendedLegendEntries.map((entry) => (
+                  entry.legendModel.type === 'palette' ? (
+                    <div className="legend-item recommended" key={entry.id}>
+                      <span
+                        className="legend-gradient recommended"
+                        style={{
+                          background: `linear-gradient(90deg, ${entry.legendModel.palette.join(', ')})`,
+                        }}
+                      ></span>
+                      <span>
+                        {entry.legendModel.label}
+                        {(entry.legendModel.min !== undefined && entry.legendModel.max !== undefined)
+                          ? ` (${entry.legendModel.min} - ${entry.legendModel.max})`
+                          : ''}
+                      </span>
+                    </div>
+                  ) : entry.legendModel.type === 'classes' ? (
+                    <div className="legend-item recommended classes" key={entry.id}>
+                      <div className="legend-class-list">
+                        {entry.legendModel.items.map((item) => (
+                          <div className="legend-class-item" key={`${entry.id}-${item.value}`}>
+                            <span
+                              className="legend-dot square"
+                              style={{ background: item.color }}
+                            ></span>
+                            <span>{item.value}: {item.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : entry.legendModel.type === 'text' ? (
+                    <div className="legend-item recommended text-only" key={entry.id}>
+                      <span>{entry.legendModel.label}</span>
+                    </div>
+                  ) : (
+                    <div className="legend-item recommended" key={entry.id}>
+                      <span
+                        className="legend-color"
+                        style={{ background: entry.legendModel.color }}
+                      ></span>
+                      <span>{entry.legendModel.label}</span>
+                    </div>
+                  )
+                ))}
               </div>
             </div>
           </div>

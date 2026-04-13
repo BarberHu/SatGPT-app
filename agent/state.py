@@ -55,10 +55,28 @@ class FloodAgentState(CopilotKitState, total=False):
     
     # 地理边界 {"west": float, "south": float, "east": float, "north": float}
     bounds: Dict[str, float]
-    
+
     # GeoJSON 边界 (不传递给 LLM，仅用于 GEE 服务)
     geojson: Dict[str, Any]
-    
+
+    # 预确认阶段解析出的 AOI
+    resolved_aoi: Dict[str, Any]
+
+    # AOI 解析元数据
+    aoi_resolution_meta: Dict[str, Any]
+
+    # 用户最终确认后的 AOI
+    confirmed_aoi: Dict[str, Any]
+
+    # 推荐图层描述符列表
+    recommended_layers: List[Dict[str, Any]]
+
+    # 当前选中的推荐图层 id 列表
+    selected_layer_ids: List[str]
+
+    # 统一确认版本号
+    confirmation_version: int
+
     # 地理编码原始数据 (不传递给 LLM，用于存储 Nominatim 返回的完整数据)
     geo_data: Dict[str, Any]
     

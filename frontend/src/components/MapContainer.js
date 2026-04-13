@@ -2,7 +2,12 @@ import React, { useEffect, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { useAppContext } from '../context/AppContext';
-import { buildAoiFromAgentState, buildAoiFromDrawFeature, buildAoiFromGridSelection } from '../utils/aoi';
+import {
+  buildAoiFromAgentState,
+  buildAoiFromDrawFeatures,
+  buildAoiFromGridSelection,
+  getDrawFeaturesFromAoi,
+} from '../utils/aoi';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -26,6 +31,7 @@ const AGENT_SOURCE_IDS = [
 ];
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
+const getRecommendedMapLayerId = (layerId) => `agent-rec-${String(layerId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 const DRAW_BLUE = '#2563eb';
 const DRAW_ORANGE = '#f97316';
 const DRAW_WHITE = '#ffffff';
@@ -159,6 +165,7 @@ function MapContainer() {
   const mapRef = useRef(null);
   const drawRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
+  const lastConfirmationFocusRef = useRef(null);
   const gridClickEnabledRef = useRef(true);
   const isAoiEditingRef = useRef(false);
   const editableGeojsonRef = useRef(null);
@@ -193,6 +200,8 @@ function MapContainer() {
     agentShowUrbanLayer,
     agentShowLandcoverLayer,
     agentImpactData,
+    agentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
     setAgentLayerLoading,
     setAgentTileError,
   } = useAppContext();
@@ -406,15 +415,15 @@ function MapContainer() {
     };
   }, [loadGridLayer, reconcileLayerOrder, resetAgentSession, setMapInstance]);
 
-  const syncDraftFromFeature = useCallback((feature) => {
-    const nextDraftAoi = buildAoiFromDrawFeature(feature, {
+  const syncDraftFromFeatures = useCallback((features) => {
+    const nextDraftAoi = buildAoiFromDrawFeatures(features, {
       source: aoiEditorMode === 'edit' ? 'edited' : 'draw',
       label: selectedAOI?.label || 'Manual boundary',
     });
 
     if (!nextDraftAoi) {
       setDraftAOI(null);
-      setWarning('当前绘制结果不是有效的单 Polygon，请重新绘制。');
+      setWarning('Current drawing result is not a valid AOI. Please redraw the boundary.');
       return;
     }
 
@@ -431,16 +440,11 @@ function MapContainer() {
       const createdFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon');
       if (!createdFeature) {
         setDraftAOI(null);
-        setWarning('请绘制一个有效的 Polygon 边界。');
+        setWarning('Please draw a valid polygon boundary.');
         return;
       }
 
-      const allFeatures = draw.getAll().features || [];
-      allFeatures
-        .filter((feature) => feature.id !== createdFeature.id)
-        .forEach((feature) => draw.delete(feature.id));
-
-      syncDraftFromFeature(createdFeature);
+      syncDraftFromFeatures(draw.getAll().features || []);
 
       if (createdFeature.id) {
         window.requestAnimationFrame(() => {
@@ -463,14 +467,18 @@ function MapContainer() {
     };
 
     const handleUpdate = (event) => {
-      const updatedFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon')
-        || draw.getAll().features.find((feature) => feature.geometry?.type === 'Polygon');
-      syncDraftFromFeature(updatedFeature);
+      syncDraftFromFeatures(draw.getAll().features || []);
       promoteDrawLayers(map);
     };
 
     const handleDelete = () => {
-      setDraftAOI(null);
+      const remainingFeatures = draw.getAll().features || [];
+      if (!remainingFeatures.length) {
+        setDraftAOI(null);
+        setWarning('');
+      } else {
+        syncDraftFromFeatures(remainingFeatures);
+      }
       promoteDrawLayers(map);
     };
 
@@ -483,7 +491,7 @@ function MapContainer() {
       map.off('draw.update', handleUpdate);
       map.off('draw.delete', handleDelete);
     };
-  }, [promoteDrawLayers, setDraftAOI, setWarning, syncDraftFromFeature]);
+  }, [promoteDrawLayers, setDraftAOI, setWarning, syncDraftFromFeatures]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -512,13 +520,18 @@ function MapContainer() {
 
     if (aoiEditorMode === 'edit') {
       const editableFeature = editableGeojsonRef.current;
-      if (!editableFeature?.geometry || editableFeature.geometry.type !== 'Polygon') {
-        setWarning('当前边界无法进入编辑模式，请先选择或绘制一个单 Polygon。');
+      const editableFeatures = getDrawFeaturesFromAoi({ geojson: editableFeature });
+      if (!editableFeatures.length) {
+        const editWarning = 'Current boundary cannot be edited. Please select, upload, or draw a valid AOI first.';
+        setWarning(editWarning);
         return;
       }
 
       draw.deleteAll();
-      const featureIds = draw.add(editableFeature);
+      const featureIds = draw.add({
+        type: 'FeatureCollection',
+        features: editableFeatures,
+      });
       const featureId = Array.isArray(featureIds) ? featureIds[0] : featureIds;
 
       if (featureId) {
@@ -755,7 +768,7 @@ function MapContainer() {
     const onTileError = (e) => {
       if (e?.error?.status >= 400 || e?.error?.message?.includes('HTTP') || e?.type === 'error') {
         tileErrorCount++;
-        console.warn('⚠️ Tile load error:', e?.sourceId || 'unknown', e?.error?.message || '');
+        console.warn('Tile load error:', e?.sourceId || 'unknown', e?.error?.message || '');
       }
     };
     map.on('error', onTileError);
@@ -769,12 +782,12 @@ function MapContainer() {
       clearTimeout(timeout);
       setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
       if (tileErrorCount > 0) {
-        console.warn(`⚠️ ${tileErrorCount} tile(s) failed to load.`);
+        console.warn(`${tileErrorCount} tile(s) failed to load.`);
         setAgentTileError({
           count: tileErrorCount,
           message: isTimeout
-            ? 'Map tiles timed out. The GEE imagery URL may have expired — try re-running the analysis.'
-            : 'Some map tiles failed to load. The imagery URL may have expired — try re-running the analysis.',
+            ? 'Map tiles timed out. The GEE imagery URL may have expired. Try re-running the analysis.'
+            : 'Some map tiles failed to load. The imagery URL may have expired. Try re-running the analysis.',
           timestamp: Date.now(),
         });
       } else {
@@ -901,6 +914,73 @@ function MapContainer() {
     return lifecycle.cleanup;
   }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle, reconcileLayerOrder]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    if (appMode !== 'agent') {
+      (map.getStyle()?.layers || [])
+        .map((layer) => layer.id)
+        .filter((id) => id.startsWith('agent-rec-'))
+        .forEach((id) => {
+          if (map.getLayer(id)) {
+            map.removeLayer(id);
+          }
+          if (map.getSource(id)) {
+            map.removeSource(id);
+          }
+        });
+      return;
+    }
+
+    const layerEntries = Object.entries(agentRecommendedLayerData || {});
+    const activeLayerIds = new Set();
+
+    layerEntries.forEach(([layerId, descriptor]) => {
+      const mapLayerId = getRecommendedMapLayerId(layerId);
+      activeLayerIds.add(mapLayerId);
+
+      if (map.getLayer(mapLayerId)) {
+        map.removeLayer(mapLayerId);
+      }
+      if (map.getSource(mapLayerId)) {
+        map.removeSource(mapLayerId);
+      }
+
+      if (!descriptor?.tile_url || !agentRecommendedLayerVisibility?.[layerId]) {
+        return;
+      }
+
+      map.addSource(mapLayerId, {
+        type: 'raster',
+        tiles: [descriptor.tile_url],
+        tileSize: 256,
+      });
+      map.addLayer({
+        id: mapLayerId,
+        type: 'raster',
+        source: mapLayerId,
+        paint: {
+          'raster-opacity': 0.82,
+        },
+      });
+    });
+
+    (map.getStyle()?.layers || [])
+      .map((layer) => layer.id)
+      .filter((id) => id.startsWith('agent-rec-') && !activeLayerIds.has(id))
+      .forEach((id) => {
+        if (map.getLayer(id)) {
+          map.removeLayer(id);
+        }
+        if (map.getSource(id)) {
+          map.removeSource(id);
+        }
+      });
+
+    reconcileLayerOrder(map);
+  }, [agentRecommendedLayerData, agentRecommendedLayerVisibility, appMode, reconcileLayerOrder]);
+
   const displayedAoi = isAoiEditing
     ? null
     : appMode === 'agent'
@@ -909,6 +989,23 @@ function MapContainer() {
         label: floodAgentState?.location || 'Agent-derived boundary',
       })
     : selectedAOI;
+
+  const fitAoiBounds = useCallback((aoi, { force = false, padding = 50, duration = 600 } = {}) => {
+    const map = mapRef.current;
+    if (!map || !aoi?.bounds) return;
+
+    const boundsKey = JSON.stringify(aoi.bounds || {});
+    if (!force && boundsKey === lastFittedAoiRef.current) {
+      return;
+    }
+
+    const { west, south, east, north } = aoi.bounds;
+    map.fitBounds([[west, south], [east, north]], {
+      padding,
+      duration,
+    });
+    lastFittedAoiRef.current = boundsKey;
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -959,11 +1056,35 @@ function MapContainer() {
 
     const boundsKey = JSON.stringify(displayedAoi.bounds || {});
     if (displayedAoi.bounds && boundsKey !== lastFittedAoiRef.current) {
-      const { west, south, east, north } = displayedAoi.bounds;
-      map.fitBounds([[west, south], [east, north]], { padding: 50 });
-      lastFittedAoiRef.current = boundsKey;
+      fitAoiBounds(displayedAoi, { padding: 50, duration: 0 });
     }
-  }, [displayedAoi, reconcileLayerOrder, removeAoiLayers]);
+  }, [displayedAoi, fitAoiBounds, reconcileLayerOrder, removeAoiLayers]);
+
+  useEffect(() => {
+    if (appMode !== 'agent' || isAoiEditing) {
+      return;
+    }
+
+    const confirmedAoi = selectedAOI
+      || floodAgentState?.confirmed_aoi
+      || floodAgentState?.resolved_aoi
+      || null;
+    const confirmationVersion = floodAgentState?.confirmation_version || 0;
+
+    if (!confirmedAoi?.bounds || !confirmationVersion) {
+      return;
+    }
+
+    const focusKey = `${confirmationVersion}:${JSON.stringify(confirmedAoi.bounds)}`;
+    if (focusKey === lastConfirmationFocusRef.current) {
+      return;
+    }
+
+    lastConfirmationFocusRef.current = focusKey;
+    window.requestAnimationFrame(() => {
+      fitAoiBounds(confirmedAoi, { force: true, padding: 64, duration: 800 });
+    });
+  }, [appMode, fitAoiBounds, floodAgentState, isAoiEditing, selectedAOI]);
 
   return (
     <div 

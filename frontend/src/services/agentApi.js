@@ -37,6 +37,26 @@ export const getFloodImpact = async (params) => {
   }
 };
 
+export const refreshFloodConfirmation = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/flood-confirmation/refresh`, params);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to refresh flood confirmation context:', error);
+    throw normalizeAgentApiError(error, 'Failed to refresh boundary and recommended datasets.');
+  }
+};
+
+export const renderRecommendedLayer = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/recommended-layer-render`, params);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to render recommended layer:', error);
+    throw normalizeAgentApiError(error, 'Failed to render recommended layer.');
+  }
+};
+
 export const checkGEEStatus = async () => {
   try {
     const response = await axios.get(`${AGENT_API_BASE}/api/gee-status`);
@@ -60,6 +80,8 @@ export const checkAgentHealth = async () => {
 const agentApi = {
   getFloodImages,
   getFloodImpact,
+  refreshFloodConfirmation,
+  renderRecommendedLayer,
   checkGEEStatus,
   checkAgentHealth,
 };

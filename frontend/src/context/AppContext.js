@@ -11,7 +11,7 @@ export const useAppContext = () => {
   return context;
 };
 
-// FloodAgent 默认状态
+// FloodAgent 濮掓稒顭堥濠氭偐閼哥鍋?
 const defaultFloodAgentState = {
   event: null,
   event_description: null,
@@ -24,6 +24,12 @@ const defaultFloodAgentState = {
   coordinates: null,
   bounds: null,
   geojson: null,
+  resolved_aoi: null,
+  aoi_resolution_meta: null,
+  confirmed_aoi: null,
+  recommended_layers: [],
+  selected_layer_ids: [],
+  confirmation_version: 0,
   search_sources: null,
   is_valid_flood_query: false,
 };
@@ -43,10 +49,10 @@ export const AppProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [warning, setWarning] = useState('');
   
-  // 模式切换: 'ask' 或 'agent'
+  // 婵☆垪鈧磭纭€闁告帒娲﹀畷? 'ask' 闁?'agent'
   const [appMode, setAppMode] = useState('ask');
   
-  // ChatBox 模式切换 (与 appMode 同步)
+  // ChatBox 婵☆垪鈧磭纭€闁告帒娲﹀畷?(濞?appMode 闁告艾鏈?
   const [chatMode, setChatMode] = useState('ask');
   
   // Modal State
@@ -113,10 +119,10 @@ export const AppProvider = ({ children }) => {
   // GEE Code Download
   const [geeCodeUrl, setGeeCodeUrl] = useState(null);
   
-  // ========== FloodAgent 状态 (智能体模式) ==========
+  // ========== FloodAgent 闁绘鍩栭埀?(闁哄懘缂氶崗妯绘媴閹捐尐浣割嚕? ==========
   const [floodAgentState, setFloodAgentState] = useState(defaultFloodAgentState);
   
-  // FloodAgent 影像图层数据
+  // FloodAgent 鐟滄澘宕崕姘跺炊閹呮勾闁轰胶澧楀畵?
   const [agentImagery, setAgentImagery] = useState(null);
   const [agentImageryLoading, setAgentImageryLoading] = useState(false);
   
@@ -130,11 +136,13 @@ export const AppProvider = ({ children }) => {
   const [agentImpactData, setAgentImpactData] = useState(null);
   const [agentImpactLoading, setAgentImpactLoading] = useState(false);
   const [agentTileLoading, setAgentTileLoading] = useState(false);
+  const [agentRecommendedLayerData, setAgentRecommendedLayerData] = useState({});
+  const [agentRecommendedLayerVisibility, setAgentRecommendedLayerVisibility] = useState({});
   // Per-layer loading tracking: { 'base-imagery': bool, 'flood-detection': bool, 'population': bool, 'urban': bool, 'landcover': bool }
   const [agentLayerLoading, setAgentLayerLoading] = useState({});
   const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
   
-  // 更新 FloodAgent 单个字段
+  // 闁哄洤鐡ㄩ弻?FloodAgent 闁告娲戦柌婊呪偓娑欘殕椤?
   const updateFloodAgentField = useCallback((field, value) => {
     setFloodAgentState(prev => ({
       ...prev,
@@ -142,10 +150,12 @@ export const AppProvider = ({ children }) => {
     }));
   }, []);
   
-  // 重置 FloodAgent 状态
+  // 闂佹彃绉堕悿?FloodAgent 闁绘鍩栭埀?
   const resetFloodAgentState = useCallback(() => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
+    setAgentRecommendedLayerData({});
+    setAgentRecommendedLayerVisibility({});
   }, []);
 
   const resetAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
@@ -155,6 +165,8 @@ export const AppProvider = ({ children }) => {
     setAgentImpactData(null);
     setAgentImpactLoading(false);
     setAgentTileLoading(false);
+    setAgentRecommendedLayerData({});
+    setAgentRecommendedLayerVisibility({});
     setAgentLayerLoading({});
     setAgentTileError(null);
     setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
@@ -288,16 +300,11 @@ export const AppProvider = ({ children }) => {
     });
 
     if (!editableAoi) {
-      setWarning('请先通过鱼网、上传文件或 Agent 分析获得一个边界。');
+      setWarning('Please select, upload, or resolve an AOI before editing.');
       return false;
     }
 
-    if (editableAoi.kind === 'multipolygon') {
-      setWarning('当前边界是 MultiPolygon，第一版暂不支持直接编辑。请重新绘制一个单 Polygon。');
-      return false;
-    }
-
-    setDraftAOI(editableAoi);
+    setDraftAOI(JSON.parse(JSON.stringify(editableAoi)));
     setAoiEditorMode('edit');
     setWarning('');
     return true;
@@ -305,7 +312,7 @@ export const AppProvider = ({ children }) => {
 
   const applyDraftAoi = useCallback(() => {
     if (!draftAOI?.geojson) {
-      setWarning('请先绘制或编辑出一个有效的 Polygon 边界。');
+      setWarning('Please draw or edit a valid AOI boundary before applying.');
       return false;
     }
 
@@ -317,7 +324,7 @@ export const AppProvider = ({ children }) => {
     setDraftAOI(null);
     setAoiEditorMode('idle');
     setWarning('');
-    return true;
+    return nextAoi;
   }, [draftAOI, resetAgentSession, resetAskSession]);
 
   const clearAoiState = useCallback(() => {
@@ -442,6 +449,10 @@ export const AppProvider = ({ children }) => {
     setAgentImpactLoading,
     agentTileLoading,
     setAgentTileLoading,
+    agentRecommendedLayerData,
+    setAgentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
+    setAgentRecommendedLayerVisibility,
     agentLayerLoading,
     setAgentLayerLoading,
     agentTileError,

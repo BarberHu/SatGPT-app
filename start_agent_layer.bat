@@ -73,6 +73,8 @@ echo.
 
 set HTTP_PROXY=http://127.0.0.1:7890
 set HTTPS_PROXY=http://127.0.0.1:7890
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 
 echo [1/5] Checking port usage...
 netstat -ano | findstr :5001 >nul 2>&1
@@ -91,7 +93,21 @@ start "Flask Backend [%TARGET_BRANCH%]" cmd /k cd /d "%CODE_ROOT%" ^&^& call "%E
 echo [3/5] Starting FastAPI Agent ^(Port 8000^)...
 start "FastAPI Agent [%TARGET_BRANCH%]" cmd /k cd /d "%CODE_ROOT%agent" ^&^& call "%ENV_ROOT%agent\venv\Scripts\activate.bat" ^&^& python -m uvicorn server:app --host 0.0.0.0 --port 8000
 
-timeout /t 3 /nobreak >nul
+echo Waiting for FastAPI Agent to accept connections on port 8000...
+set "AGENT_READY="
+for /l %%i in (1,1,20) do (
+    powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/health -TimeoutSec 2; if ($r.StatusCode -ge 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+    if not errorlevel 1 (
+        set "AGENT_READY=1"
+        goto :agent_ready
+    )
+    timeout /t 1 /nobreak >nul
+)
+
+:agent_ready
+if not defined AGENT_READY (
+    echo Warning: FastAPI Agent did not report healthy within timeout. CopilotKit may see a temporary ECONNREFUSED until port 8000 is ready.
+)
 
 echo [4/5] Starting CopilotKit Runtime ^(Port 5000^)...
 start "CopilotKit Runtime [%TARGET_BRANCH%]" cmd /k cd /d "%CODE_ROOT%runtime" ^&^& npm start

@@ -10,8 +10,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import ee
-import folium
 import requests
+
+try:
+    import folium
+except ImportError:  # pragma: no cover - optional dependency for notebook/demo map export
+    folium = None
 
 from .catalog import AssetRecord
 
@@ -38,17 +42,16 @@ def _bootstrap_env(project_root: Path) -> None:
     env_path = project_root / ".env"
     if not env_path.exists():
         return
-    if load_dotenv:
-        load_dotenv(env_path, override=True)
     if not dotenv_values:
         return
     values = dotenv_values(env_path)
     desired_project = values.get("GEE_PROJECT_ID") or values.get("PROJECT_ID")
-    if desired_project:
+    if desired_project and not os.getenv("GEE_PROJECT_ID"):
         os.environ["GEE_PROJECT_ID"] = desired_project
+    if desired_project and not os.getenv("PROJECT_ID"):
         os.environ["PROJECT_ID"] = desired_project
     for key in ["GOOGLE_APPLICATION_CREDENTIALS", "EE_PRIVATE_KEY_FILE", "EE_ACCOUNT"]:
-        if values.get(key):
+        if values.get(key) and not os.getenv(key):
             os.environ[key] = values[key]
 
 
@@ -304,9 +307,14 @@ class GEETileService:
             end_date=end_date,
         )
 
-    def build_map(self, layers: List[Dict[str, Any]]) -> Optional[folium.Map]:
+    def build_map(self, layers: List[Dict[str, Any]]) -> Optional[Any]:
         if not layers:
             return None
+        if folium is None:
+            raise RuntimeError(
+                "folium is required only for demo map composition. "
+                "Install experiments/water_asset_agent/requirements.txt to enable build_map()."
+            )
         first_center = layers[0].get("center") or (20.0, 0.0)
         fmap = folium.Map(location=[first_center[0], first_center[1]], zoom_start=6, tiles=None)
         folium.TileLayer(
@@ -357,6 +365,10 @@ class GEETileService:
         for label, use_region, date_mode in filter_candidates:
             collection = ee.ImageCollection(asset.asset_id)
             notes: List[str] = []
+            select_bands = list((asset.collection_processing_hints or {}).get("select_bands") or [])
+            if select_bands:
+                collection = collection.select(select_bands)
+                notes.append("select_bands_applied")
             if use_region and region is not None:
                 collection = collection.filterBounds(region)
                 notes.append("filter_bounds_applied")
@@ -389,6 +401,11 @@ class GEETileService:
         reducer = (asset.collection_processing_hints or {}).get("reducer", "median")
         if reducer == "mosaic":
             image = selected_collection.sort("system:time_start", False).mosaic()
+        elif reducer == "mode":
+            image = selected_collection.reduce(ee.Reducer.mode())
+            select_bands = list((asset.collection_processing_hints or {}).get("select_bands") or [])
+            if len(select_bands) == 1:
+                image = image.rename(select_bands[0])
         elif reducer == "mean":
             image = selected_collection.mean()
         elif reducer == "first":
