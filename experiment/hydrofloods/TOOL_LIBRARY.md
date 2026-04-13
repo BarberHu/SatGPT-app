@@ -28,6 +28,18 @@
 - Returns: `tile_url`, `thumbnail_url`, `metadata`, `repro_code`
 - Example: 帮我给这个区域做一层可以直接挂在线地图上的积水图。
 
+## recommend_flood_asset_layers
+
+- Intent: `asset_recommendation`
+- Summary: 推荐适合当前洪水/水体问题的数据产品，并返回可直接挂到地图上的资产图层。
+- When to use: 当用户想知道该看哪些现成 GEE 数据产品、想快速挂参考图层或想做多源对比时使用。
+- When not to use: 当用户只想执行 HYDRAFloods 原生水体/洪水/水深工作流且不需要额外产品推荐时不要单独使用。
+- Required fields: `bbox`
+- Optional fields: `dataset`, `start_date`, `end_date`
+- Defaults: `{}`
+- Returns: `recommendations`, `tile_url`, `layers`, `legend_spec`
+- Example: 请推荐适合这个洪水问题的数据产品，并直接把图层挂到地图上。
+
 ## get_flood_extent_tile
 
 - Intent: `flood_extent`

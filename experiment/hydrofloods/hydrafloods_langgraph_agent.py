@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
@@ -13,6 +14,9 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
+# SATGPT_TRACE_DELETE_ME_START
+from debug_trace import new_debug_trace, summarize_tool_result, trace_event
+# SATGPT_TRACE_DELETE_ME_END
 from token_utils import empty_token_usage, record_llm_usage
 from tool_library import (
     TOOL_HANDLERS,
@@ -28,6 +32,7 @@ ROOT_DOTENV = Path(__file__).resolve().parents[2] / ".env"
 
 ActionName = Literal[
     "describe_tools",
+    "asset_recommendation",
     "water_mapping",
     "flood_extent",
     "depth_estimation",
@@ -37,6 +42,7 @@ ActionName = Literal[
 class AgentState(TypedDict, total=False):
     query: str
     environment: Dict[str, Any]
+    debug_trace: Dict[str, Any]
     parsed_request: Dict[str, Any]
     selected_tool: str
     tool_result: Dict[str, Any]
@@ -82,6 +88,7 @@ DATASET_ALIASES = {
 
 ACTION_PATTERNS: Dict[ActionName, List[str]] = {
     "describe_tools": ["能力", "能做什么", "tool", "tools", "支持什么", "有哪些工具"],
+    "asset_recommendation": ["推荐数据", "推荐产品", "数据产品", "asset", "dataset recommendation", "reference layer", "图层推荐"],
     "depth_estimation": ["fwdet", "水深", "depth"],
     "flood_extent": ["洪水范围", "淹没范围", "flood extent", "extract flood", "洪水提取"],
     "water_mapping": ["水体", "积水", "积涝", "water map", "water mapping", "edge otsu", "bmax otsu", "mndwi"],
@@ -109,7 +116,7 @@ def _extract_dates(query: str) -> List[str]:
 
 
 def _detect_action(normalized_query: str) -> ActionName:
-    for action in ["describe_tools", "depth_estimation", "flood_extent", "water_mapping"]:
+    for action in ["describe_tools", "asset_recommendation", "depth_estimation", "flood_extent", "water_mapping"]:
         if any(token in normalized_query for token in ACTION_PATTERNS[action]):  # type: ignore[index]
             return action  # type: ignore[return-value]
     return "describe_tools"
@@ -140,6 +147,8 @@ def _detect_reference(normalized_query: str) -> str:
 def _build_missing_fields(action: ActionName, dataset: Optional[str], dates: List[str], bbox: Optional[List[float]]) -> List[str]:
     if action == "describe_tools":
         return []
+    if action == "asset_recommendation":
+        return [] if bbox else ["bbox"]
 
     missing: List[str] = []
     if not dataset:
@@ -175,9 +184,16 @@ def _candidate_tools(heuristic: Dict[str, Any]) -> List[str]:
     if action == "describe_tools":
         return [
             "describe_hydrafloods_tools",
+            "recommend_flood_asset_layers",
             "get_water_extent_tile",
             "get_flood_extent_tile",
             "estimate_flood_depth_tile",
+        ]
+    if action == "asset_recommendation":
+        return [
+            "recommend_flood_asset_layers",
+            "get_water_extent_tile",
+            "get_flood_extent_tile",
         ]
     if action == "water_mapping":
         return ["get_water_extent_tile", "get_flood_extent_tile", "estimate_flood_depth_tile"]
@@ -213,6 +229,7 @@ def _parse_query_with_llm(
         "Algorithms: edge_otsu, bmax_otsu\n"
         "References: seasonal, yearly, occurrence\n"
         "Rules: choose exactly one tool; use describe_hydrafloods_tools for capability/tool questions; "
+        "use recommend_flood_asset_layers for data-product recommendation or reference-layer requests; "
         "use water_mapping for water/ponding/积水/water-layer requests; "
         "use flood_extent only for explicit flood extent / inundation / 淹没范围 requests; "
         "depth_estimation means fwdet water depth.\n"
@@ -268,18 +285,48 @@ def _parse_query_with_llm(
 def detect_environment_node(state: AgentState) -> AgentState:
     load_dotenv(ROOT_DOTENV)
     token_tracking_enabled = str(os.getenv("HYDRAFLOODS_TOKEN_TRACE", "0")).lower() in {"1", "true", "yes", "on"}
+    debug_trace_enabled = str(os.getenv("HYDRAFLOODS_DEBUG_TRACE", "0")).lower() in {"1", "true", "yes", "on"}
     if state.get("environment", {}).get("token_tracking_enabled") is True:
         token_tracking_enabled = True
-    return {
-        "environment": {
-            "gee_project_id": "configured",
-            "llm_model": os.getenv("LLM_MODEL", "gpt-4o-mini"),
-            "token_tracking_enabled": token_tracking_enabled,
-        }
+    if state.get("environment", {}).get("debug_trace_enabled") is True:
+        debug_trace_enabled = True
+
+    debug_trace = state.get("debug_trace") or new_debug_trace(debug_trace_enabled)
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="detect_environment",
+        phase="enter",
+        payload={"query": state.get("query")},
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    environment = {
+        "gee_project_id": "configured",
+        "llm_model": os.getenv("LLM_MODEL", "gpt-4o-mini"),
+        "token_tracking_enabled": token_tracking_enabled,
+        "debug_trace_enabled": debug_trace_enabled,
     }
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="detect_environment",
+        phase="exit",
+        payload=environment,
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    return {"environment": environment, "debug_trace": debug_trace}
 
 
 def parse_request_node(state: AgentState) -> AgentState:
+    debug_trace = state.get("debug_trace") or new_debug_trace(False)
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="parse_request",
+        phase="enter",
+        payload={"query": state["query"]},
+    )
+    # SATGPT_TRACE_DELETE_ME_END
     token_tracking_enabled = state["environment"]["token_tracking_enabled"]
     token_usage = state.get("token_usage") or empty_token_usage(token_tracking_enabled)
     parsed_request = _parse_query_with_llm(
@@ -287,59 +334,146 @@ def parse_request_node(state: AgentState) -> AgentState:
         token_usage=token_usage,
         token_tracking_enabled=token_tracking_enabled,
     )
-    return {"parsed_request": parsed_request, "token_usage": token_usage}
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="parse_request",
+        phase="exit",
+        payload={"parsed_request": parsed_request, "token_usage": token_usage.get("totals")},
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    return {"parsed_request": parsed_request, "token_usage": token_usage, "debug_trace": debug_trace}
 
 
 def select_tool_node(state: AgentState) -> AgentState:
-    return {"selected_tool": state["parsed_request"]["selected_tool"]}
+    debug_trace = state.get("debug_trace") or new_debug_trace(False)
+    selected_tool = state["parsed_request"]["selected_tool"]
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="select_tool",
+        phase="selected",
+        payload={
+            "selected_tool": selected_tool,
+            "action": state["parsed_request"].get("action"),
+            "dataset": state["parsed_request"].get("dataset"),
+        },
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    return {"selected_tool": selected_tool, "debug_trace": debug_trace}
 
 
 def execute_tool_node(state: AgentState) -> AgentState:
     parsed = state["parsed_request"]
+    debug_trace = state.get("debug_trace") or new_debug_trace(False)
 
     if parsed["missing_fields"]:
+        # SATGPT_TRACE_DELETE_ME_START
+        debug_trace = trace_event(
+            debug_trace,
+            node="execute_tool",
+            phase="blocked_missing_fields",
+            payload={"missing_fields": parsed["missing_fields"], "parsed_request": parsed},
+        )
+        # SATGPT_TRACE_DELETE_ME_END
         return {
             "tool_result": {
                 "status": "error",
                 "summary": f"缺少必要参数: {', '.join(parsed['missing_fields'])}",
                 "inputs": parsed,
-            }
+            },
+            "debug_trace": debug_trace,
         }
 
     tool_name = state["selected_tool"]
     handler = TOOL_HANDLERS[tool_name]
+    tool_kwargs: Dict[str, Any]
     if tool_name == "describe_hydrafloods_tools":
-        tool_result = handler()
+        tool_kwargs = {}
+    elif tool_name == "recommend_flood_asset_layers":
+        tool_kwargs = {
+            "query": state["query"],
+            "parsed_request": parsed,
+        }
     elif tool_name == "get_water_extent_tile":
-        tool_result = handler(
-            dataset=parsed["dataset"],
-            start_date=parsed["dates"][0],
-            end_date=parsed["dates"][1],
-            bbox=parsed["bbox"],
-            algorithm=parsed["algorithm"],
-        )
+        tool_kwargs = {
+            "dataset": parsed["dataset"],
+            "start_date": parsed["dates"][0],
+            "end_date": parsed["dates"][1],
+            "bbox": parsed["bbox"],
+            "algorithm": parsed["algorithm"],
+        }
     elif tool_name == "get_flood_extent_tile":
-        tool_result = handler(
-            dataset=parsed["dataset"],
-            start_date=parsed["dates"][0],
-            end_date=parsed["dates"][1],
-            bbox=parsed["bbox"],
-            algorithm=parsed["algorithm"],
-            reference=parsed["reference"],
-        )
+        tool_kwargs = {
+            "dataset": parsed["dataset"],
+            "start_date": parsed["dates"][0],
+            "end_date": parsed["dates"][1],
+            "bbox": parsed["bbox"],
+            "algorithm": parsed["algorithm"],
+            "reference": parsed["reference"],
+        }
     elif tool_name == "estimate_flood_depth_tile":
-        tool_result = handler(
-            dataset=parsed["dataset"],
-            start_date=parsed["dates"][0],
-            end_date=parsed["dates"][1],
-            bbox=parsed["bbox"],
-            algorithm=parsed["algorithm"],
-            reference=parsed["reference"],
-        )
+        tool_kwargs = {
+            "dataset": parsed["dataset"],
+            "start_date": parsed["dates"][0],
+            "end_date": parsed["dates"][1],
+            "bbox": parsed["bbox"],
+            "algorithm": parsed["algorithm"],
+            "reference": parsed["reference"],
+        }
     else:
         raise ValueError(f"Unsupported tool: {tool_name}")
 
-    return {"tool_result": tool_result}
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="execute_tool",
+        phase="tool_call",
+        payload={"tool_name": tool_name, "tool_kwargs": tool_kwargs},
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    try:
+        tool_result = handler(**tool_kwargs)
+        if (
+            tool_result.get("status") == "ok"
+            and tool_name not in {"describe_hydrafloods_tools", "recommend_flood_asset_layers"}
+            and parsed.get("bbox")
+        ):
+            asset_result = TOOL_HANDLERS["recommend_flood_asset_layers"](
+                query=state["query"],
+                parsed_request=parsed,
+            )
+            tool_result["recommendations"] = asset_result.get("recommendations", [])
+            tool_result.setdefault("artifacts", {})
+            tool_result["artifacts"]["recommended_layers"] = asset_result.get("artifacts", {}).get("layers", [])
+            tool_result["metadata"]["recommended_asset_count"] = asset_result.get("metadata", {}).get(
+                "recommended_asset_count", 0
+            )
+    except Exception as exc:
+        # SATGPT_TRACE_DELETE_ME_START
+        debug_trace = trace_event(
+            debug_trace,
+            node="execute_tool",
+            phase="tool_exception",
+            payload={
+                "tool_name": tool_name,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "traceback": traceback.format_exc(),
+            },
+        )
+        # SATGPT_TRACE_DELETE_ME_END
+        raise
+
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="execute_tool",
+        phase="tool_result",
+        payload=summarize_tool_result(tool_result),
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    return {"tool_result": tool_result, "debug_trace": debug_trace}
 
 
 def _render_registry(result: Dict[str, Any]) -> str:
@@ -359,6 +493,7 @@ def _render_registry(result: Dict[str, Any]) -> str:
             "## 数据与算法",
             f"- 数据集: {', '.join(registry['datasets']['supported'])}",
             f"- 推荐数据集: {', '.join(registry['datasets']['recommended'])}",
+            f"- 精选资产数: {registry['assets']['asset_count']}",
             f"- 水体算法: {', '.join(registry['algorithms']['water_mapping'])}",
             f"- 洪水算法: {', '.join(registry['algorithms']['flood'])}",
             f"- 水深算法: {', '.join(registry['algorithms']['depth'])}",
@@ -423,6 +558,32 @@ def _render_tool_result(
         lines.append(f"- Tile URL: {primary_layer['tile_url']}")
         lines.append(f"- Thumbnail URL: {primary_layer['thumbnail_url']}")
 
+    recommendations = result.get("recommendations", [])
+    if recommendations:
+        lines.extend(
+            [
+                "",
+                "## 推荐资产",
+            ]
+        )
+        for item in recommendations:
+            lines.append(
+                f"- `{item['asset_id']}` ({item['title']}): score={item['score']}, reason={item['reason']}"
+            )
+
+    recommended_layers = result.get("artifacts", {}).get("recommended_layers", [])
+    if recommended_layers:
+        lines.extend(
+            [
+                "",
+                "## 推荐图层",
+            ]
+        )
+        for layer in recommended_layers:
+            lines.append(
+                f"- `{layer['asset_id']}`: {layer['tile_url']}"
+            )
+
     metadata = result.get("metadata", {})
     if metadata:
         lines.extend(
@@ -453,14 +614,45 @@ def format_response_node(state: AgentState) -> AgentState:
     tool_name = state["selected_tool"]
     result = state["tool_result"]
     token_usage = state.get("token_usage")
+    debug_trace = state.get("debug_trace") or new_debug_trace(False)
+
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="format_response",
+        phase="enter",
+        payload={
+            "tool_name": tool_name,
+            "result_status": result.get("status"),
+        },
+    )
+    # SATGPT_TRACE_DELETE_ME_END
 
     if tool_name == "describe_hydrafloods_tools":
         response = _render_registry(result)
         token_lines = _render_token_usage(token_usage)
         if token_lines:
             response = response + "\n" + "\n".join(token_lines)
-        return {"response": response}
-    return {"response": _render_tool_result(result, parsed, tool_name, token_usage=token_usage)}
+        # SATGPT_TRACE_DELETE_ME_START
+        debug_trace = trace_event(
+            debug_trace,
+            node="format_response",
+            phase="exit",
+            payload={"response_length": len(response)},
+        )
+        # SATGPT_TRACE_DELETE_ME_END
+        return {"response": response, "debug_trace": debug_trace}
+
+    response = _render_tool_result(result, parsed, tool_name, token_usage=token_usage)
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = trace_event(
+        debug_trace,
+        node="format_response",
+        phase="exit",
+        payload={"response_length": len(response)},
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    return {"response": response, "debug_trace": debug_trace}
 
 
 def build_graph():
@@ -485,10 +677,27 @@ GRAPH = build_graph()
 
 EXAMPLES = [
     "请列出当前 HYDRAFloods 工具层暴露了哪些任务工具。",
+    "请推荐适合这个区域洪水分析的数据产品，并把可用图层挂到地图上，bbox=[90.30,23.60,90.50,23.80]，时间是2020-07-01到2020-07-15。",
     "请用 Landsat 8 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做水体提取。",
     "请用 Sentinel-1 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做洪水范围提取。",
     "请用 Sentinel-1 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做水深估算。",
 ]
+
+
+def run_agent_query(
+    query: str,
+    *,
+    token_stats: bool = True,
+    debug_trace: bool = False,
+) -> Dict[str, Any]:
+    initial_state: Dict[str, Any] = {"query": query}
+    if token_stats or debug_trace:
+        initial_state["environment"] = {}
+    if token_stats:
+        initial_state["environment"]["token_tracking_enabled"] = True
+    if debug_trace:
+        initial_state["environment"]["debug_trace_enabled"] = True
+    return GRAPH.invoke(initial_state)
 
 
 def main() -> None:
@@ -497,6 +706,7 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="输出完整 JSON 状态")
     parser.add_argument("--examples", action="store_true", help="打印内置示例")
     parser.add_argument("--token-stats", action="store_true", help="开启一次问答过程中的 token 用量统计")
+    parser.add_argument("--debug-trace", action="store_true", help="输出 graph 节点和工具调用的详细跟踪日志")
     args = parser.parse_args()
 
     if args.examples:
@@ -506,11 +716,11 @@ def main() -> None:
     if not args.query:
         raise SystemExit("请通过 --query 传入自然语言请求，或通过 --examples 查看示例。")
 
-    initial_state: Dict[str, Any] = {"query": args.query}
-    if args.token_stats:
-        initial_state["environment"] = {"token_tracking_enabled": True}
-
-    final_state = GRAPH.invoke(initial_state)
+    final_state = run_agent_query(
+        args.query,
+        token_stats=args.token_stats,
+        debug_trace=args.debug_trace,
+    )
     if args.json:
         print(json.dumps(final_state, ensure_ascii=False, indent=2))
     else:

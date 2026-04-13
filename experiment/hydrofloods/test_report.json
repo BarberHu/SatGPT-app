@@ -2,13 +2,13 @@
   "llm_model": "gpt-4o-mini",
   "token_stats_enabled": true,
   "token_totals": {
-    "prompt_tokens": 7851,
-    "completion_tokens": 583,
-    "total_tokens": 8434
+    "prompt_tokens": 9937,
+    "completion_tokens": 713,
+    "total_tokens": 10650
   },
   "summary": {
-    "total": 10,
-    "passed": 10,
+    "total": 12,
+    "passed": 12,
     "failed": 0
   },
   "results": [
@@ -23,21 +23,22 @@
       "action": "describe_tools",
       "dataset": null,
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 767,
+            "prompt_tokens": 879,
             "completion_tokens": 36,
-            "total_tokens": 803
+            "total_tokens": 915
           }
         ],
         "totals": {
-          "prompt_tokens": 767,
+          "prompt_tokens": 879,
           "completion_tokens": 36,
-          "total_tokens": 803
+          "total_tokens": 915
         }
       }
     },
@@ -52,21 +53,52 @@
       "action": "describe_tools",
       "dataset": null,
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 782,
+            "prompt_tokens": 894,
             "completion_tokens": 36,
-            "total_tokens": 818
+            "total_tokens": 930
           }
         ],
         "totals": {
-          "prompt_tokens": 782,
+          "prompt_tokens": 894,
           "completion_tokens": 36,
-          "total_tokens": 818
+          "total_tokens": 930
+        }
+      }
+    },
+    {
+      "id": "asset_recommendation_basic",
+      "description": "显式请求推荐洪水数据产品并返回地图图层",
+      "query": "请推荐适合这个区域洪水分析的数据产品，并把可用图层挂到地图上，bbox=[90.30,23.60,90.50,23.80]，时间是2020-07-01到2020-07-15。",
+      "passed": true,
+      "errors": [],
+      "llm_model": "gpt-4o-mini",
+      "selected_tool": "recommend_flood_asset_layers",
+      "action": "asset_recommendation",
+      "dataset": null,
+      "status": "ok",
+      "exception": null,
+      "token_usage": {
+        "enabled": true,
+        "llm_calls": [
+          {
+            "phase": "route_query",
+            "model": "gpt-4o-mini",
+            "prompt_tokens": 790,
+            "completion_tokens": 62,
+            "total_tokens": 852
+          }
+        ],
+        "totals": {
+          "prompt_tokens": 790,
+          "completion_tokens": 62,
+          "total_tokens": 852
         }
       }
     },
@@ -81,21 +113,22 @@
       "action": "water_mapping",
       "dataset": "Landsat8",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 796,
+            "prompt_tokens": 817,
             "completion_tokens": 64,
-            "total_tokens": 860
+            "total_tokens": 881
           }
         ],
         "totals": {
-          "prompt_tokens": 796,
+          "prompt_tokens": 817,
           "completion_tokens": 64,
-          "total_tokens": 860
+          "total_tokens": 881
         }
       }
     },
@@ -110,21 +143,22 @@
       "action": "water_mapping",
       "dataset": "Landsat8",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 789,
+            "prompt_tokens": 810,
             "completion_tokens": 65,
-            "total_tokens": 854
+            "total_tokens": 875
           }
         ],
         "totals": {
-          "prompt_tokens": 789,
+          "prompt_tokens": 810,
           "completion_tokens": 65,
-          "total_tokens": 854
+          "total_tokens": 875
         }
       }
     },
@@ -139,21 +173,22 @@
       "action": "water_mapping",
       "dataset": "Sentinel2",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 780,
+            "prompt_tokens": 801,
             "completion_tokens": 63,
-            "total_tokens": 843
+            "total_tokens": 864
           }
         ],
         "totals": {
-          "prompt_tokens": 780,
+          "prompt_tokens": 801,
           "completion_tokens": 63,
-          "total_tokens": 843
+          "total_tokens": 864
         }
       }
     },
@@ -168,21 +203,22 @@
       "action": "water_mapping",
       "dataset": "Sentinel1",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 780,
+            "prompt_tokens": 801,
             "completion_tokens": 63,
-            "total_tokens": 843
+            "total_tokens": 864
           }
         ],
         "totals": {
-          "prompt_tokens": 780,
+          "prompt_tokens": 801,
           "completion_tokens": 63,
-          "total_tokens": 843
+          "total_tokens": 864
         }
       }
     },
@@ -197,21 +233,22 @@
       "action": "flood_extent",
       "dataset": "Sentinel1",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 789,
+            "prompt_tokens": 810,
             "completion_tokens": 64,
-            "total_tokens": 853
+            "total_tokens": 874
           }
         ],
         "totals": {
-          "prompt_tokens": 789,
+          "prompt_tokens": 810,
           "completion_tokens": 64,
-          "total_tokens": 853
+          "total_tokens": 874
         }
       }
     },
@@ -226,21 +263,22 @@
       "action": "flood_extent",
       "dataset": "Sentinel1",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 789,
+            "prompt_tokens": 810,
             "completion_tokens": 64,
-            "total_tokens": 853
+            "total_tokens": 874
           }
         ],
         "totals": {
-          "prompt_tokens": 789,
+          "prompt_tokens": 810,
           "completion_tokens": 64,
-          "total_tokens": 853
+          "total_tokens": 874
         }
       }
     },
@@ -255,21 +293,22 @@
       "action": "flood_extent",
       "dataset": "Sentinel1",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 791,
+            "prompt_tokens": 812,
             "completion_tokens": 64,
-            "total_tokens": 855
+            "total_tokens": 876
           }
         ],
         "totals": {
-          "prompt_tokens": 791,
+          "prompt_tokens": 812,
           "completion_tokens": 64,
-          "total_tokens": 855
+          "total_tokens": 876
         }
       }
     },
@@ -284,21 +323,52 @@
       "action": "depth_estimation",
       "dataset": "Sentinel1",
       "status": "ok",
+      "exception": null,
       "token_usage": {
         "enabled": true,
         "llm_calls": [
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 788,
+            "prompt_tokens": 809,
             "completion_tokens": 64,
-            "total_tokens": 852
+            "total_tokens": 873
           }
         ],
         "totals": {
-          "prompt_tokens": 788,
+          "prompt_tokens": 809,
           "completion_tokens": 64,
-          "total_tokens": 852
+          "total_tokens": 873
+        }
+      }
+    },
+    {
+      "id": "venice_2023_flood_severity",
+      "description": "英文真实问题，当前会路由到 Venice 2023 的 Sentinel-1 洪水范围提取并返回推荐资产图层",
+      "query": "Help me extract the flooded areas in the flood event in 2023 in the city of Venice, Italy. I want to know the flooded areas and the severity of the flood in those areas.",
+      "passed": true,
+      "errors": [],
+      "llm_model": "gpt-4o-mini",
+      "selected_tool": "get_flood_extent_tile",
+      "action": "flood_extent",
+      "dataset": "Sentinel1",
+      "status": "ok",
+      "exception": null,
+      "token_usage": {
+        "enabled": true,
+        "llm_calls": [
+          {
+            "phase": "route_query",
+            "model": "gpt-4o-mini",
+            "prompt_tokens": 904,
+            "completion_tokens": 68,
+            "total_tokens": 972
+          }
+        ],
+        "totals": {
+          "prompt_tokens": 904,
+          "completion_tokens": 68,
+          "total_tokens": 972
         }
       }
     }

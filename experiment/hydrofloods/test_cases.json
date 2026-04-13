@@ -20,6 +20,16 @@
     "expected_artifact": "registry"
   },
   {
+    "id": "asset_recommendation_basic",
+    "category": "assets",
+    "description": "显式请求推荐洪水数据产品并返回地图图层",
+    "query": "请推荐适合这个区域洪水分析的数据产品，并把可用图层挂到地图上，bbox=[90.30,23.60,90.50,23.80]，时间是2020-07-01到2020-07-15。",
+    "expected_tool": "recommend_flood_asset_layers",
+    "expected_action": "asset_recommendation",
+    "expect_status": "ok",
+    "expected_artifact": "tile"
+  },
+  {
     "id": "water_landsat_natural",
     "category": "water",
     "description": "自然语言积水图请求，测试 LLM 路由到光学水体工具",
@@ -110,6 +120,17 @@
     "expect_status": "ok",
     "expected_dataset": "Sentinel1",
     "expected_reference": "seasonal",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "venice_2023_flood_severity",
+    "category": "flood",
+    "description": "英文真实问题，当前会路由到 Venice 2023 的 Sentinel-1 洪水范围提取并返回推荐资产图层",
+    "query": "Help me extract the flooded areas in the flood event in 2023 in the city of Venice, Italy. I want to know the flooded areas and the severity of the flood in those areas.",
+    "expected_tool": "get_flood_extent_tile",
+    "expected_action": "flood_extent",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel1",
     "expected_artifact": "tile"
   }
 ]

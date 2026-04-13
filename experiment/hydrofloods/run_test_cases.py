@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -21,6 +23,25 @@ def check_case(case: Dict[str, Any], result: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
     parsed = result.get("parsed_request", {})
     tool_result = result.get("tool_result", {})
+    exception = result.get("exception", {})
+
+    if case["expect_status"] == "exception":
+        if result.get("status") != "exception":
+            errors.append(f"status mismatch: expected exception, got {result.get('status')}")
+        if "expected_exception_type" in case and exception.get("type") != case["expected_exception_type"]:
+            errors.append(
+                f"exception type mismatch: expected {case['expected_exception_type']}, got {exception.get('type')}"
+            )
+        if (
+            "expected_exception_message_contains" in case
+            and case["expected_exception_message_contains"] not in (exception.get("message") or "")
+        ):
+            errors.append(
+                "exception message mismatch: "
+                f"expected to contain {case['expected_exception_message_contains']!r}, "
+                f"got {exception.get('message')!r}"
+            )
+        return errors
 
     if result.get("selected_tool") != case["expected_tool"]:
         errors.append(
@@ -64,12 +85,30 @@ def check_case(case: Dict[str, Any], result: Dict[str, Any]) -> List[str]:
     return errors
 
 
-def run_case(case: Dict[str, Any], token_stats: bool) -> Dict[str, Any]:
+def run_case(case: Dict[str, Any], token_stats: bool, debug_trace: bool) -> Dict[str, Any]:
     initial_state: Dict[str, Any] = {"query": case["query"]}
+    if token_stats or debug_trace:
+        initial_state["environment"] = {}
     if token_stats:
-        initial_state["environment"] = {"token_tracking_enabled": True}
+        initial_state["environment"]["token_tracking_enabled"] = True
+    if debug_trace:
+        initial_state["environment"]["debug_trace_enabled"] = True
 
-    result = GRAPH.invoke(initial_state)
+    try:
+        result = GRAPH.invoke(initial_state)
+    except Exception as exc:
+        result = {
+            "status": "exception",
+            "exception": {
+                "type": type(exc).__name__,
+                "message": str(exc),
+                "traceback": traceback.format_exc(),
+            },
+            "environment": {
+                "llm_model": os.getenv("LLM_MODEL", "gpt-4o-mini"),
+            },
+            "token_usage": None,
+        }
     errors = check_case(case, result)
     return {
         "id": case["id"],
@@ -81,7 +120,8 @@ def run_case(case: Dict[str, Any], token_stats: bool) -> Dict[str, Any]:
         "selected_tool": result.get("selected_tool"),
         "action": result.get("parsed_request", {}).get("action"),
         "dataset": result.get("parsed_request", {}).get("dataset"),
-        "status": result.get("tool_result", {}).get("status"),
+        "status": result.get("tool_result", {}).get("status") or result.get("status"),
+        "exception": result.get("exception"),
         "token_usage": result.get("token_usage"),
     }
 
@@ -110,11 +150,19 @@ def main() -> None:
         action="store_true",
         help="Disable token usage collection during test runs",
     )
+    parser.add_argument(
+        "--debug-trace",
+        action="store_true",
+        help="Print detailed graph node and tool-call tracing during test runs",
+    )
     args = parser.parse_args()
 
     token_stats_enabled = not args.no_token_stats
     cases = load_cases(args.cases)
-    results = [run_case(case, token_stats=token_stats_enabled) for case in cases]
+    results = [
+        run_case(case, token_stats=token_stats_enabled, debug_trace=args.debug_trace)
+        for case in cases
+    ]
     passed = sum(1 for item in results if item["passed"])
     total = len(results)
     llm_model = next((item.get("llm_model") for item in results if item.get("llm_model")), None)

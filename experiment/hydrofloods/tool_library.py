@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from ee_utils import init_gee
-from tool_adapters import (
+from adapter import (
     estimate_flood_depth_tile,
     get_flood_extent_tile,
     get_water_extent_tile,
+    recommend_asset_layers,
 )
+from assets_library import build_assets_registry_summary
+from ee_utils import init_gee
 
 
 TOOL_LIBRARY: List[Dict[str, Any]] = [
@@ -37,6 +39,20 @@ TOOL_LIBRARY: List[Dict[str, Any]] = [
         "returns": ["tile_url", "thumbnail_url", "metadata", "repro_code"],
         "examples": [
             "帮我给这个区域做一层可以直接挂在线地图上的积水图。",
+        ],
+    },
+    {
+        "name": "recommend_flood_asset_layers",
+        "intent": "asset_recommendation",
+        "summary": "推荐适合当前洪水/水体问题的数据产品，并返回可直接挂到地图上的资产图层。",
+        "when_to_use": "当用户想知道该看哪些现成 GEE 数据产品、想快速挂参考图层或想做多源对比时使用。",
+        "when_not_to_use": "当用户只想执行 HYDRAFloods 原生水体/洪水/水深工作流且不需要额外产品推荐时不要单独使用。",
+        "required_fields": ["bbox"],
+        "optional_fields": ["dataset", "start_date", "end_date"],
+        "defaults": {},
+        "returns": ["recommendations", "tile_url", "layers", "legend_spec"],
+        "examples": [
+            "请推荐适合这个洪水问题的数据产品，并直接把图层挂到地图上。",
         ],
     },
     {
@@ -91,6 +107,7 @@ ENGINEERING_BOUNDARIES = [
 
 def build_tool_registry() -> Dict[str, Any]:
     return {
+        "assets": build_assets_registry_summary(),
         "datasets": {
             "supported": SUPPORTED_DATASETS,
             "recommended": RECOMMENDED_DATASETS,
@@ -114,6 +131,7 @@ def describe_hydrafloods_tools() -> Dict[str, Any]:
 TOOL_HANDLERS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "describe_hydrafloods_tools": describe_hydrafloods_tools,
     "get_water_extent_tile": get_water_extent_tile,
+    "recommend_flood_asset_layers": recommend_asset_layers,
     "get_flood_extent_tile": get_flood_extent_tile,
     "estimate_flood_depth_tile": estimate_flood_depth_tile,
 }

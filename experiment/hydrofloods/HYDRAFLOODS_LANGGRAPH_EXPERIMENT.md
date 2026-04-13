@@ -16,11 +16,12 @@
 本轮实验涉及的关键文件:
 
 1. `experiment/hydrofloods/ee_utils.py`
-2. `experiment/hydrofloods/tool_adapters.py`
+2. `experiment/hydrofloods/adapter.py`
 3. `experiment/hydrofloods/tool_library.py`
-4. `experiment/hydrofloods/TOOL_LIBRARY.md`
-5. `experiment/hydrofloods/token_utils.py`
-6. `experiment/hydrofloods/hydrafloods_langgraph_agent.py`
+4. `experiment/hydrofloods/assets_library.py`
+5. `experiment/hydrofloods/TOOL_LIBRARY.md`
+6. `experiment/hydrofloods/token_utils.py`
+7. `experiment/hydrofloods/hydrafloods_langgraph_agent.py`
 
 职责分工:
 
