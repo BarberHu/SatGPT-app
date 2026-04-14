@@ -8,6 +8,7 @@ import hydrafloods as hf
 
 from assets_library import get_asset_spec, get_recommendable_assets
 from ee_utils import init_gee
+from tool_library import build_tool_registry
 
 
 def _ensure_gee() -> Dict[str, Any]:
@@ -454,6 +455,42 @@ def _repro_code(
     else:
         lines.append("print(water_img.getMapId({'min': 0, 'max': 1, 'palette': 'white,blue'})['tile_fetcher'].url_format)")
     return "\n".join(lines)
+
+
+def describe_hydrafloods_tools() -> Dict[str, Any]:
+    init_result = _ensure_gee()
+    return {
+        "status": "ok",
+        "summary": "当前实验通过本地任务级工具把 HYDRAFloods 暴露给 LangGraph。",
+        "gee_project_id": init_result["project_id"],
+        "registry": build_tool_registry(),
+    }
+
+
+def execute_tool(tool_name: str, parsed_request: Dict[str, Any], query: str) -> Dict[str, Any]:
+    if tool_name == "describe_hydrafloods_tools":
+        return describe_hydrafloods_tools()
+
+    if tool_name == "recommend_flood_asset_layers":
+        return recommend_asset_layers(query=query, parsed_request=parsed_request)
+
+    common_kwargs = {
+        "dataset": parsed_request["dataset"],
+        "start_date": parsed_request["dates"][0],
+        "end_date": parsed_request["dates"][1],
+        "bbox": parsed_request["bbox"],
+        "algorithm": parsed_request["algorithm"],
+    }
+    if tool_name == "get_water_extent_tile":
+        return get_water_extent_tile(**common_kwargs)
+
+    if tool_name in {"get_flood_extent_tile", "estimate_flood_depth_tile"}:
+        return globals()[tool_name](
+            **common_kwargs,
+            reference=parsed_request["reference"],
+        )
+
+    raise ValueError(f"Unsupported tool: {tool_name}")
 
 
 def get_water_extent_tile(

@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from adapter import (
-    estimate_flood_depth_tile,
-    get_flood_extent_tile,
-    get_water_extent_tile,
-    recommend_asset_layers,
-)
 from assets_library import build_assets_registry_summary
-from ee_utils import init_gee
 
 
 TOOL_LIBRARY: List[Dict[str, Any]] = [
@@ -99,7 +92,7 @@ ALGORITHM_REGISTRY = {
 }
 ENGINEERING_BOUNDARIES = [
     "adapter 层只负责执行 HYDRAFloods 工作流，不直接承担工具注册和目录维护。",
-    "tool library 层负责维护工具目录、工具说明和 handler 注册，是 agent 的工具单一事实来源。",
+    "tool library 层负责维护工具目录和工具说明，是 agent 的工具单一事实来源。",
     "工具层返回结构化结果、工件链接和元数据，不把 ee.Image 等内部对象暴露给 LLM。",
     "本地工具依赖规范环境变量 GOOGLE_APPLICATION_CREDENTIALS 和 GEE_PROJECT_ID。",
 ]
@@ -116,25 +109,6 @@ def build_tool_registry() -> Dict[str, Any]:
         "algorithms": ALGORITHM_REGISTRY,
         "engineering_boundaries": ENGINEERING_BOUNDARIES,
     }
-
-
-def describe_hydrafloods_tools() -> Dict[str, Any]:
-    init_result = init_gee()
-    return {
-        "status": "ok",
-        "summary": "当前实验通过本地任务级工具把 HYDRAFloods 暴露给 LangGraph。",
-        "gee_project_id": init_result["project_id"],
-        "registry": build_tool_registry(),
-    }
-
-
-TOOL_HANDLERS: Dict[str, Callable[..., Dict[str, Any]]] = {
-    "describe_hydrafloods_tools": describe_hydrafloods_tools,
-    "get_water_extent_tile": get_water_extent_tile,
-    "recommend_flood_asset_layers": recommend_asset_layers,
-    "get_flood_extent_tile": get_flood_extent_tile,
-    "estimate_flood_depth_tile": estimate_flood_depth_tile,
-}
 
 
 def get_tool_spec(tool_name: str) -> Dict[str, Any]:

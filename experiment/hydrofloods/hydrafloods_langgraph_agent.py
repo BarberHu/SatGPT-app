@@ -19,10 +19,10 @@ from pydantic import BaseModel, Field
 # SATGPT_TRACE_DELETE_ME_START
 from debug_trace import new_debug_trace, summarize_tool_result, trace_event
 # SATGPT_TRACE_DELETE_ME_END
+from adapter import execute_tool
 from assets_library import get_recommendable_assets
 from token_utils import empty_token_usage, record_llm_usage
 from tool_library import (
-    TOOL_HANDLERS,
     TOOL_LIBRARY,
     find_tool_by_intent,
     get_tool_spec,
@@ -220,29 +220,6 @@ def _build_missing_fields(action: ActionName, dataset: Optional[str], dates: Lis
     if not bbox:
         missing.append("bbox")
     return missing
-
-
-def _build_tool_kwargs(tool_name: str, parsed: Dict[str, Any], query: str) -> Dict[str, Any]:
-    if tool_name == "describe_hydrafloods_tools":
-        return {}
-    if tool_name == "recommend_flood_asset_layers":
-        return {"query": query, "parsed_request": parsed}
-
-    common_kwargs = {
-        "dataset": parsed["dataset"],
-        "start_date": parsed["dates"][0],
-        "end_date": parsed["dates"][1],
-        "bbox": parsed["bbox"],
-        "algorithm": parsed["algorithm"],
-    }
-    if tool_name == "get_water_extent_tile":
-        return common_kwargs
-    if tool_name in {"get_flood_extent_tile", "estimate_flood_depth_tile"}:
-        return {
-            **common_kwargs,
-            "reference": parsed["reference"],
-        }
-    raise ValueError(f"Unsupported tool: {tool_name}")
 
 
 def _query_has_any_hint(normalized_query: str, hints: tuple[str, ...]) -> bool:
@@ -699,29 +676,24 @@ def execute_tool_node(state: AgentState) -> AgentState:
         mode = execution_plan["mode"]
         if mode == "describe_only":
             tool_name = "describe_hydrafloods_tools"
-            tool_result = TOOL_HANDLERS[tool_name]()
+            tool_result = execute_tool(tool_name, parsed, state["query"])
         elif mode == "assets_only":
             tool_name = "recommend_flood_asset_layers"
-            tool_result = TOOL_HANDLERS[tool_name](
-                query=state["query"],
-                parsed_request=parsed,
-            )
+            tool_result = execute_tool(tool_name, parsed, state["query"])
         elif mode == "compute_only":
             tool_name = execution_plan["compute_tool"]
-            tool_kwargs = _build_tool_kwargs(tool_name, parsed, state["query"])
             # SATGPT_TRACE_DELETE_ME_START
             debug_trace = _trace(
                 debug_trace,
                 node="execute_tool",
                 phase="tool_call",
-                payload={"tool_name": tool_name, "tool_kwargs": tool_kwargs},
+                payload={"tool_name": tool_name, "parsed_request": parsed},
             )
             # SATGPT_TRACE_DELETE_ME_END
-            tool_result = TOOL_HANDLERS[tool_name](**tool_kwargs)
+            tool_result = execute_tool(tool_name, parsed, state["query"])
         elif mode == "hybrid":
             compute_tool = execution_plan["compute_tool"]
             asset_tool = execution_plan["asset_tool"]
-            compute_kwargs = _build_tool_kwargs(compute_tool, parsed, state["query"])
             # SATGPT_TRACE_DELETE_ME_START
             debug_trace = _trace(
                 debug_trace,
@@ -729,16 +701,13 @@ def execute_tool_node(state: AgentState) -> AgentState:
                 phase="hybrid_calls",
                 payload={
                     "compute_tool": compute_tool,
-                    "compute_kwargs": compute_kwargs,
+                    "parsed_request": parsed,
                     "asset_tool": asset_tool,
                 },
             )
             # SATGPT_TRACE_DELETE_ME_END
-            asset_result = TOOL_HANDLERS[asset_tool](
-                query=state["query"],
-                parsed_request=parsed,
-            )
-            compute_result = TOOL_HANDLERS[compute_tool](**compute_kwargs)
+            asset_result = execute_tool(asset_tool, parsed, state["query"])
+            compute_result = execute_tool(compute_tool, parsed, state["query"])
             if execution_plan["primary_output"] == "assets":
                 tool_name = asset_tool
                 tool_result = _merge_compute_result_into_assets(asset_result, compute_result)
