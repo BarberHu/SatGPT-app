@@ -48,9 +48,10 @@ def check_case(case: Dict[str, Any], result: Dict[str, Any]) -> List[str]:
             f"selected_tool mismatch: expected {case['expected_tool']}, got {result.get('selected_tool')}"
         )
 
-    if parsed.get("action") != case["expected_action"]:
+    actual_action = parsed.get("primary_action") or parsed.get("action")
+    if actual_action != case["expected_action"]:
         errors.append(
-            f"action mismatch: expected {case['expected_action']}, got {parsed.get('action')}"
+            f"action mismatch: expected {case['expected_action']}, got {actual_action}"
         )
 
     if tool_result.get("status") != case["expect_status"]:
@@ -81,6 +82,28 @@ def check_case(case: Dict[str, Any], result: Dict[str, Any]) -> List[str]:
     if case["expect_status"] == "ok" and case.get("expected_artifact") == "registry":
         if not tool_result.get("registry"):
             errors.append("missing registry in catalog result")
+
+    if "expected_execution_mode" in case:
+        actual_mode = tool_result.get("metadata", {}).get("execution_mode")
+        if actual_mode != case["expected_execution_mode"]:
+            errors.append(
+                f"execution_mode mismatch: expected {case['expected_execution_mode']}, got {actual_mode}"
+            )
+
+    if "expect_recommendations" in case:
+        has_recommendations = bool(tool_result.get("recommendations"))
+        if has_recommendations != case["expect_recommendations"]:
+            errors.append(
+                f"recommendations mismatch: expected {case['expect_recommendations']}, got {has_recommendations}"
+            )
+
+    if "expected_blocking_issue_contains" in case:
+        blocking_issues = tool_result.get("preflight", {}).get("blocking_issues", [])
+        expected_text = case["expected_blocking_issue_contains"]
+        if not any(expected_text in issue for issue in blocking_issues):
+            errors.append(
+                f"blocking issue mismatch: expected one issue containing {expected_text!r}, got {blocking_issues!r}"
+            )
 
     return errors
 
@@ -118,7 +141,8 @@ def run_case(case: Dict[str, Any], token_stats: bool, debug_trace: bool) -> Dict
         "errors": errors,
         "llm_model": result.get("environment", {}).get("llm_model"),
         "selected_tool": result.get("selected_tool"),
-        "action": result.get("parsed_request", {}).get("action"),
+        "action": result.get("parsed_request", {}).get("primary_action")
+        or result.get("parsed_request", {}).get("action"),
         "dataset": result.get("parsed_request", {}).get("dataset"),
         "status": result.get("tool_result", {}).get("status") or result.get("status"),
         "exception": result.get("exception"),

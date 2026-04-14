@@ -5,6 +5,8 @@ import json
 import os
 import re
 import traceback
+from copy import deepcopy
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
@@ -17,6 +19,7 @@ from pydantic import BaseModel, Field
 # SATGPT_TRACE_DELETE_ME_START
 from debug_trace import new_debug_trace, summarize_tool_result, trace_event
 # SATGPT_TRACE_DELETE_ME_END
+from assets_library import get_recommendable_assets
 from token_utils import empty_token_usage, record_llm_usage
 from tool_library import (
     TOOL_HANDLERS,
@@ -44,6 +47,8 @@ class AgentState(TypedDict, total=False):
     environment: Dict[str, Any]
     debug_trace: Dict[str, Any]
     parsed_request: Dict[str, Any]
+    execution_plan: Dict[str, Any]
+    preflight: Dict[str, Any]
     selected_tool: str
     tool_result: Dict[str, Any]
     token_usage: Dict[str, Any]
@@ -51,6 +56,55 @@ class AgentState(TypedDict, total=False):
 
 
 TOOL_NAMES = [tool["name"] for tool in TOOL_LIBRARY]
+
+ACTION_PRIORITY = (
+    "describe_tools",
+    "asset_recommendation",
+    "depth_estimation",
+    "flood_extent",
+    "water_mapping",
+)
+
+RECOMMENDATION_HINTS = (
+    "推荐",
+    "recommend",
+    "asset",
+    "产品",
+    "reference layer",
+    "参考图层",
+    "现成数据",
+    "现成资产",
+    "baseline",
+    "context",
+    "archive",
+    "历史",
+)
+
+ASSET_FIRST_HINTS = (
+    "优先",
+    "先看",
+    "先展示",
+    "reference",
+    "参考",
+    "baseline",
+    "context",
+    "现成资产",
+    "现成数据",
+)
+
+OPTICAL_DATASETS = {"Sentinel2", "Landsat7", "Landsat8", "Modis", "Viirs"}
+COMPUTE_INTENTS = ("water_mapping", "flood_extent", "depth_estimation")
+
+CANDIDATE_TOOL_MAP = {
+    "describe_tools": [
+        "describe_hydrafloods_tools",
+        "recommend_flood_asset_layers",
+    ],
+    "asset_recommendation": ["recommend_flood_asset_layers"],
+    "water_mapping": ["get_water_extent_tile", "get_flood_extent_tile", "estimate_flood_depth_tile"],
+    "flood_extent": ["get_flood_extent_tile", "estimate_flood_depth_tile", "get_water_extent_tile"],
+    "depth_estimation": ["estimate_flood_depth_tile", "get_flood_extent_tile", "get_water_extent_tile"],
+}
 
 
 class QueryPlan(BaseModel):
@@ -95,6 +149,14 @@ ACTION_PATTERNS: Dict[ActionName, List[str]] = {
 }
 
 
+def _trace(debug_trace: Dict[str, Any], node: str, phase: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    return trace_event(debug_trace, node=node, phase=phase, payload=payload)
+
+
+def _get_debug_trace(state: AgentState, enabled: bool = False) -> Dict[str, Any]:
+    return state.get("debug_trace") or new_debug_trace(enabled)
+
+
 def _normalize_query(query: str) -> str:
     return query.lower().replace("：", ":").replace("，", ",").strip()
 
@@ -116,7 +178,7 @@ def _extract_dates(query: str) -> List[str]:
 
 
 def _detect_action(normalized_query: str) -> ActionName:
-    for action in ["describe_tools", "asset_recommendation", "depth_estimation", "flood_extent", "water_mapping"]:
+    for action in ACTION_PRIORITY:
         if any(token in normalized_query for token in ACTION_PATTERNS[action]):  # type: ignore[index]
             return action  # type: ignore[return-value]
     return "describe_tools"
@@ -160,6 +222,222 @@ def _build_missing_fields(action: ActionName, dataset: Optional[str], dates: Lis
     return missing
 
 
+def _build_tool_kwargs(tool_name: str, parsed: Dict[str, Any], query: str) -> Dict[str, Any]:
+    if tool_name == "describe_hydrafloods_tools":
+        return {}
+    if tool_name == "recommend_flood_asset_layers":
+        return {"query": query, "parsed_request": parsed}
+
+    common_kwargs = {
+        "dataset": parsed["dataset"],
+        "start_date": parsed["dates"][0],
+        "end_date": parsed["dates"][1],
+        "bbox": parsed["bbox"],
+        "algorithm": parsed["algorithm"],
+    }
+    if tool_name == "get_water_extent_tile":
+        return common_kwargs
+    if tool_name in {"get_flood_extent_tile", "estimate_flood_depth_tile"}:
+        return {
+            **common_kwargs,
+            "reference": parsed["reference"],
+        }
+    raise ValueError(f"Unsupported tool: {tool_name}")
+
+
+def _query_has_any_hint(normalized_query: str, hints: tuple[str, ...]) -> bool:
+    return any(hint in normalized_query for hint in hints)
+
+
+def _detect_compute_action(normalized_query: str) -> Optional[ActionName]:
+    for action in ("depth_estimation", "flood_extent", "water_mapping"):
+        if any(token in normalized_query for token in ACTION_PATTERNS[action]):  # type: ignore[index]
+            return action  # type: ignore[return-value]
+    return None
+
+
+def _primary_tool_from_plan(execution_plan: Dict[str, Any]) -> str:
+    return execution_plan["primary_tool"]
+
+
+def _parse_iso_date(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
+def _asset_available_for_window(asset: Dict[str, Any], start_date: Optional[str], end_date: Optional[str]) -> bool:
+    availability = asset.get("availability", {})
+    request_start = _parse_iso_date(start_date)
+    request_end = _parse_iso_date(end_date)
+    available_start = _parse_iso_date(availability.get("start_date"))
+    available_end = _parse_iso_date(availability.get("end_date"))
+
+    if request_end and available_start and request_end < available_start:
+        return False
+    if request_start and available_end and request_start > available_end:
+        return False
+    return True
+
+
+def _build_execution_plan(query: str, parsed: Dict[str, Any]) -> Dict[str, Any]:
+    normalized_query = _normalize_query(query)
+    selected_tool = parsed["selected_tool"]
+    selected_intent = get_tool_spec(selected_tool)["intent"]
+    compute_action = _detect_compute_action(normalized_query)
+    wants_asset_recommendation = (
+        selected_tool == "recommend_flood_asset_layers"
+        or _query_has_any_hint(normalized_query, RECOMMENDATION_HINTS)
+    )
+    primary_output = "assets" if _query_has_any_hint(normalized_query, ASSET_FIRST_HINTS) else "compute"
+
+    compute_tool: Optional[str] = None
+    if selected_intent in COMPUTE_INTENTS:
+        compute_tool = selected_tool
+    elif compute_action:
+        fallback = find_tool_by_intent(compute_action)
+        compute_tool = fallback["name"] if fallback else None
+
+    if selected_tool == "describe_hydrafloods_tools":
+        return {
+            "mode": "describe_only",
+            "primary_tool": "describe_hydrafloods_tools",
+            "compute_tool": None,
+            "asset_tool": None,
+            "primary_output": "describe",
+        }
+
+    if wants_asset_recommendation and not compute_tool:
+        return {
+            "mode": "assets_only",
+            "primary_tool": "recommend_flood_asset_layers",
+            "compute_tool": None,
+            "asset_tool": "recommend_flood_asset_layers",
+            "primary_output": "assets",
+        }
+
+    if wants_asset_recommendation and compute_tool:
+        return {
+            "mode": "hybrid",
+            "primary_tool": "recommend_flood_asset_layers" if primary_output == "assets" else compute_tool,
+            "compute_tool": compute_tool,
+            "asset_tool": "recommend_flood_asset_layers",
+            "primary_output": primary_output,
+        }
+
+    return {
+        "mode": "compute_only",
+        "primary_tool": compute_tool or selected_tool,
+        "compute_tool": compute_tool or selected_tool,
+        "asset_tool": None,
+        "primary_output": "compute",
+    }
+
+
+def _preflight_asset_checks(parsed: Dict[str, Any], execution_plan: Dict[str, Any]) -> Dict[str, Any]:
+    asset_tool_enabled = execution_plan["mode"] in {"assets_only", "hybrid"}
+    if not asset_tool_enabled:
+        return {"blocking_issues": [], "warnings": []}
+
+    dates = parsed.get("dates") or []
+    start_date = dates[0] if dates else None
+    end_date = dates[1] if len(dates) > 1 else start_date
+    if not start_date and not end_date:
+        return {"blocking_issues": [], "warnings": []}
+
+    available_assets = []
+    unavailable_assets = []
+    for asset in get_recommendable_assets():
+        if asset.get("execution_profile", {}).get("supports_tile", False) is False:
+            continue
+        if _asset_available_for_window(asset, start_date, end_date):
+            available_assets.append(asset["asset_id"])
+        else:
+            unavailable_assets.append(asset["asset_id"])
+
+    blocking_issues: List[str] = []
+    warnings: List[str] = []
+    if not available_assets:
+        blocking_issues.append("所选时间窗与当前可推荐资产的可用期冲突。")
+    elif unavailable_assets:
+        warnings.append(
+            "部分资产与所选时间窗不匹配: " + ", ".join(unavailable_assets[:3])
+        )
+    return {"blocking_issues": blocking_issues, "warnings": warnings}
+
+
+def _preflight_sensor_checks(parsed: Dict[str, Any], execution_plan: Dict[str, Any]) -> Dict[str, Any]:
+    if execution_plan["mode"] not in {"compute_only", "hybrid"}:
+        return {"blocking_issues": [], "warnings": []}
+
+    warnings: List[str] = []
+    dataset = parsed.get("dataset")
+    compute_tool = execution_plan.get("compute_tool")
+    action = get_tool_spec(compute_tool)["intent"] if compute_tool else parsed.get("action")
+
+    if action == "flood_extent" and dataset in OPTICAL_DATASETS:
+        warnings.append("当前洪水范围提取使用光学传感器，可能受云和阴影影响。")
+    if action == "depth_estimation" and dataset != "Sentinel1":
+        warnings.append("当前水深估算更适合先使用 Sentinel-1 生成稳态洪水范围。")
+    if action == "water_mapping" and dataset == "Sentinel1":
+        warnings.append("当前 Sentinel-1 水体提取链路对阈值和时序合成较敏感，建议结合参考资产图层一起判断。")
+    return {"blocking_issues": [], "warnings": warnings}
+
+
+def _run_preflight_checks(query: str, parsed: Dict[str, Any], execution_plan: Dict[str, Any]) -> Dict[str, Any]:
+    blocking_issues = list(parsed.get("missing_fields", []))
+    warnings: List[str] = []
+
+    if blocking_issues:
+        blocking_issues = [f"缺少必要参数: {', '.join(blocking_issues)}"]
+
+    asset_checks = _preflight_asset_checks(parsed, execution_plan)
+    sensor_checks = _preflight_sensor_checks(parsed, execution_plan)
+    blocking_issues.extend(asset_checks["blocking_issues"])
+    blocking_issues.extend(sensor_checks["blocking_issues"])
+    warnings.extend(asset_checks["warnings"])
+    warnings.extend(sensor_checks["warnings"])
+
+    return {
+        "status": "error" if blocking_issues else "ok",
+        "blocking_issues": blocking_issues,
+        "warnings": warnings,
+        "checked_query": query,
+    }
+
+
+def _merge_asset_result_into_compute(compute_result: Dict[str, Any], asset_result: Dict[str, Any]) -> Dict[str, Any]:
+    merged = deepcopy(compute_result)
+    merged["recommendations"] = asset_result.get("recommendations", [])
+    merged.setdefault("artifacts", {})
+    merged["artifacts"]["recommended_layers"] = asset_result.get("artifacts", {}).get("layers", [])
+    merged.setdefault("metadata", {})
+    merged["metadata"]["recommended_asset_count"] = asset_result.get("metadata", {}).get("recommended_asset_count", 0)
+    return merged
+
+
+def _merge_compute_result_into_assets(asset_result: Dict[str, Any], compute_result: Dict[str, Any]) -> Dict[str, Any]:
+    merged = deepcopy(asset_result)
+    compute_layer = compute_result.get("artifacts", {}).get("primary_layer")
+    merged.setdefault("artifacts", {})
+    merged.setdefault("metadata", {})
+    merged["analysis_result"] = {
+        "tool_name": compute_result.get("tool_name"),
+        "summary": compute_result.get("summary"),
+        "metadata": compute_result.get("metadata", {}),
+    }
+    merged["metadata"]["analysis_tool"] = compute_result.get("tool_name")
+    if compute_layer:
+        merged["artifacts"].setdefault("layers", [])
+        merged["artifacts"]["layers"].append(
+            {
+                **compute_layer,
+                "visible": False,
+            }
+        )
+    return merged
+
+
 def _heuristic_parse(query: str) -> Dict[str, Any]:
     normalized_query = _normalize_query(query)
     action = _detect_action(normalized_query)
@@ -180,26 +458,7 @@ def _heuristic_parse(query: str) -> Dict[str, Any]:
 
 
 def _candidate_tools(heuristic: Dict[str, Any]) -> List[str]:
-    action = heuristic["action"]
-    if action == "describe_tools":
-        return [
-            "describe_hydrafloods_tools",
-            "recommend_flood_asset_layers",
-            "get_water_extent_tile",
-            "get_flood_extent_tile",
-            "estimate_flood_depth_tile",
-        ]
-    if action == "asset_recommendation":
-        return [
-            "recommend_flood_asset_layers",
-            "get_water_extent_tile",
-            "get_flood_extent_tile",
-        ]
-    if action == "water_mapping":
-        return ["get_water_extent_tile", "get_flood_extent_tile", "estimate_flood_depth_tile"]
-    if action == "flood_extent":
-        return ["get_flood_extent_tile", "estimate_flood_depth_tile", "get_water_extent_tile"]
-    return ["estimate_flood_depth_tile", "get_flood_extent_tile", "get_water_extent_tile"]
+    return CANDIDATE_TOOL_MAP[heuristic["action"]]
 
 
 def _get_parser_model() -> ChatOpenAI:
@@ -291,9 +550,9 @@ def detect_environment_node(state: AgentState) -> AgentState:
     if state.get("environment", {}).get("debug_trace_enabled") is True:
         debug_trace_enabled = True
 
-    debug_trace = state.get("debug_trace") or new_debug_trace(debug_trace_enabled)
+    debug_trace = _get_debug_trace(state, debug_trace_enabled)
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="detect_environment",
         phase="enter",
@@ -307,7 +566,7 @@ def detect_environment_node(state: AgentState) -> AgentState:
         "debug_trace_enabled": debug_trace_enabled,
     }
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="detect_environment",
         phase="exit",
@@ -318,9 +577,9 @@ def detect_environment_node(state: AgentState) -> AgentState:
 
 
 def parse_request_node(state: AgentState) -> AgentState:
-    debug_trace = state.get("debug_trace") or new_debug_trace(False)
+    debug_trace = _get_debug_trace(state)
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="parse_request",
         phase="enter",
@@ -335,7 +594,7 @@ def parse_request_node(state: AgentState) -> AgentState:
         token_tracking_enabled=token_tracking_enabled,
     )
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="parse_request",
         phase="exit",
@@ -345,18 +604,58 @@ def parse_request_node(state: AgentState) -> AgentState:
     return {"parsed_request": parsed_request, "token_usage": token_usage, "debug_trace": debug_trace}
 
 
-def select_tool_node(state: AgentState) -> AgentState:
-    debug_trace = state.get("debug_trace") or new_debug_trace(False)
-    selected_tool = state["parsed_request"]["selected_tool"]
+def plan_execution_node(state: AgentState) -> AgentState:
+    debug_trace = _get_debug_trace(state)
+    execution_plan = _build_execution_plan(state["query"], state["parsed_request"])
+    parsed_request = deepcopy(state["parsed_request"])
+    parsed_request["primary_action"] = get_tool_spec(execution_plan["primary_tool"])["intent"]
+    if execution_plan.get("compute_tool"):
+        parsed_request["compute_action"] = get_tool_spec(execution_plan["compute_tool"])["intent"]
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
+        debug_trace,
+        node="plan_execution",
+        phase="planned",
+        payload=execution_plan,
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    return {
+        "execution_plan": execution_plan,
+        "parsed_request": parsed_request,
+        "debug_trace": debug_trace,
+    }
+
+
+def preflight_check_node(state: AgentState) -> AgentState:
+    debug_trace = _get_debug_trace(state)
+    preflight = _run_preflight_checks(
+        state["query"],
+        state["parsed_request"],
+        state["execution_plan"],
+    )
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = _trace(
+        debug_trace,
+        node="preflight_check",
+        phase="completed",
+        payload=preflight,
+    )
+    # SATGPT_TRACE_DELETE_ME_END
+    return {"preflight": preflight, "debug_trace": debug_trace}
+
+
+def select_tool_node(state: AgentState) -> AgentState:
+    debug_trace = _get_debug_trace(state)
+    selected_tool = _primary_tool_from_plan(state["execution_plan"])
+    # SATGPT_TRACE_DELETE_ME_START
+    debug_trace = _trace(
         debug_trace,
         node="select_tool",
         phase="selected",
         payload={
             "selected_tool": selected_tool,
+            "mode": state["execution_plan"].get("mode"),
             "action": state["parsed_request"].get("action"),
-            "dataset": state["parsed_request"].get("dataset"),
         },
     )
     # SATGPT_TRACE_DELETE_ME_END
@@ -365,98 +664,97 @@ def select_tool_node(state: AgentState) -> AgentState:
 
 def execute_tool_node(state: AgentState) -> AgentState:
     parsed = state["parsed_request"]
-    debug_trace = state.get("debug_trace") or new_debug_trace(False)
+    debug_trace = _get_debug_trace(state)
+    preflight = state["preflight"]
+    execution_plan = state["execution_plan"]
 
-    if parsed["missing_fields"]:
+    if preflight["blocking_issues"]:
         # SATGPT_TRACE_DELETE_ME_START
-        debug_trace = trace_event(
+        debug_trace = _trace(
             debug_trace,
             node="execute_tool",
-            phase="blocked_missing_fields",
-            payload={"missing_fields": parsed["missing_fields"], "parsed_request": parsed},
+            phase="blocked_preflight",
+            payload={"preflight": preflight, "parsed_request": parsed},
         )
         # SATGPT_TRACE_DELETE_ME_END
         return {
             "tool_result": {
                 "status": "error",
-                "summary": f"缺少必要参数: {', '.join(parsed['missing_fields'])}",
+                "summary": "执行前检查未通过。",
                 "inputs": parsed,
+                "preflight": preflight,
             },
             "debug_trace": debug_trace,
         }
 
-    tool_name = state["selected_tool"]
-    handler = TOOL_HANDLERS[tool_name]
-    tool_kwargs: Dict[str, Any]
-    if tool_name == "describe_hydrafloods_tools":
-        tool_kwargs = {}
-    elif tool_name == "recommend_flood_asset_layers":
-        tool_kwargs = {
-            "query": state["query"],
-            "parsed_request": parsed,
-        }
-    elif tool_name == "get_water_extent_tile":
-        tool_kwargs = {
-            "dataset": parsed["dataset"],
-            "start_date": parsed["dates"][0],
-            "end_date": parsed["dates"][1],
-            "bbox": parsed["bbox"],
-            "algorithm": parsed["algorithm"],
-        }
-    elif tool_name == "get_flood_extent_tile":
-        tool_kwargs = {
-            "dataset": parsed["dataset"],
-            "start_date": parsed["dates"][0],
-            "end_date": parsed["dates"][1],
-            "bbox": parsed["bbox"],
-            "algorithm": parsed["algorithm"],
-            "reference": parsed["reference"],
-        }
-    elif tool_name == "estimate_flood_depth_tile":
-        tool_kwargs = {
-            "dataset": parsed["dataset"],
-            "start_date": parsed["dates"][0],
-            "end_date": parsed["dates"][1],
-            "bbox": parsed["bbox"],
-            "algorithm": parsed["algorithm"],
-            "reference": parsed["reference"],
-        }
-    else:
-        raise ValueError(f"Unsupported tool: {tool_name}")
-
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="execute_tool",
-        phase="tool_call",
-        payload={"tool_name": tool_name, "tool_kwargs": tool_kwargs},
+        phase="plan_dispatch",
+        payload=execution_plan,
     )
     # SATGPT_TRACE_DELETE_ME_END
     try:
-        tool_result = handler(**tool_kwargs)
-        if (
-            tool_result.get("status") == "ok"
-            and tool_name not in {"describe_hydrafloods_tools", "recommend_flood_asset_layers"}
-            and parsed.get("bbox")
-        ):
-            asset_result = TOOL_HANDLERS["recommend_flood_asset_layers"](
+        mode = execution_plan["mode"]
+        if mode == "describe_only":
+            tool_name = "describe_hydrafloods_tools"
+            tool_result = TOOL_HANDLERS[tool_name]()
+        elif mode == "assets_only":
+            tool_name = "recommend_flood_asset_layers"
+            tool_result = TOOL_HANDLERS[tool_name](
                 query=state["query"],
                 parsed_request=parsed,
             )
-            tool_result["recommendations"] = asset_result.get("recommendations", [])
-            tool_result.setdefault("artifacts", {})
-            tool_result["artifacts"]["recommended_layers"] = asset_result.get("artifacts", {}).get("layers", [])
-            tool_result["metadata"]["recommended_asset_count"] = asset_result.get("metadata", {}).get(
-                "recommended_asset_count", 0
+        elif mode == "compute_only":
+            tool_name = execution_plan["compute_tool"]
+            tool_kwargs = _build_tool_kwargs(tool_name, parsed, state["query"])
+            # SATGPT_TRACE_DELETE_ME_START
+            debug_trace = _trace(
+                debug_trace,
+                node="execute_tool",
+                phase="tool_call",
+                payload={"tool_name": tool_name, "tool_kwargs": tool_kwargs},
             )
+            # SATGPT_TRACE_DELETE_ME_END
+            tool_result = TOOL_HANDLERS[tool_name](**tool_kwargs)
+        elif mode == "hybrid":
+            compute_tool = execution_plan["compute_tool"]
+            asset_tool = execution_plan["asset_tool"]
+            compute_kwargs = _build_tool_kwargs(compute_tool, parsed, state["query"])
+            # SATGPT_TRACE_DELETE_ME_START
+            debug_trace = _trace(
+                debug_trace,
+                node="execute_tool",
+                phase="hybrid_calls",
+                payload={
+                    "compute_tool": compute_tool,
+                    "compute_kwargs": compute_kwargs,
+                    "asset_tool": asset_tool,
+                },
+            )
+            # SATGPT_TRACE_DELETE_ME_END
+            asset_result = TOOL_HANDLERS[asset_tool](
+                query=state["query"],
+                parsed_request=parsed,
+            )
+            compute_result = TOOL_HANDLERS[compute_tool](**compute_kwargs)
+            if execution_plan["primary_output"] == "assets":
+                tool_name = asset_tool
+                tool_result = _merge_compute_result_into_assets(asset_result, compute_result)
+            else:
+                tool_name = compute_tool
+                tool_result = _merge_asset_result_into_compute(compute_result, asset_result)
+        else:
+            raise ValueError(f"Unsupported execution mode: {mode}")
     except Exception as exc:
         # SATGPT_TRACE_DELETE_ME_START
-        debug_trace = trace_event(
+        debug_trace = _trace(
             debug_trace,
             node="execute_tool",
             phase="tool_exception",
             payload={
-                "tool_name": tool_name,
+                "tool_name": state.get("selected_tool"),
                 "exception_type": type(exc).__name__,
                 "exception_message": str(exc),
                 "traceback": traceback.format_exc(),
@@ -465,8 +763,14 @@ def execute_tool_node(state: AgentState) -> AgentState:
         # SATGPT_TRACE_DELETE_ME_END
         raise
 
+    tool_result.setdefault("metadata", {})
+    tool_result["metadata"]["execution_mode"] = execution_plan["mode"]
+    if preflight["warnings"]:
+        tool_result["metadata"]["preflight_warning_count"] = len(preflight["warnings"])
+    tool_result["preflight"] = preflight
+
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="execute_tool",
         phase="tool_result",
@@ -537,6 +841,16 @@ def _render_tool_result(
             f"- 工具: `{tool_name}`",
             f"- 错误: {result['summary']}",
         ]
+        preflight = result.get("preflight", {})
+        if preflight.get("blocking_issues"):
+            lines.extend(
+                [
+                    "",
+                    "## 执行前检查",
+                ]
+            )
+            for item in preflight["blocking_issues"]:
+                lines.append(f"- {item}")
         lines.extend(_render_token_usage(token_usage))
         return "\n".join(lines)
 
@@ -544,7 +858,7 @@ def _render_tool_result(
         "# HYDRAFloods Tool-Agent 实验结果",
         "",
         f"- 工具: `{tool_name}`",
-        f"- 动作: `{parsed['action']}`",
+        f"- 动作: `{parsed.get('primary_action', parsed['action'])}`",
         f"- 数据集: `{parsed.get('dataset')}`",
         f"- 日期: `{', '.join(parsed.get('dates', []))}`",
         f"- 边界框: `{parsed.get('bbox')}`",
@@ -552,6 +866,17 @@ def _render_tool_result(
         "",
         f"结论: {result['summary']}",
     ]
+
+    preflight = result.get("preflight", {})
+    if preflight.get("warnings"):
+        lines.extend(
+            [
+                "",
+                "## 执行前检查",
+            ]
+        )
+        for item in preflight["warnings"]:
+            lines.append(f"- {item}")
 
     primary_layer = result.get("artifacts", {}).get("primary_layer")
     if primary_layer:
@@ -614,10 +939,10 @@ def format_response_node(state: AgentState) -> AgentState:
     tool_name = state["selected_tool"]
     result = state["tool_result"]
     token_usage = state.get("token_usage")
-    debug_trace = state.get("debug_trace") or new_debug_trace(False)
+    debug_trace = _get_debug_trace(state)
 
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="format_response",
         phase="enter",
@@ -634,7 +959,7 @@ def format_response_node(state: AgentState) -> AgentState:
         if token_lines:
             response = response + "\n" + "\n".join(token_lines)
         # SATGPT_TRACE_DELETE_ME_START
-        debug_trace = trace_event(
+        debug_trace = _trace(
             debug_trace,
             node="format_response",
             phase="exit",
@@ -645,7 +970,7 @@ def format_response_node(state: AgentState) -> AgentState:
 
     response = _render_tool_result(result, parsed, tool_name, token_usage=token_usage)
     # SATGPT_TRACE_DELETE_ME_START
-    debug_trace = trace_event(
+    debug_trace = _trace(
         debug_trace,
         node="format_response",
         phase="exit",
@@ -659,13 +984,17 @@ def build_graph():
     workflow = StateGraph(AgentState)
     workflow.add_node("detect_environment", detect_environment_node)
     workflow.add_node("parse_request", parse_request_node)
+    workflow.add_node("plan_execution", plan_execution_node)
+    workflow.add_node("preflight_check", preflight_check_node)
     workflow.add_node("select_tool", select_tool_node)
     workflow.add_node("execute_tool", execute_tool_node)
     workflow.add_node("format_response", format_response_node)
 
     workflow.add_edge(START, "detect_environment")
     workflow.add_edge("detect_environment", "parse_request")
-    workflow.add_edge("parse_request", "select_tool")
+    workflow.add_edge("parse_request", "plan_execution")
+    workflow.add_edge("plan_execution", "preflight_check")
+    workflow.add_edge("preflight_check", "select_tool")
     workflow.add_edge("select_tool", "execute_tool")
     workflow.add_edge("execute_tool", "format_response")
     workflow.add_edge("format_response", END)

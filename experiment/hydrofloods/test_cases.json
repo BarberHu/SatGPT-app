@@ -27,6 +27,20 @@
     "expected_tool": "recommend_flood_asset_layers",
     "expected_action": "asset_recommendation",
     "expect_status": "ok",
+    "expected_execution_mode": "assets_only",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "hybrid_recommend_then_flood",
+    "category": "hybrid",
+    "description": "同时请求资产推荐和 Sentinel-1 洪水范围提取，应该走前置推荐 + 计算的混合流程",
+    "query": "请推荐适合这个区域洪水分析的数据产品，并同时用 Sentinel-1 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做洪水范围提取。",
+    "expected_tool": "get_flood_extent_tile",
+    "expected_action": "flood_extent",
+    "expect_status": "ok",
+    "expected_dataset": "Sentinel1",
+    "expected_execution_mode": "hybrid",
+    "expect_recommendations": true,
     "expected_artifact": "tile"
   },
   {
@@ -120,6 +134,18 @@
     "expect_status": "ok",
     "expected_dataset": "Sentinel1",
     "expected_reference": "seasonal",
+    "expected_artifact": "tile"
+  },
+  {
+    "id": "preflight_missing_params",
+    "category": "preflight",
+    "description": "缺少时间窗和 bbox 时，执行前检查应阻断真实计算",
+    "query": "请用 Sentinel-1 做洪水范围提取。",
+    "expected_tool": "get_flood_extent_tile",
+    "expected_action": "flood_extent",
+    "expect_status": "error",
+    "expected_dataset": "Sentinel1",
+    "expected_blocking_issue_contains": "缺少必要参数",
     "expected_artifact": "tile"
   },
   {

@@ -2,13 +2,13 @@
   "llm_model": "gpt-4o-mini",
   "token_stats_enabled": true,
   "token_totals": {
-    "prompt_tokens": 9937,
-    "completion_tokens": 713,
-    "total_tokens": 10650
+    "prompt_tokens": 10254,
+    "completion_tokens": 813,
+    "total_tokens": 11067
   },
   "summary": {
-    "total": 12,
-    "passed": 12,
+    "total": 14,
+    "passed": 14,
     "failed": 0
   },
   "results": [
@@ -30,15 +30,15 @@
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 879,
+            "prompt_tokens": 592,
             "completion_tokens": 36,
-            "total_tokens": 915
+            "total_tokens": 628
           }
         ],
         "totals": {
-          "prompt_tokens": 879,
+          "prompt_tokens": 592,
           "completion_tokens": 36,
-          "total_tokens": 915
+          "total_tokens": 628
         }
       }
     },
@@ -60,15 +60,15 @@
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 894,
+            "prompt_tokens": 607,
             "completion_tokens": 36,
-            "total_tokens": 930
+            "total_tokens": 643
           }
         ],
         "totals": {
-          "prompt_tokens": 894,
+          "prompt_tokens": 607,
           "completion_tokens": 36,
-          "total_tokens": 930
+          "total_tokens": 643
         }
       }
     },
@@ -90,15 +90,45 @@
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 790,
+            "prompt_tokens": 614,
             "completion_tokens": 62,
-            "total_tokens": 852
+            "total_tokens": 676
           }
         ],
         "totals": {
-          "prompt_tokens": 790,
+          "prompt_tokens": 614,
           "completion_tokens": 62,
-          "total_tokens": 852
+          "total_tokens": 676
+        }
+      }
+    },
+    {
+      "id": "hybrid_recommend_then_flood",
+      "description": "同时请求资产推荐和 Sentinel-1 洪水范围提取，应该走前置推荐 + 计算的混合流程",
+      "query": "请推荐适合这个区域洪水分析的数据产品，并同时用 Sentinel-1 在 bbox=[90.30,23.60,90.50,23.80] 上，对 2020-07-01 到 2020-07-15 做洪水范围提取。",
+      "passed": true,
+      "errors": [],
+      "llm_model": "gpt-4o-mini",
+      "selected_tool": "get_flood_extent_tile",
+      "action": "flood_extent",
+      "dataset": "Sentinel1",
+      "status": "ok",
+      "exception": null,
+      "token_usage": {
+        "enabled": true,
+        "llm_calls": [
+          {
+            "phase": "route_query",
+            "model": "gpt-4o-mini",
+            "prompt_tokens": 620,
+            "completion_tokens": 64,
+            "total_tokens": 684
+          }
+        ],
+        "totals": {
+          "prompt_tokens": 620,
+          "completion_tokens": 64,
+          "total_tokens": 684
         }
       }
     },
@@ -343,6 +373,36 @@
       }
     },
     {
+      "id": "preflight_missing_params",
+      "description": "缺少时间窗和 bbox 时，执行前检查应阻断真实计算",
+      "query": "请用 Sentinel-1 做洪水范围提取。",
+      "passed": true,
+      "errors": [],
+      "llm_model": "gpt-4o-mini",
+      "selected_tool": "get_flood_extent_tile",
+      "action": "flood_extent",
+      "dataset": "Sentinel1",
+      "status": "error",
+      "exception": null,
+      "token_usage": {
+        "enabled": true,
+        "llm_calls": [
+          {
+            "phase": "route_query",
+            "model": "gpt-4o-mini",
+            "prompt_tokens": 734,
+            "completion_tokens": 36,
+            "total_tokens": 770
+          }
+        ],
+        "totals": {
+          "prompt_tokens": 734,
+          "completion_tokens": 36,
+          "total_tokens": 770
+        }
+      }
+    },
+    {
       "id": "venice_2023_flood_severity",
       "description": "英文真实问题，当前会路由到 Venice 2023 的 Sentinel-1 洪水范围提取并返回推荐资产图层",
       "query": "Help me extract the flooded areas in the flood event in 2023 in the city of Venice, Italy. I want to know the flooded areas and the severity of the flood in those areas.",
@@ -360,15 +420,15 @@
           {
             "phase": "route_query",
             "model": "gpt-4o-mini",
-            "prompt_tokens": 904,
+            "prompt_tokens": 617,
             "completion_tokens": 68,
-            "total_tokens": 972
+            "total_tokens": 685
           }
         ],
         "totals": {
-          "prompt_tokens": 904,
+          "prompt_tokens": 617,
           "completion_tokens": 68,
-          "total_tokens": 972
+          "total_tokens": 685
         }
       }
     }

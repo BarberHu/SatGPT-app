@@ -23,6 +23,65 @@ def _build_dataset(dataset_name: str, region: ee.Geometry, start_date: str, end_
     return dataset_cls(region, start_date, end_date)
 
 
+def _native_layer_profile(layer_kind: str, region: ee.Geometry) -> Dict[str, Any]:
+    profiles: Dict[str, Dict[str, Any]] = {
+        "water_extent": {
+            "title": "HYDRAFloods Water Extent",
+            "vis_params": {
+                "min": 0,
+                "max": 1,
+                "palette": ["#ffffff", "#1d4ed8"],
+                "dimensions": 1024,
+                "region": region,
+            },
+            "legend_spec": {
+                "type": "categorical",
+                "label": "Water extent",
+                "items": [
+                    {"value": 0, "label": "Not water", "color": "#ffffff"},
+                    {"value": 1, "label": "Water", "color": "#1d4ed8"},
+                ],
+            },
+        },
+        "flood_extent": {
+            "title": "HYDRAFloods Flood Extent",
+            "vis_params": {
+                "min": 0,
+                "max": 1,
+                "palette": ["#ffffff", "#ef4444"],
+                "dimensions": 1024,
+                "region": region,
+            },
+            "legend_spec": {
+                "type": "categorical",
+                "label": "Flood extent",
+                "items": [
+                    {"value": 0, "label": "No flood", "color": "#ffffff"},
+                    {"value": 1, "label": "Flooded", "color": "#ef4444"},
+                ],
+            },
+        },
+        "flood_depth": {
+            "title": "HYDRAFloods Flood Depth",
+            "vis_params": {
+                "min": 0,
+                "max": 5,
+                "palette": ["#ffffff", "#67e8f9", "#2563eb", "#172554"],
+                "dimensions": 1024,
+                "region": region,
+            },
+            "legend_spec": {
+                "type": "continuous",
+                "label": "Flood depth",
+                "palette": ["#ffffff", "#67e8f9", "#2563eb", "#172554"],
+                "min": 0,
+                "max": 5,
+            },
+        },
+    }
+    return profiles[layer_kind]
+
+
 def _default_index(dataset_name: str) -> str:
     if dataset_name == "Sentinel1":
         return "vv_vh_ratio"
@@ -58,13 +117,7 @@ def _apply_water_workflow(
         else:
             raise NotImplementedError(f"Unsupported water-mapping algorithm: {algorithm}")
 
-        vis_params = {
-            "min": 0,
-            "max": 1,
-            "palette": "white,blue",
-            "dimensions": 1024,
-            "region": region,
-        }
+        vis_params = _native_layer_profile("water_extent", region)["vis_params"]
         return working_ds, water_ds, vis_params, index_name
 
     working_ds = dataset_obj.apply_func(hf.vv_vh_ratio)
@@ -83,13 +136,7 @@ def _apply_water_workflow(
     else:
         raise NotImplementedError(f"Unsupported water-mapping algorithm: {algorithm}")
 
-    vis_params = {
-        "min": 0,
-        "max": 1,
-        "palette": "white,navy",
-        "dimensions": 1024,
-        "region": region,
-    }
+    vis_params = _native_layer_profile("water_extent", region)["vis_params"]
     return working_ds, water_ds, vis_params, "vv_vh_ratio"
 
 
@@ -98,15 +145,21 @@ def _tile_artifact(
     vis_params: Dict[str, Any],
     name: str,
     region: Optional[ee.Geometry] = None,
+    title: Optional[str] = None,
+    legend_spec: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     clipped_image = image.clip(region) if region is not None else image
     serializable_vis = {k: v for k, v in vis_params.items() if k != "region"}
-    return {
+    artifact = {
         "name": name,
+        "title": title or name,
         "tile_url": clipped_image.getMapId(vis_params)["tile_fetcher"].url_format,
         "thumbnail_url": clipped_image.getThumbURL(vis_params),
         "vis_params": serializable_vis,
     }
+    if legend_spec:
+        artifact["legend_spec"] = legend_spec
+    return artifact
 
 
 def _observation_image(water_ds, observation_date: str) -> ee.Image:
@@ -416,6 +469,7 @@ def get_water_extent_tile(
     working_ds, water_ds, vis_params, index_name = _apply_water_workflow(
         dataset, dataset_obj, algorithm, region
     )
+    layer_profile = _native_layer_profile("water_extent", region)
     water_img = _observation_image(water_ds, end_date)
     image_count = dataset_obj.collection.size().getInfo()
 
@@ -431,7 +485,14 @@ def get_water_extent_tile(
             "algorithm": algorithm,
         },
         "artifacts": {
-            "primary_layer": _tile_artifact(water_img, vis_params, "water_extent", region),
+            "primary_layer": _tile_artifact(
+                water_img,
+                vis_params,
+                "water_extent",
+                region,
+                title=layer_profile["title"],
+                legend_spec=layer_profile["legend_spec"],
+            ),
         },
         "metadata": {
             "gee_project_id": init_result["project_id"],
@@ -457,13 +518,8 @@ def get_flood_extent_tile(
     _, water_ds, _, _ = _apply_water_workflow(dataset, dataset_obj, algorithm, region)
     water_img = _observation_image(water_ds, end_date)
     flood_img = hf.extract_flood(water_img, reference=reference, permanent_threshold=75)
-    flood_vis = {
-        "min": 0,
-        "max": 1,
-        "palette": "white,red",
-        "dimensions": 1024,
-        "region": region,
-    }
+    layer_profile = _native_layer_profile("flood_extent", region)
+    flood_vis = layer_profile["vis_params"]
 
     base.update(
         {
@@ -475,7 +531,14 @@ def get_flood_extent_tile(
             },
             "artifacts": {
                 **base["artifacts"],
-                "primary_layer": _tile_artifact(flood_img, flood_vis, "flood_extent", region),
+                "primary_layer": _tile_artifact(
+                    flood_img,
+                    flood_vis,
+                    "flood_extent",
+                    region,
+                    title=layer_profile["title"],
+                    legend_spec=layer_profile["legend_spec"],
+                ),
             },
             "metadata": {
                 **base["metadata"],
@@ -506,13 +569,8 @@ def estimate_flood_depth_tile(
     flood_img = hf.extract_flood(water_img, reference=reference, permanent_threshold=75)
     dem = ee.Image(dem_asset)
     depth_img = hf.fwdet(flood_img, dem)
-    depth_vis = {
-        "min": 0,
-        "max": 5,
-        "palette": "white,cyan,blue,navy",
-        "dimensions": 1024,
-        "region": region,
-    }
+    layer_profile = _native_layer_profile("flood_depth", region)
+    depth_vis = layer_profile["vis_params"]
 
     base.update(
         {
@@ -524,7 +582,14 @@ def estimate_flood_depth_tile(
             },
             "artifacts": {
                 **base["artifacts"],
-                "primary_layer": _tile_artifact(depth_img, depth_vis, "flood_depth", region),
+                "primary_layer": _tile_artifact(
+                    depth_img,
+                    depth_vis,
+                    "flood_depth",
+                    region,
+                    title=layer_profile["title"],
+                    legend_spec=layer_profile["legend_spec"],
+                ),
             },
             "metadata": {
                 **base["metadata"],
