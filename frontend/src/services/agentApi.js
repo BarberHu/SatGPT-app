@@ -57,6 +57,36 @@ export const renderRecommendedLayer = async (params) => {
   }
 };
 
+export const searchLocationCandidates = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/location-search`, params);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to search location candidates:', error);
+    throw normalizeAgentApiError(error, 'Failed to search location candidates.');
+  }
+};
+
+export const syncBusinessLayers = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/business-layers/upsert`, params);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to sync business layers:', error);
+    throw normalizeAgentApiError(error, 'Failed to sync business layers.');
+  }
+};
+
+export const resolveBusinessLayers = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/business-layers/batch-resolve`, params);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to resolve business layers:', error);
+    throw normalizeAgentApiError(error, 'Failed to resolve business layers.');
+  }
+};
+
 export const checkGEEStatus = async () => {
   try {
     const response = await axios.get(`${AGENT_API_BASE}/api/gee-status`);
@@ -82,6 +112,9 @@ const agentApi = {
   getFloodImpact,
   refreshFloodConfirmation,
   renderRecommendedLayer,
+  searchLocationCandidates,
+  syncBusinessLayers,
+  resolveBusinessLayers,
   checkGEEStatus,
   checkAgentHealth,
 };

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import ee
 
-from flood_aoi import resolve_location_aoi
+from flood_aoi import _center_from_bounds, resolve_location_aoi
 from gee_service import gee_service
 
 
@@ -27,6 +27,22 @@ EXCLUDED_THEMES = {"ocean"}
 REGIONAL_ALLOWLIST = ("usgs/wbd", "wwf/hydroatlas", "wwf/hydrosheds")
 RECOMMENDED_RENDER_CACHE_TTL_SECONDS = 15 * 60
 RECOMMENDED_RENDER_CACHE_MAX_ENTRIES = 128
+PRODUCT_GROUP_LABELS = {
+    "flood_event_classification": "Flood Classification",
+    "flood_event_archive": "Flood Archive",
+    "surface_water_history": "Surface Water History",
+    "surface_water_frequency": "Surface Water Frequency",
+    "basin_context": "Basin Context",
+    "river_context": "River Context",
+}
+PRODUCT_GROUP_ORDER = {
+    "flood_event_classification": 10,
+    "flood_event_archive": 20,
+    "surface_water_history": 30,
+    "surface_water_frequency": 40,
+    "basin_context": 50,
+    "river_context": 60,
+}
 
 
 CORE_LAYER_DEFS = [
@@ -135,6 +151,41 @@ def _merge_render_profile(entry: Dict[str, Any]) -> Dict[str, Any]:
         if key in render_profile:
             merged[key] = deepcopy(render_profile[key])
     return merged
+
+
+def _build_ui_profile(asset: AssetRecord, entry: Dict[str, Any]) -> Dict[str, Any]:
+    product_group = str(entry.get("product_group") or "other")
+    selection = entry.get("selection_profile") or {}
+    render_profile = entry.get("render_profile") or {}
+    legend_spec = entry.get("legend_spec") or {}
+    ui_profile = deepcopy(entry.get("ui_profile") or {})
+
+    default_opacity = ui_profile.get("default_opacity")
+    if default_opacity is None:
+        default_opacity = 0.9 if render_profile.get("mode") == "styled_vector" or legend_spec.get("type") == "vector" else 0.82
+
+    ui_profile.setdefault("group", product_group)
+    ui_profile.setdefault("group_label", PRODUCT_GROUP_LABELS.get(product_group, "Other Context"))
+    ui_profile.setdefault("group_order", PRODUCT_GROUP_ORDER.get(product_group, 999))
+    ui_profile.setdefault("order", int(selection.get("priority", 0)))
+    ui_profile.setdefault("default_visible", bool(selection.get("default_selected", False)))
+    ui_profile["default_opacity"] = max(0.0, min(1.0, float(default_opacity)))
+
+    if not ui_profile.get("badge_label") and product_group in {"basin_context", "river_context"}:
+        ui_profile["badge_label"] = "Context"
+
+    accent_color = ui_profile.get("accent_color")
+    if accent_color is None:
+        if legend_spec.get("type") == "categorical" and legend_spec.get("items"):
+            accent_color = legend_spec["items"][-1].get("color")
+        elif legend_spec.get("type") == "continuous" and legend_spec.get("palette"):
+            accent_color = legend_spec["palette"][-1]
+        elif legend_spec.get("type") == "vector":
+            accent_color = (legend_spec.get("style") or {}).get("color")
+    if accent_color:
+        ui_profile["accent_color"] = accent_color
+
+    return ui_profile
 
 
 def _apply_registry_entry(asset: AssetRecord, entry: Dict[str, Any]) -> AssetRecord:
@@ -248,6 +299,7 @@ def _relevance_score(asset: AssetRecord) -> int:
 
 def _build_asset_descriptor(asset: AssetRecord, score: int, registry_entry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     layer_id = _hash_to_layer_id(asset.asset_id)
+    ui_profile = _build_ui_profile(asset, registry_entry or {})
     return {
         "id": layer_id,
         "asset_id": asset.asset_id,
@@ -268,6 +320,7 @@ def _build_asset_descriptor(asset: AssetRecord, score: int, registry_entry: Opti
         "selection_profile": deepcopy((registry_entry or {}).get("selection_profile") or {}),
         "render_profile": deepcopy((registry_entry or {}).get("render_profile") or {}),
         "execution_profile": deepcopy((registry_entry or {}).get("execution_profile") or {}),
+        "ui_profile": ui_profile,
     }
 
 
@@ -336,11 +389,43 @@ def build_confirmation_context(
     pre_date: Optional[str],
     peek_date: Optional[str],
     after_date: Optional[str],
+    mention_context: Optional[Dict[str, Any]] = None,
     confirmation_version: int = 1,
 ) -> Dict[str, Any]:
-    aoi_context = resolve_location_aoi(location or "")
+    mentioned_aoi = (mention_context or {}).get("mentioned_aoi")
+    mentioned_aoi_source = (mention_context or {}).get("mentioned_aoi_source")
+    effective_location = location or mentioned_aoi_source
+
+    if mentioned_aoi:
+        aoi_context = {
+            "resolved_aoi": deepcopy(mentioned_aoi),
+            "aoi_resolution_meta": {
+                "location": effective_location or "Mention-derived AOI",
+                "source": "mentioned_business_layer",
+                "confidence": 1.0,
+                "status": "resolved",
+                "bounds": mentioned_aoi.get("bounds"),
+                "resolution_rank": 0,
+            },
+            "coordinates": (
+                [mentioned_aoi["center"]["lng"], mentioned_aoi["center"]["lat"]]
+                if isinstance(mentioned_aoi.get("center"), dict)
+                and mentioned_aoi["center"].get("lng") is not None
+                and mentioned_aoi["center"].get("lat") is not None
+                else _center_from_bounds(mentioned_aoi.get("bounds")) if mentioned_aoi.get("bounds") else [0.0, 0.0]
+            ),
+            "bounds": mentioned_aoi.get("bounds"),
+            "geojson": mentioned_aoi.get("geojson"),
+            "geo_data": {
+                "source": "mentioned_business_layer",
+                "label": mentioned_aoi.get("label"),
+            },
+        }
+    else:
+        aoi_context = resolve_location_aoi(location or "")
+
     recommendation_context = recommend_flood_layers(
-        location=location,
+        location=effective_location,
         dates={
             "pre_date": pre_date,
             "peek_date": peek_date,
@@ -350,7 +435,7 @@ def build_confirmation_context(
     return {
         "event": event,
         "event_description": event_description,
-        "location": location,
+        "location": effective_location,
         "pre_date": pre_date,
         "peek_date": peek_date,
         "after_date": after_date,
@@ -364,6 +449,40 @@ def build_confirmation_context(
         "bounds": aoi_context["bounds"],
         "geojson": aoi_context["geojson"],
         "geo_data": aoi_context["geo_data"],
+        "mentioned_aoi": deepcopy(mentioned_aoi) if mentioned_aoi else None,
+        "mentioned_aoi_source": mentioned_aoi_source,
+        "mentioned_layer_refs": deepcopy((mention_context or {}).get("mentioned_layer_refs", [])),
+    }
+
+
+def build_aoi_from_business_layer(layer_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not layer_record or not isinstance(layer_record, dict):
+        return None
+
+    geojson = layer_record.get("geojson")
+    bounds = layer_record.get("bounds")
+    center = layer_record.get("center")
+    label = layer_record.get("label") or layer_record.get("id") or "Mentioned AOI"
+    source = layer_record.get("source") or "business_layer"
+
+    if not isinstance(geojson, dict) or not bounds:
+        return None
+
+    geometry = geojson.get("geometry") if geojson.get("type") == "Feature" else geojson
+    if not geometry:
+        return None
+
+    return {
+        "id": layer_record.get("id"),
+        "source": source,
+        "kind": "multipolygon" if geometry.get("type") == "MultiPolygon" else "polygon",
+        "label": label,
+        "bounds": bounds,
+        "center": center,
+        "geojson": geojson,
+        "origin": layer_record.get("origin"),
+        "created_at": layer_record.get("created_at"),
+        "updated_at": layer_record.get("updated_at"),
     }
 
 
@@ -379,6 +498,10 @@ def _get_catalog_asset_by_layer_id(layer_id: str, layers: Sequence[Dict[str, Any
         if asset.asset_id == asset_id:
             return asset
     return None
+
+
+def _get_requested_layer_descriptor(layer_id: str, layers: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    return next((item for item in layers if item.get("id") == layer_id), None)
 
 
 def _aoi_geometry_payload(aoi: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -649,16 +772,26 @@ class FloodDatasetRenderer:
                 after_date=after_date,
             )
 
+        requested_layer = _get_requested_layer_descriptor(layer_id, recommended_layers)
         asset = _get_catalog_asset_by_layer_id(layer_id, recommended_layers)
         if not asset:
             raise ValueError(f"Unknown recommended layer: {layer_id}")
 
-        return self._render_catalog_asset(
+        rendered = self._render_catalog_asset(
             asset=asset,
             aoi=confirmed_aoi,
             start_date=pre_date or peek_date,
             end_date=after_date or peek_date,
         )
+
+        if requested_layer:
+            rendered["product_group"] = requested_layer.get("product_group")
+            rendered["legend_spec"] = deepcopy(requested_layer.get("legend_spec") or {})
+            rendered["ui_profile"] = deepcopy(requested_layer.get("ui_profile") or {})
+            rendered["source_meta"]["product_group"] = requested_layer.get("product_group")
+            rendered["source_meta"]["ui_profile"] = deepcopy(requested_layer.get("ui_profile") or {})
+
+        return rendered
 
 
 renderer = FloodDatasetRenderer()

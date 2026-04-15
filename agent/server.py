@@ -4,7 +4,7 @@ FastAPI 后端服务 - 集成 CopilotKit 和 LangGraph
 """
 import os
 import warnings
-from typing import Optional
+from typing import Any, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -24,6 +24,8 @@ from flood_agent import graph
 from gee_service import gee_service, get_flood_images
 from gee_code_generator import generate_flood_gee_code
 from flood_dataset_service import build_confirmation_context, renderer
+from flood_aoi import search_location_candidates
+from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
 
 
 # 继承 LangGraphAGUIAgent，只覆写 prepare_stream 一个方法来修 bug
@@ -155,6 +157,37 @@ class FloodState(BaseModel):
     recommended_layers: Optional[list[dict]] = None
     selected_layer_ids: Optional[list[str]] = None
     confirmation_version: Optional[int] = None
+    mentioned_layer_refs: Optional[list[dict]] = None
+    mentioned_aoi: Optional[dict] = None
+    mentioned_aoi_source: Optional[str] = None
+
+
+class BusinessLayerRecord(BaseModel):
+    id: str
+    label: Optional[str] = None
+    kind: Optional[str] = None
+    source: Optional[str] = None
+    geometry_type: Optional[str] = None
+    bounds: Optional[dict] = None
+    center: Optional[dict] = None
+    geojson: Optional[dict] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    is_active: Optional[bool] = None
+    origin: Optional[str] = None
+    layer_role: Optional[str] = None
+
+
+class BusinessLayerUpsertRequest(BaseModel):
+    store_namespace: Optional[str] = "business_layer_store"
+    store_key: str
+    layers: list[BusinessLayerRecord]
+
+
+class BusinessLayerResolveRequest(BaseModel):
+    store_namespace: Optional[str] = "business_layer_store"
+    store_key: str
+    layer_ids: list[str]
 
 
 # ============== API 端点 ==============
@@ -314,6 +347,11 @@ class RecommendedLayerRenderRequest(BaseModel):
     after_date: Optional[str] = None
 
 
+class LocationSearchRequest(BaseModel):
+    query: str
+    limit: Optional[int] = 5
+
+
 @app.post("/api/flood-impact")
 async def get_flood_impact(request: FloodImpactRequest):
     """
@@ -403,6 +441,54 @@ async def render_recommended_layer(request: RecommendedLayerRenderRequest):
         return {"success": True, "data": rendered}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/location-search")
+async def search_location(request: LocationSearchRequest):
+    try:
+        candidates = search_location_candidates(
+            location_name=request.query,
+            limit=request.limit or 5,
+        )
+        return {"success": True, "data": candidates}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/business-layers/upsert")
+async def upsert_business_layer_records(request: BusinessLayerUpsertRequest):
+    saved_layers = upsert_business_layers(
+        store_namespace=request.store_namespace,
+        store_key=request.store_key,
+        layers=[layer.model_dump() for layer in request.layers],
+    )
+    return {"success": True, "data": saved_layers}
+
+
+@app.get("/api/business-layers/{layer_id}")
+async def get_business_layer_record(
+    layer_id: str,
+    store_key: str,
+    store_namespace: str = "business_layer_store",
+):
+    layer = get_business_layer(
+        layer_id=layer_id,
+        store_namespace=store_namespace,
+        store_key=store_key,
+    )
+    if not layer:
+        raise HTTPException(status_code=404, detail="Business layer not found.")
+    return {"success": True, "data": layer}
+
+
+@app.post("/api/business-layers/batch-resolve")
+async def batch_resolve_business_layers(request: BusinessLayerResolveRequest):
+    layers = resolve_business_layers(
+        layer_ids=request.layer_ids,
+        store_namespace=request.store_namespace,
+        store_key=request.store_key,
+    )
+    return {"success": True, "data": layers}
 
 
 @app.post("/api/state")

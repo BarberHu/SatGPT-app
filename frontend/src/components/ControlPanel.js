@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import AgentPanel from './AgentPanel';
-import AoiUploadPanel from './AoiUploadPanel';
 
 function ControlPanel() {
   const {
@@ -26,16 +25,13 @@ function ControlPanel() {
     selectedAOI,
     appMode,
     resetAskSession,
-    gridClickEnabled,
-    setGridClickEnabled,
-    isAoiEditing,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
 
   // Load countries data
   useEffect(() => {
-    fetch('/static/countries.json')
+    fetch('/assets/data/countries.json')
       .then((res) => res.json())
       .then((data) => setCountries(data))
       .catch((err) => console.error('Error loading countries:', err));
@@ -109,7 +105,7 @@ function ControlPanel() {
           &#187;
         </div>
         <img 
-          src="/static/images/Sat-GPT-Logos-01.png" 
+          src="/assets/images/Sat-GPT-Logos-01.png" 
           alt="SatGPT Logo" 
           style={{ width: '90%' }}
         />
@@ -203,19 +199,6 @@ function ControlPanel() {
         </div>
       </div>
 
-      <div className="toggle-switcher-css" style={{ marginTop: '10px' }}>
-        <label className="switch-label">Click to Load</label>
-        <div className="form-check form-switch">
-          <input
-            className="form-check-input"
-            type="checkbox"
-            checked={gridClickEnabled}
-            disabled={isAoiEditing}
-            onChange={() => setGridClickEnabled(!gridClickEnabled)}
-          />
-        </div>
-      </div>
-
       {/* Legend */}
       <div className="Legend-sec">
         <div className="heading-title">
@@ -269,8 +252,6 @@ function ControlPanel() {
           </div>
         </div>
       </div>
-
-      <AoiUploadPanel variant="ask" />
 
       {/* Transparency Control */}
       <div className="transparency">

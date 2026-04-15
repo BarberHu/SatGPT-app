@@ -1,10 +1,53 @@
-import React, { useRef, useState } from 'react';
+import React, {
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
 import shp from 'shpjs';
 import { useAppContext } from '../context/AppContext';
 import { buildAoiFromAgentState, buildAoiFromGeoJSON } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 
-function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
+const readFileAsText = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file.'));
+    reader.readAsText(file);
+  });
+
+const readFileAsArrayBuffer = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file.'));
+    reader.readAsArrayBuffer(file);
+  });
+
+export async function parseSpatialScopeFile(file) {
+  const lowerName = String(file?.name || '').toLowerCase();
+
+  if (lowerName.endsWith('.geojson') || lowerName.endsWith('.json')) {
+    const text = await readFileAsText(file);
+    return JSON.parse(text);
+  }
+
+  if (lowerName.endsWith('.zip')) {
+    const buffer = await readFileAsArrayBuffer(file);
+    return shp(buffer);
+  }
+
+  throw new Error('Only GeoJSON (.geojson/.json) and zipped Shapefile (.zip) are supported.');
+}
+
+const AoiUploadPanel = forwardRef(function AoiUploadPanel({
+  variant = 'ask',
+  onAoiChange = null,
+  presentation = 'full',
+  lightweight = false,
+}, ref) {
   const fileInputRef = useRef(null);
   const [isParsing, setIsParsing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -24,55 +67,31 @@ function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
     clearAoiState,
     resetAgentSession,
     resetAskSession,
+    registerBusinessLayerFromAoi,
+    clearAgentVisualState,
+    fitAoiBoundsOnMap,
   } = useAppContext();
 
   const effectiveAoi = selectedAOI || buildAoiFromAgentState(floodAgentState, {
     source: 'agent_geocode',
-    label: floodAgentState?.location || 'Agent-derived boundary',
+    label: floodAgentState?.location || 'Agent-derived scope',
   });
   const hasEditableAoi = Boolean(effectiveAoi);
 
-  const openFilePicker = () => {
-    if (isAoiEditing) return;
+  const openFilePicker = useCallback(() => {
+    if (isAoiEditing || isParsing) return;
     fileInputRef.current?.click();
-  };
+  }, [isAoiEditing, isParsing]);
+
+  useImperativeHandle(ref, () => ({
+    openFilePicker,
+    isParsing,
+  }), [isParsing, openFilePicker]);
 
   const clearAoi = () => {
     clearAoiState();
     onAoiChange?.(null, { action: 'clear' });
     trackUxEvent('aoi_clear', { mode: variant });
-  };
-
-  const readFileAsText = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
-      reader.readAsText(file);
-    });
-
-  const readFileAsArrayBuffer = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
-      reader.readAsArrayBuffer(file);
-    });
-
-  const parseBoundaryFile = async (file) => {
-    const lowerName = file.name.toLowerCase();
-
-    if (lowerName.endsWith('.geojson') || lowerName.endsWith('.json')) {
-      const text = await readFileAsText(file);
-      return JSON.parse(text);
-    }
-
-    if (lowerName.endsWith('.zip')) {
-      const buffer = await readFileAsArrayBuffer(file);
-      return shp(buffer);
-    }
-
-    throw new Error('Only GeoJSON (.geojson/.json) and zipped Shapefile (.zip) are supported.');
   };
 
   const handleFileChange = async (event) => {
@@ -85,30 +104,50 @@ function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
     setWarning('');
 
     try {
-      const parsed = await parseBoundaryFile(file);
+      const parsed = await parseSpatialScopeFile(file);
       const aoi = buildAoiFromGeoJSON(parsed, {
         source: 'upload',
+        origin: 'upload',
         label: file.name.replace(/\.(geojson|json|zip)$/i, ''),
       });
 
       if (!aoi) {
-        throw new Error('The file does not contain a valid Polygon or MultiPolygon boundary.');
+        throw new Error('The file does not contain a valid Polygon or MultiPolygon scope.');
       }
 
-      resetAskSession();
+      registerBusinessLayerFromAoi(aoi, {
+        id: aoi.id,
+        label: aoi.label,
+        source: aoi.source,
+        origin: 'upload',
+        markActive: true,
+      });
       setSelectedGridCords(null);
       setSelectedAOI(aoi);
-      cancelDraftAoi();
-      resetAgentSession({ preserveSelectedAoi: true });
+
+      if (lightweight) {
+        clearAgentVisualState();
+        cancelDraftAoi();
+      } else {
+        resetAskSession();
+        cancelDraftAoi();
+        resetAgentSession({ preserveSelectedAoi: true });
+      }
+
+      window.requestAnimationFrame(() => {
+        fitAoiBoundsOnMap(aoi, { padding: 72, duration: 650 });
+      });
+
       onAoiChange?.(aoi, { action: 'upload' });
       trackUxEvent('aoi_upload_success', {
         mode: variant,
         fileName: file.name,
         source: aoi.source,
         kind: aoi.kind,
+        lightweight,
       });
     } catch (error) {
-      const message = error?.message || 'Boundary parsing failed.';
+      const message = error?.message || 'Spatial scope parsing failed.';
       setWarning(message);
       trackUxEvent('aoi_upload_fail', {
         mode: variant,
@@ -176,7 +215,7 @@ function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
         disabled={isParsing}
         onClick={openFilePicker}
       >
-        {isParsing ? 'Uploading...' : 'Upload file'}
+        {isParsing ? 'Uploading...' : 'Upload scope'}
       </button>
       <button
         type="button"
@@ -184,7 +223,7 @@ function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
         disabled={isParsing}
         onClick={handleStartDraw}
       >
-        Draw
+        Draw scope
       </button>
       <button
         type="button"
@@ -192,7 +231,7 @@ function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
         disabled={!hasEditableAoi || isParsing}
         onClick={handleStartEdit}
       >
-        Edit
+        Edit scope
       </button>
       <button
         type="button"
@@ -207,21 +246,23 @@ function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
 
   return (
     <>
-      {variant === 'agent' ? (
-        <div className="control-section aoi-upload-inline-shell agent">
-          <div className="section-header" onClick={() => setIsExpanded((value) => !value)}>
-            <span className="section-title">Analysis Boundary</span>
-            <span className={`expand-icon ${isExpanded ? 'expanded' : ''}`}>▼</span>
+      {presentation !== 'hidden' && (
+        variant === 'agent' ? (
+          <div className="control-section aoi-upload-inline-shell agent">
+            <div className="section-header" onClick={() => setIsExpanded((value) => !value)}>
+              <span className="section-title">Spatial Scope</span>
+              <span className={`expand-icon ${isExpanded ? 'expanded' : ''}`}>▼</span>
+            </div>
+            {isExpanded && <div className="section-body aoi-upload-inline-body">{actionRow}</div>}
           </div>
-          {isExpanded && <div className="section-body aoi-upload-inline-body">{actionRow}</div>}
-        </div>
-      ) : (
-        <section className="aoi-upload-inline-shell ask">
-          <div className="aoi-upload-heading-row">
-            <h4 className="aoi-upload-heading">Analysis Boundary</h4>
-          </div>
-          {actionRow}
-        </section>
+        ) : (
+          <section className="aoi-upload-inline-shell ask">
+            <div className="aoi-upload-heading-row">
+              <h4 className="aoi-upload-heading">Spatial Scope</h4>
+            </div>
+            {actionRow}
+          </section>
+        )
       )}
 
       <input
@@ -234,6 +275,6 @@ function AoiUploadPanel({ variant = 'ask', onAoiChange = null }) {
       />
     </>
   );
-}
+});
 
 export default AoiUploadPanel;

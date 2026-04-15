@@ -4,6 +4,9 @@ import { getHistoricalMap, getFloodHotspotMap, getWaterRegimeChangeMap, createCo
 import { buildAskMapRequestParams } from '../utils/aoi';
 
 const FLOOD_HOTSPOT_YEAR_FROM = 1988;
+const ASK_AUTOLOAD_AOI_SOURCES = new Set(['fishnet']);
+
+const isAskAutoloadAoi = (aoi) => ASK_AUTOLOAD_AOI_SOURCES.has(String(aoi?.source || '').toLowerCase());
 
 export const useMapData = () => {
   const {
@@ -11,6 +14,7 @@ export const useMapData = () => {
     aoiClearVersion,
     dataType,
     yearControl,
+    appMode,
     setIsLoading,
     setWarning,
     updateLayerData,
@@ -20,10 +24,15 @@ export const useMapData = () => {
   // Track previous grid coords to detect changes
   const prevAoiRef = useRef(null);
   const requestIdRef = useRef(0);
+  const appModeRef = useRef(appMode);
+
+  useEffect(() => {
+    appModeRef.current = appMode;
+  }, [appMode]);
 
   // Fetch map data when grid is selected
   const fetchMapData = useCallback(async (aoi) => {
-    if (!aoi) return;
+    if (!aoi || appModeRef.current !== 'ask' || !isAskAutoloadAoi(aoi)) return;
     const requestId = ++requestIdRef.current;
 
     console.log('fetchMapData called with AOI:', aoi);
@@ -56,7 +65,7 @@ export const useMapData = () => {
         data = await getFloodHotspotMap(params);
       }
 
-      if (requestIdRef.current !== requestId) {
+      if (requestIdRef.current !== requestId || appModeRef.current !== 'ask') {
         return;
       }
 
@@ -83,7 +92,7 @@ export const useMapData = () => {
       }
 
     } catch (error) {
-      if (requestIdRef.current !== requestId) {
+      if (requestIdRef.current !== requestId || appModeRef.current !== 'ask') {
         return;
       }
       console.error('Error fetching map data:', error);
@@ -97,7 +106,14 @@ export const useMapData = () => {
 
   // Auto-fetch when AOI is selected or data type changes
   useEffect(() => {
-    if (selectedAOI) {
+    if (appMode !== 'ask') {
+      prevAoiRef.current = null;
+      requestIdRef.current += 1;
+      setIsLoading(false);
+      return;
+    }
+
+    if (selectedAOI && isAskAutoloadAoi(selectedAOI)) {
       console.log('selectedAOI changed:', selectedAOI);
       const currentAoiStr = JSON.stringify(selectedAOI);
       const prevAoiStr = JSON.stringify(prevAoiRef.current);
@@ -112,7 +128,7 @@ export const useMapData = () => {
       requestIdRef.current += 1;
       setIsLoading(false);
     }
-  }, [selectedAOI, fetchMapData, setIsLoading]);
+  }, [appMode, selectedAOI, fetchMapData, setIsLoading]);
 
   useEffect(() => {
     requestIdRef.current += 1;
@@ -122,10 +138,10 @@ export const useMapData = () => {
 
   // Also refetch when dataType or yearControl changes (if grid is selected)
   useEffect(() => {
-    if (selectedAOI && prevAoiRef.current) {
+    if (appMode === 'ask' && selectedAOI && isAskAutoloadAoi(selectedAOI) && prevAoiRef.current) {
       fetchMapData(selectedAOI);
     }
-  }, [dataType, yearControl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [appMode, dataType, yearControl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { fetchMapData };
 };

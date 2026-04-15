@@ -237,6 +237,113 @@ def _get_location_from_nominatim(location_name: str) -> Optional[Dict[str, Any]]
         return None
 
 
+def search_location_candidates(location_name: str, limit: int = 5) -> list[Dict[str, Any]]:
+    location = (location_name or "").strip()
+    if not location:
+        return []
+
+    safe_limit = max(1, min(int(limit or 5), 5))
+
+    try:
+        time.sleep(1)
+        response = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": location,
+                "format": "geojson",
+                "polygon_geojson": 1,
+                "limit": safe_limit,
+                "accept-language": "en,zh-CN",
+            },
+            headers={"User-Agent": "FloodAgent/2.0"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception:
+        return []
+
+    features = data.get("features") or []
+    candidates: list[Dict[str, Any]] = []
+    seen_labels: set[str] = set()
+
+    for index, feature in enumerate(features):
+        properties = feature.get("properties", {})
+        geometry = feature.get("geometry")
+        bbox = feature.get("bbox") or []
+        label = properties.get("display_name", location).strip() or location
+        label_key = label.lower()
+        if label_key in seen_labels:
+            continue
+
+        bounds = _bounds_from_geometry(geometry)
+        if not bounds and len(bbox) == 4:
+            bounds = {
+                "west": float(bbox[0]),
+                "south": float(bbox[1]),
+                "east": float(bbox[2]),
+                "north": float(bbox[3]),
+            }
+
+        if geometry and geometry.get("type") in {"Polygon", "MultiPolygon"} and bounds:
+            source = "official_boundary"
+            confidence = 0.98
+            status = AOI_STATUS_RESOLVED
+            resolution_rank = 1
+            resolved_geometry = geometry
+        elif bounds:
+            source = "bounds_fallback"
+            confidence = 0.72
+            status = AOI_STATUS_APPROXIMATE
+            resolution_rank = 3
+            resolved_geometry = _build_bounds_polygon(bounds)["geometry"]
+        else:
+            continue
+
+        resolved_aoi = _build_aoi(
+            location=label,
+            geometry=resolved_geometry,
+            bounds=bounds,
+            source=source,
+            confidence=confidence,
+            status=status,
+            resolution_rank=resolution_rank,
+        )
+
+        candidate_id = str(
+            properties.get("place_id")
+            or properties.get("osm_id")
+            or f"{label_key}-{index}"
+        )
+
+        candidates.append({
+            "id": candidate_id,
+            "location": label,
+            "label": label,
+            "resolved_aoi": resolved_aoi,
+            "aoi_resolution_meta": _build_resolution_meta(
+                location=label,
+                source=source,
+                confidence=confidence,
+                status=status,
+                bounds=bounds,
+                resolution_rank=resolution_rank,
+            ),
+            "coordinates": _center_from_bounds(bounds),
+            "bounds": bounds,
+            "geojson": resolved_aoi["geojson"],
+            "source": source,
+            "raw_type": properties.get("type"),
+            "raw_class": properties.get("class"),
+        })
+        seen_labels.add(label_key)
+
+        if len(candidates) >= safe_limit:
+            break
+
+    return candidates
+
+
 def resolve_location_aoi(location_name: str) -> Dict[str, Any]:
     location = (location_name or "").strip()
     if not location:

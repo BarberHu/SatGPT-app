@@ -1,13 +1,18 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { useAppContext } from '../context/AppContext';
 import {
-  buildAoiFromAgentState,
+  buildAoiFromDrawFeature,
   buildAoiFromDrawFeatures,
   buildAoiFromGridSelection,
   getDrawFeaturesFromAoi,
 } from '../utils/aoi';
+import { buildAoiFromBusinessLayerRecord } from '../utils/businessLayerStore';
+import {
+  buildCatalogMapLayerDefinition,
+  isCatalogMapLayerId,
+} from '../utils/catalogLayers';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -31,7 +36,8 @@ const AGENT_SOURCE_IDS = [
 ];
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
-const getRecommendedMapLayerId = (layerId) => `agent-rec-${String(layerId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+const BUSINESS_LAYER_SOURCE_ID = 'business-layer-scopes';
+const BUSINESS_LAYER_LAYER_IDS = ['business-layer-scopes-fill', 'business-layer-scopes-outline'];
 const DRAW_BLUE = '#2563eb';
 const DRAW_ORANGE = '#f97316';
 const DRAW_WHITE = '#ffffff';
@@ -164,11 +170,16 @@ function MapContainer() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const drawRef = useRef(null);
+  const gridClickControlRef = useRef(null);
+  const gridClickButtonRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
   const lastConfirmationFocusRef = useRef(null);
   const gridClickEnabledRef = useRef(true);
+  const programmaticDrawMutationRef = useRef(false);
   const isAoiEditingRef = useRef(false);
   const editableGeojsonRef = useRef(null);
+  const [isPolygonDrawMode, setIsPolygonDrawMode] = useState(false);
+  const [pendingSpatialScopeSave, setPendingSpatialScopeSave] = useState(null);
   
   const {
     setMapInstance,
@@ -179,6 +190,7 @@ function MapContainer() {
     draftAOI,
     aoiClearVersion,
     gridClickEnabled,
+    setGridClickEnabled,
     isAoiEditing,
     aoiEditorMode,
     setWarning,
@@ -204,6 +216,11 @@ function MapContainer() {
     agentRecommendedLayerVisibility,
     setAgentLayerLoading,
     setAgentTileError,
+    businessLayers,
+    agentVisualResetVersion,
+    registerBusinessLayerFromAoi,
+    removeBusinessLayerRecord,
+    clearAgentVisualState,
   } = useAppContext();
 
   // Track if map is initialized
@@ -212,6 +229,21 @@ function MapContainer() {
   useEffect(() => {
     gridClickEnabledRef.current = gridClickEnabled;
   }, [gridClickEnabled]);
+
+  useEffect(() => {
+    const button = gridClickButtonRef.current;
+    if (!button) {
+      return;
+    }
+
+    const disabled = isAoiEditing || isPolygonDrawMode;
+    button.classList.toggle('active', gridClickEnabled && !disabled);
+    button.classList.toggle('disabled', disabled);
+    button.setAttribute('aria-pressed', gridClickEnabled ? 'true' : 'false');
+    button.title = disabled
+      ? 'Drawing is in progress, so map click loading is temporarily disabled.'
+      : (gridClickEnabled ? 'Click map grids to load data.' : 'Map grid click loading is off.');
+  }, [gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
 
   useEffect(() => {
     isAoiEditingRef.current = isAoiEditing;
@@ -261,6 +293,32 @@ function MapContainer() {
     }
   }, []);
 
+  const removeBusinessLayerMapLayers = useCallback((map) => {
+    BUSINESS_LAYER_LAYER_IDS.forEach((id) => {
+      if (map.getLayer(id)) {
+        map.removeLayer(id);
+      }
+    });
+
+    if (map.getSource(BUSINESS_LAYER_SOURCE_ID)) {
+      map.removeSource(BUSINESS_LAYER_SOURCE_ID);
+    }
+  }, []);
+
+  const removeCatalogMapLayers = useCallback((map) => {
+    (map.getStyle()?.layers || [])
+      .map((layer) => layer.id)
+      .filter((id) => isCatalogMapLayerId(id))
+      .forEach((id) => {
+        if (map.getLayer(id)) {
+          map.removeLayer(id);
+        }
+        if (map.getSource(id)) {
+          map.removeSource(id);
+        }
+      });
+  }, []);
+
   const getExistingLayerBands = useCallback((map) => {
     const styleLayers = map.getStyle()?.layers || [];
     const styleLayerIds = styleLayers.map((layer) => layer.id);
@@ -273,6 +331,7 @@ function MapContainer() {
         ...ASK_LAYER_NAMES.map((layerName) => `${layerName}-layer`),
         ...AGENT_ANALYSIS_LAYER_IDS,
       ].filter((id) => existingLayerIds.has(id)),
+      businessLayers: BUSINESS_LAYER_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
       aoiLayers: AOI_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
       drawLayers: styleLayerIds.filter((id) => id.startsWith('gl-draw-')),
     };
@@ -299,6 +358,7 @@ function MapContainer() {
       gridLayers,
       baseImageryLayers,
       analysisLayers,
+      businessLayers,
       aoiLayers,
       drawLayers,
     } = getExistingLayerBands(map);
@@ -307,6 +367,7 @@ function MapContainer() {
       ...gridLayers,
       ...baseImageryLayers,
       ...analysisLayers,
+      ...businessLayers,
       ...aoiLayers,
       ...drawLayers,
     ].forEach((id) => {
@@ -322,7 +383,7 @@ function MapContainer() {
   const loadGridLayer = useCallback((map) => {
     map.addSource('grid_cell', {
       type: 'geojson',
-      data: '/static/HFMT_Fishnet_3_FeaturesToJSO.geojson',
+      data: '/assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson',
     });
 
     map.addLayer({
@@ -392,9 +453,53 @@ function MapContainer() {
       drawRef.current = new MapboxDraw({
         displayControlsDefault: false,
         defaultMode: 'simple_select',
+        controls: {
+          polygon: true,
+          trash: true,
+        },
         styles: DRAW_STYLES,
       });
       map.addControl(drawRef.current, 'top-right');
+
+      const gridClickControl = {
+        onAdd() {
+          const container = document.createElement('div');
+          container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group satgpt-map-toggle-group';
+
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'satgpt-map-toggle-btn';
+          button.textContent = 'Load';
+          button.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (isAoiEditingRef.current || drawRef.current?.getMode?.() === 'draw_polygon') {
+              return;
+            }
+
+            setGridClickEnabled((previous) => !previous);
+          };
+
+          const disabled = isAoiEditingRef.current || drawRef.current?.getMode?.() === 'draw_polygon';
+          button.classList.toggle('active', gridClickEnabledRef.current && !disabled);
+          button.classList.toggle('disabled', disabled);
+          button.setAttribute('aria-pressed', gridClickEnabledRef.current ? 'true' : 'false');
+
+          container.appendChild(button);
+          gridClickButtonRef.current = button;
+          return container;
+        },
+        onRemove() {
+          if (gridClickButtonRef.current) {
+            gridClickButtonRef.current.onclick = null;
+          }
+          gridClickButtonRef.current = null;
+        },
+      };
+
+      map.addControl(gridClickControl, 'top-right');
+      gridClickControlRef.current = gridClickControl;
       loadGridLayer(map);
       window.requestAnimationFrame(() => reconcileLayerOrder(map));
     });
@@ -407,23 +512,167 @@ function MapContainer() {
     return () => {
       map.off('styledata', handleStyleData);
       if (mapRef.current) {
+        if (gridClickControlRef.current) {
+          map.removeControl(gridClickControlRef.current);
+          gridClickControlRef.current = null;
+        }
         drawRef.current = null;
         mapRef.current.remove();
         mapRef.current = null;
         mapInitialized.current = false;
       }
     };
-  }, [loadGridLayer, reconcileLayerOrder, resetAgentSession, setMapInstance]);
+  }, [loadGridLayer, reconcileLayerOrder, resetAgentSession, setGridClickEnabled, setMapInstance]);
+
+  const fitAoiBounds = useCallback((aoi, { force = false, padding = 50, duration = 600 } = {}) => {
+    const map = mapRef.current;
+    if (!map || !aoi?.bounds) return;
+
+    const boundsKey = JSON.stringify(aoi.bounds || {});
+    if (!force && boundsKey === lastFittedAoiRef.current) {
+      return;
+    }
+
+    const { west, south, east, north } = aoi.bounds;
+    map.fitBounds([[west, south], [east, north]], {
+      padding,
+      duration,
+    });
+    lastFittedAoiRef.current = boundsKey;
+  }, []);
+
+  const runProgrammaticDrawMutation = useCallback((callback) => {
+    programmaticDrawMutationRef.current = true;
+    try {
+      callback();
+    } finally {
+      window.setTimeout(() => {
+        programmaticDrawMutationRef.current = false;
+      }, 0);
+    }
+  }, []);
+
+  const getDrawScopeLabel = useCallback((featureId) => {
+    const existing = businessLayers.find((layer) => String(layer.id) === String(featureId));
+    if (existing?.label) {
+      return existing.label;
+    }
+
+    const drawCount = businessLayers.filter((layer) => (
+      String(layer.origin || layer.source || '').toLowerCase() === 'draw'
+      || String(layer.source || '').toLowerCase() === 'draw'
+      || String(layer.source || '').toLowerCase() === 'edited'
+    )).length;
+
+    return `draw_scope_${drawCount + 1}`;
+  }, [businessLayers]);
+
+  const syncAgentDrawFeature = useCallback((feature, { shouldFit = false } = {}) => {
+    const featureId = String(feature?.id || '').trim();
+    if (!featureId || feature?.geometry?.type !== 'Polygon') {
+      return null;
+    }
+
+    const nextAoi = buildAoiFromDrawFeature(feature, {
+      id: featureId,
+      source: 'draw',
+      origin: 'draw',
+      label: getDrawScopeLabel(featureId),
+    });
+
+    if (!nextAoi) {
+      return null;
+    }
+
+    clearAgentVisualState();
+    setSelectedGridCords(null);
+    setSelectedAOI(nextAoi);
+    registerBusinessLayerFromAoi(nextAoi, {
+      id: nextAoi.id,
+      label: nextAoi.label,
+      source: 'draw',
+      origin: 'draw',
+      markActive: true,
+    });
+    setWarning('');
+
+    if (shouldFit) {
+      fitAoiBounds(nextAoi, { force: true, padding: 56, duration: 500 });
+    }
+
+    return nextAoi;
+  }, [
+    fitAoiBounds,
+    clearAgentVisualState,
+    getDrawScopeLabel,
+    registerBusinessLayerFromAoi,
+    setSelectedAOI,
+    setSelectedGridCords,
+    setWarning,
+  ]);
+
+  const handleDiscardPendingSpatialScope = useCallback(() => {
+    const draw = drawRef.current;
+    if (!draw || !pendingSpatialScopeSave?.featureIds?.length) {
+      setPendingSpatialScopeSave(null);
+      return;
+    }
+
+    draw.delete(pendingSpatialScopeSave.featureIds);
+    setPendingSpatialScopeSave(null);
+    setWarning('Spatial scope was discarded.');
+    window.requestAnimationFrame(() => {
+      try {
+        draw.changeMode('draw_polygon');
+      } catch (error) {
+        console.warn('Failed to resume polygon drawing after discard:', error);
+      }
+    });
+  }, [pendingSpatialScopeSave, setWarning]);
+
+  const handleConfirmPendingSpatialScope = useCallback(() => {
+    const draw = drawRef.current;
+    const map = mapRef.current;
+    if (!draw || !pendingSpatialScopeSave?.featureIds?.length) {
+      setPendingSpatialScopeSave(null);
+      return;
+    }
+
+    pendingSpatialScopeSave.featureIds.forEach((featureId, index) => {
+      const feature = draw.get(featureId);
+      if (feature?.geometry?.type === 'Polygon') {
+        syncAgentDrawFeature(feature, { shouldFit: index === 0 });
+      }
+    });
+
+    setPendingSpatialScopeSave(null);
+    setWarning('');
+    if (draw) {
+      runProgrammaticDrawMutation(() => {
+        draw.deleteAll();
+        draw.changeMode('simple_select');
+      });
+    }
+    if (map) {
+      promoteDrawLayers(map);
+    }
+  }, [
+    pendingSpatialScopeSave,
+    promoteDrawLayers,
+    runProgrammaticDrawMutation,
+    setWarning,
+    syncAgentDrawFeature,
+  ]);
 
   const syncDraftFromFeatures = useCallback((features) => {
     const nextDraftAoi = buildAoiFromDrawFeatures(features, {
       source: aoiEditorMode === 'edit' ? 'edited' : 'draw',
-      label: selectedAOI?.label || 'Manual boundary',
+      label: selectedAOI?.label || 'Manual scope',
     });
 
     if (!nextDraftAoi) {
       setDraftAOI(null);
-      setWarning('Current drawing result is not a valid AOI. Please redraw the boundary.');
+      setWarning('Current drawing result is not a valid spatial scope. Please redraw the polygon.');
       return;
     }
 
@@ -436,11 +685,44 @@ function MapContainer() {
     const draw = drawRef.current;
     if (!map || !draw) return;
 
+    const syncDrawModeState = (event) => {
+      const nextMode = event?.mode || draw.getMode?.() || 'simple_select';
+      const drawingPolygon = nextMode === 'draw_polygon';
+      setIsPolygonDrawMode(drawingPolygon);
+      if (drawingPolygon && gridClickEnabledRef.current) {
+        setGridClickEnabled(false);
+      }
+      if (drawingPolygon && pendingSpatialScopeSave) {
+        setPendingSpatialScopeSave(null);
+      }
+    };
+
     const handleCreate = (event) => {
+      if (programmaticDrawMutationRef.current) {
+        return;
+      }
+
+      if (appMode === 'agent' && !isAoiEditingRef.current) {
+        const createdFeatures = (event.features || [])
+          .filter((feature) => feature.geometry?.type === 'Polygon');
+
+        if (!createdFeatures.length) {
+          setWarning('Please draw a valid polygon spatial scope.');
+          return;
+        }
+        setPendingSpatialScopeSave({
+          featureIds: createdFeatures.map((feature) => feature.id).filter(Boolean),
+          featureCount: createdFeatures.length,
+        });
+        setWarning('');
+        promoteDrawLayers(map);
+        return;
+      }
+
       const createdFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon');
       if (!createdFeature) {
         setDraftAOI(null);
-        setWarning('Please draw a valid polygon boundary.');
+        setWarning('Please draw a valid polygon spatial scope.');
         return;
       }
 
@@ -467,11 +749,55 @@ function MapContainer() {
     };
 
     const handleUpdate = (event) => {
+      if (programmaticDrawMutationRef.current) {
+        return;
+      }
+
+      if (appMode === 'agent' && !isAoiEditingRef.current) {
+        (event.features || [])
+          .filter((feature) => feature.geometry?.type === 'Polygon')
+          .forEach((feature) => {
+            syncAgentDrawFeature(feature);
+          });
+        promoteDrawLayers(map);
+        return;
+      }
+
       syncDraftFromFeatures(draw.getAll().features || []);
       promoteDrawLayers(map);
     };
 
-    const handleDelete = () => {
+    const handleDelete = (event) => {
+      if (programmaticDrawMutationRef.current) {
+        return;
+      }
+
+      if (appMode === 'agent' && !isAoiEditingRef.current) {
+        const deletedIds = (event.features || [])
+          .map((feature) => String(feature?.id || '').trim())
+          .filter(Boolean);
+
+        if (deletedIds.length) {
+          if (pendingSpatialScopeSave?.featureIds?.some((featureId) => deletedIds.includes(String(featureId)))) {
+            setPendingSpatialScopeSave(null);
+          }
+          const deletedActive = deletedIds.includes(String(selectedAOI?.id || ''));
+          deletedIds.forEach((layerId) => {
+            removeBusinessLayerRecord(layerId);
+          });
+
+          if (deletedActive) {
+            const fallbackRecord = businessLayers.find((layer) => !deletedIds.includes(String(layer.id || '')));
+            setSelectedAOI(fallbackRecord ? buildAoiFromBusinessLayerRecord(fallbackRecord) : null);
+          }
+        }
+
+        setDraftAOI(null);
+        setWarning('');
+        promoteDrawLayers(map);
+        return;
+      }
+
       const remainingFeatures = draw.getAll().features || [];
       if (!remainingFeatures.length) {
         setDraftAOI(null);
@@ -485,13 +811,31 @@ function MapContainer() {
     map.on('draw.create', handleCreate);
     map.on('draw.update', handleUpdate);
     map.on('draw.delete', handleDelete);
+    map.on('draw.modechange', syncDrawModeState);
+    syncDrawModeState({ mode: draw.getMode?.() || 'simple_select' });
 
     return () => {
       map.off('draw.create', handleCreate);
       map.off('draw.update', handleUpdate);
       map.off('draw.delete', handleDelete);
+      map.off('draw.modechange', syncDrawModeState);
     };
-  }, [promoteDrawLayers, setDraftAOI, setWarning, syncDraftFromFeatures]);
+  }, [
+    appMode,
+    businessLayers,
+    gridClickEnabled,
+    pendingSpatialScopeSave,
+    promoteDrawLayers,
+    removeBusinessLayerRecord,
+    selectedAOI?.id,
+    setGridClickEnabled,
+    setDraftAOI,
+    setPendingSpatialScopeSave,
+    setSelectedAOI,
+    setWarning,
+    syncAgentDrawFeature,
+    syncDraftFromFeatures,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -499,8 +843,10 @@ function MapContainer() {
     if (!draw) return;
 
     if (aoiEditorMode === 'idle') {
-      draw.deleteAll();
-      draw.changeMode('simple_select');
+      runProgrammaticDrawMutation(() => {
+        draw.deleteAll();
+        draw.changeMode('simple_select');
+      });
       if (map) {
         window.requestAnimationFrame(() => reconcileLayerOrder(map));
       }
@@ -508,7 +854,9 @@ function MapContainer() {
     }
 
     if (aoiEditorMode === 'draw') {
-      draw.deleteAll();
+      runProgrammaticDrawMutation(() => {
+        draw.deleteAll();
+      });
       setDraftAOI(null);
       setWarning('');
       draw.changeMode('draw_polygon');
@@ -522,15 +870,18 @@ function MapContainer() {
       const editableFeature = editableGeojsonRef.current;
       const editableFeatures = getDrawFeaturesFromAoi({ geojson: editableFeature });
       if (!editableFeatures.length) {
-        const editWarning = 'Current boundary cannot be edited. Please select, upload, or draw a valid AOI first.';
+        const editWarning = 'Current spatial scope cannot be edited. Please select, upload, or draw a valid scope first.';
         setWarning(editWarning);
         return;
       }
 
-      draw.deleteAll();
-      const featureIds = draw.add({
-        type: 'FeatureCollection',
-        features: editableFeatures,
+      let featureIds = [];
+      runProgrammaticDrawMutation(() => {
+        draw.deleteAll();
+        featureIds = draw.add({
+          type: 'FeatureCollection',
+          features: editableFeatures,
+        });
       });
       const featureId = Array.isArray(featureIds) ? featureIds[0] : featureIds;
 
@@ -546,12 +897,18 @@ function MapContainer() {
         window.requestAnimationFrame(() => promoteDrawLayers(map));
       }
     }
-  }, [aoiEditorMode, promoteDrawLayers, reconcileLayerOrder, setDraftAOI, setWarning]);
+  }, [aoiEditorMode, promoteDrawLayers, reconcileLayerOrder, runProgrammaticDrawMutation, setDraftAOI, setWarning]);
 
   // Update EE layers when layer data changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+
+    if (appMode !== 'ask') {
+      removeAskLayers(map);
+      reconcileLayerOrder(map);
+      return;
+    }
 
     ASK_LAYER_NAMES.forEach((layerName) => {
       const data = layerData[layerName];
@@ -584,12 +941,17 @@ function MapContainer() {
     });
 
     reconcileLayerOrder(map);
-  }, [layerData, layerOpacity, layerVisibility, reconcileLayerOrder]);
+  }, [appMode, layerData, layerOpacity, layerVisibility, reconcileLayerOrder, removeAskLayers]);
 
   // Update layer visibility and opacity
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+
+    if (appMode !== 'ask') {
+      removeAskLayers(map);
+      return;
+    }
 
     ASK_LAYER_NAMES.forEach((layerName) => {
       if (map.getLayer(`${layerName}-layer`)) {
@@ -597,7 +959,7 @@ function MapContainer() {
         map.setPaintProperty(`${layerName}-layer`, 'raster-opacity', opacity);
       }
     });
-  }, [layerVisibility, layerOpacity]);
+  }, [appMode, layerVisibility, layerOpacity, removeAskLayers]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -648,6 +1010,18 @@ function MapContainer() {
 
     reconcileLayerOrder(map);
   }, [aoiClearVersion, reconcileLayerOrder, removeAgentLayers, removeAskLayers, removeAoiLayers]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    removeAgentLayers(map);
+    removeCatalogMapLayers(map);
+    setAgentTileError(null);
+    reconcileLayerOrder(map);
+  }, [agentVisualResetVersion, reconcileLayerOrder, removeAgentLayers, removeCatalogMapLayers, setAgentTileError]);
 
   // Handle 3D terrain
   useEffect(() => {
@@ -921,7 +1295,7 @@ function MapContainer() {
     if (appMode !== 'agent') {
       (map.getStyle()?.layers || [])
         .map((layer) => layer.id)
-        .filter((id) => id.startsWith('agent-rec-'))
+        .filter((id) => isCatalogMapLayerId(id))
         .forEach((id) => {
           if (map.getLayer(id)) {
             map.removeLayer(id);
@@ -937,7 +1311,13 @@ function MapContainer() {
     const activeLayerIds = new Set();
 
     layerEntries.forEach(([layerId, descriptor]) => {
-      const mapLayerId = getRecommendedMapLayerId(layerId);
+      const mapDefinition = buildCatalogMapLayerDefinition(layerId, descriptor);
+      const mapLayerId = mapDefinition?.mapLayerId;
+
+      if (!mapLayerId) {
+        return;
+      }
+
       activeLayerIds.add(mapLayerId);
 
       if (map.getLayer(mapLayerId)) {
@@ -951,24 +1331,16 @@ function MapContainer() {
         return;
       }
 
-      map.addSource(mapLayerId, {
-        type: 'raster',
-        tiles: [descriptor.tile_url],
-        tileSize: 256,
-      });
+      map.addSource(mapLayerId, mapDefinition.source);
       map.addLayer({
-        id: mapLayerId,
-        type: 'raster',
+        ...mapDefinition.layer,
         source: mapLayerId,
-        paint: {
-          'raster-opacity': 0.82,
-        },
       });
     });
 
     (map.getStyle()?.layers || [])
       .map((layer) => layer.id)
-      .filter((id) => id.startsWith('agent-rec-') && !activeLayerIds.has(id))
+      .filter((id) => isCatalogMapLayerId(id) && !activeLayerIds.has(id))
       .forEach((id) => {
         if (map.getLayer(id)) {
           map.removeLayer(id);
@@ -983,29 +1355,113 @@ function MapContainer() {
 
   const displayedAoi = isAoiEditing
     ? null
-    : appMode === 'agent'
-    ? selectedAOI || buildAoiFromAgentState(floodAgentState, {
-        source: 'agent_geocode',
-        label: floodAgentState?.location || 'Agent-derived boundary',
-      })
-    : selectedAOI;
+    : appMode === 'ask' || selectedAOI?.source === 'location_search_preview'
+    ? selectedAOI
+    : null;
 
-  const fitAoiBounds = useCallback((aoi, { force = false, padding = 50, duration = 600 } = {}) => {
+  useEffect(() => {
     const map = mapRef.current;
-    if (!map || !aoi?.bounds) return;
-
-    const boundsKey = JSON.stringify(aoi.bounds || {});
-    if (!force && boundsKey === lastFittedAoiRef.current) {
+    if (!map || !map.isStyleLoaded()) {
       return;
     }
 
-    const { west, south, east, north } = aoi.bounds;
-    map.fitBounds([[west, south], [east, north]], {
-      padding,
-      duration,
+    if (appMode !== 'agent') {
+      removeBusinessLayerMapLayers(map);
+      reconcileLayerOrder(map);
+      return;
+    }
+
+    const drawFeatureIds = new Set(
+      (drawRef.current?.getAll?.().features || [])
+        .map((feature) => String(feature?.id || '').trim())
+        .filter(Boolean)
+    );
+
+    const activeLayers = (businessLayers || []).filter((layer) => layer?.is_active);
+    const visibleLayers = activeLayers.length
+      ? activeLayers
+      : ((businessLayers || []).length ? [businessLayers[0]] : []);
+
+    const features = visibleLayers
+      .filter((layer) => layer?.geojson)
+      .filter((layer) => {
+        const layerSource = String(layer.source || '').toLowerCase();
+        if ((layerSource === 'draw' || layerSource === 'edited') && drawFeatureIds.has(String(layer.id))) {
+          return false;
+        }
+        return true;
+      })
+      .map((layer) => ({
+        ...(layer.geojson?.type === 'Feature'
+          ? layer.geojson
+          : { type: 'Feature', properties: {}, geometry: layer.geojson }),
+        properties: {
+          ...(layer.geojson?.properties || {}),
+          id: layer.id,
+          label: layer.label,
+          source: layer.source,
+          is_active: Boolean(layer.is_active),
+        },
+      }));
+
+    removeBusinessLayerMapLayers(map);
+
+    if (!features.length) {
+      reconcileLayerOrder(map);
+      return;
+    }
+
+    map.addSource(BUSINESS_LAYER_SOURCE_ID, {
+      type: 'geojson',
+      data: {
+        type: 'FeatureCollection',
+        features,
+      },
     });
-    lastFittedAoiRef.current = boundsKey;
-  }, []);
+
+    map.addLayer({
+      id: BUSINESS_LAYER_LAYER_IDS[0],
+      type: 'fill',
+      source: BUSINESS_LAYER_SOURCE_ID,
+      paint: {
+        'fill-color': [
+          'case',
+          ['boolean', ['get', 'is_active'], false], '#2563eb',
+          '#38bdf8',
+        ],
+        'fill-opacity': [
+          'case',
+          ['boolean', ['get', 'is_active'], false], 0.12,
+          0.06,
+        ],
+      },
+    });
+
+    map.addLayer({
+      id: BUSINESS_LAYER_LAYER_IDS[1],
+      type: 'line',
+      source: BUSINESS_LAYER_SOURCE_ID,
+      paint: {
+        'line-color': [
+          'case',
+          ['boolean', ['get', 'is_active'], false], '#1d4ed8',
+          '#0f766e',
+        ],
+        'line-width': [
+          'case',
+          ['boolean', ['get', 'is_active'], false], 2.6,
+          1.6,
+        ],
+      },
+    });
+
+    reconcileLayerOrder(map);
+  }, [
+    appMode,
+    businessLayers,
+    reconcileLayerOrder,
+    removeBusinessLayerMapLayers,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1087,12 +1543,39 @@ function MapContainer() {
   }, [appMode, fitAoiBounds, floodAgentState, isAoiEditing, selectedAOI]);
 
   return (
-    <div 
-      ref={mapContainerRef} 
-      id="map" 
-      className="map"
-      style={{ width: '100%', height: '100%' }}
-    />
+    <div className="satgpt-map-shell">
+      <div
+        ref={mapContainerRef}
+        id="map"
+        className="map"
+        style={{ width: '100%', height: '100%' }}
+      />
+
+      {pendingSpatialScopeSave ? (
+        <div className="satgpt-map-confirm-card">
+          <div className="satgpt-map-confirm-title">Save spatial scope?</div>
+          <div className="satgpt-map-confirm-text">
+            Double-click finished the polygon. Save it to the spatial scope list or discard it.
+          </div>
+          <div className="satgpt-map-confirm-actions">
+            <button
+              type="button"
+              className="satgpt-map-confirm-btn secondary"
+              onClick={handleDiscardPendingSpatialScope}
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              className="satgpt-map-confirm-btn primary"
+              onClick={handleConfirmPendingSpatialScope}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

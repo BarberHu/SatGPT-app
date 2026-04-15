@@ -1,5 +1,16 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { buildAoiFromAgentState } from '../utils/aoi';
+import {
+  buildBusinessLayerRecordFromAoi,
+  buildAoiFromBusinessLayerRecord,
+  createAgentSessionId,
+  getStoredAgentSessionId,
+  isBusinessLayerAoiSource,
+  listBusinessLayerRecords,
+  persistAgentSessionId,
+  saveBusinessLayerRecords,
+} from '../utils/businessLayerStore';
+import { syncBusinessLayers } from '../services/agentApi';
 
 const AppContext = createContext();
 
@@ -42,6 +53,13 @@ const defaultAgentLayerVisibility = {
   agentShowUrbanLayer: false,
   agentShowLandcoverLayer: false,
 };
+
+const activateBusinessLayer = (records = [], activeId = null) =>
+  records.map((record) => ({
+    ...record,
+    is_active: Boolean(activeId && record.id === activeId),
+    updated_at: new Date().toISOString(),
+  }));
 
 export const AppProvider = ({ children }) => {
   // UI State
@@ -118,6 +136,13 @@ export const AppProvider = ({ children }) => {
   
   // GEE Code Download
   const [geeCodeUrl, setGeeCodeUrl] = useState(null);
+
+  // Agent session + business layer inventory
+  const [agentSessionId, setAgentSessionId] = useState(() => getStoredAgentSessionId());
+  const [businessLayers, setBusinessLayers] = useState([]);
+  const [businessLayersReady, setBusinessLayersReady] = useState(false);
+  const [agentVisualResetVersion, setAgentVisualResetVersion] = useState(0);
+  const selectedAOIRef = useRef(null);
   
   // ========== FloodAgent 闁绘鍩栭埀?(闁哄懘缂氶崗妯绘媴閹捐尐浣割嚕? ==========
   const [floodAgentState, setFloodAgentState] = useState(defaultFloodAgentState);
@@ -158,6 +183,196 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerVisibility({});
   }, []);
 
+  const clearAgentVisualState = useCallback(() => {
+    setAgentImagery(null);
+    setAgentImageryLoading(false);
+    setAgentImpactData(null);
+    setAgentImpactLoading(false);
+    setAgentTileLoading(false);
+    setAgentRecommendedLayerData({});
+    setAgentRecommendedLayerVisibility({});
+    setAgentLayerLoading({});
+    setAgentTileError(null);
+    setAgentShowFloodDetection(false);
+    setAgentShowPopulationLayer(false);
+    setAgentShowUrbanLayer(false);
+    setAgentShowLandcoverLayer(false);
+    setAgentVisualResetVersion((value) => value + 1);
+  }, []);
+
+  const setBusinessLayerActive = useCallback((activeLayerId) => {
+    setBusinessLayers((previous) => {
+      if (!previous.length) {
+        return previous;
+      }
+      return activateBusinessLayer(previous, activeLayerId);
+    });
+  }, []);
+
+  const fitAoiBoundsOnMap = useCallback((aoi, { padding = 64, duration = 700 } = {}) => {
+    if (!mapInstance?.fitBounds || !aoi?.bounds) {
+      return;
+    }
+
+    const { west, south, east, north } = aoi.bounds;
+    mapInstance.fitBounds([[west, south], [east, north]], {
+      padding,
+      duration,
+    });
+  }, [mapInstance]);
+
+  const upsertBusinessLayerRecord = useCallback((record, { markActive = true } = {}) => {
+    if (!record?.id) {
+      return null;
+    }
+
+    let nextRecord = null;
+    setBusinessLayers((previous) => {
+      const now = new Date().toISOString();
+      const existing = previous.find((item) => item.id === record.id) || null;
+      nextRecord = {
+        ...existing,
+        ...record,
+        created_at: record.created_at || existing?.created_at || now,
+        updated_at: record.updated_at || now,
+        is_active: markActive ? true : Boolean(record.is_active ?? existing?.is_active),
+      };
+
+      const existingIndex = previous.findIndex((item) => item.id === record.id);
+      const merged = existingIndex >= 0
+        ? previous.map((item, index) => (index === existingIndex ? nextRecord : item))
+        : [...previous, nextRecord];
+
+      return markActive ? activateBusinessLayer(merged, nextRecord.id) : merged;
+    });
+
+    return nextRecord || record;
+  }, []);
+
+  const registerBusinessLayerFromAoi = useCallback((aoi, options = {}) => {
+    const nextRecord = buildBusinessLayerRecordFromAoi(aoi, options);
+    if (!nextRecord) {
+      return null;
+    }
+
+    upsertBusinessLayerRecord(nextRecord, { markActive: options.markActive !== false });
+    return nextRecord;
+  }, [upsertBusinessLayerRecord]);
+
+  const activateBusinessLayerRecord = useCallback((layerId, { focus = true } = {}) => {
+    if (!layerId) {
+      return null;
+    }
+
+    const targetRecord = businessLayers.find((record) => record.id === layerId);
+    if (!targetRecord) {
+      return null;
+    }
+
+    const nextAoi = buildAoiFromBusinessLayerRecord({
+      ...targetRecord,
+      is_active: true,
+    });
+
+    setBusinessLayerActive(layerId);
+    if (nextAoi) {
+      setSelectedAOI(nextAoi);
+      setDraftAOI(null);
+      setWarning('');
+      if (focus) {
+        window.requestAnimationFrame(() => {
+          fitAoiBoundsOnMap(nextAoi, { padding: 72, duration: 650 });
+        });
+      }
+    }
+
+    return targetRecord;
+  }, [
+    businessLayers,
+    fitAoiBoundsOnMap,
+    setBusinessLayerActive,
+  ]);
+
+  const removeBusinessLayerRecord = useCallback((layerId, { nextSelectedAoi = null } = {}) => {
+    if (!layerId) {
+      return;
+    }
+
+    setBusinessLayers((previous) => {
+      const remaining = previous.filter((item) => item.id !== layerId);
+      if (!remaining.length) {
+        return [];
+      }
+
+      if (nextSelectedAoi?.id) {
+        return activateBusinessLayer(remaining, nextSelectedAoi.id);
+      }
+
+      const activeCandidate = remaining.find((item) => item.is_active) || remaining[0];
+      return activateBusinessLayer(remaining, activeCandidate?.id || null);
+    });
+  }, []);
+
+  const deleteBusinessLayer = useCallback((layerId) => {
+    if (!layerId) {
+      return null;
+    }
+
+    const targetRecord = businessLayers.find((record) => record.id === layerId);
+    if (!targetRecord) {
+      return null;
+    }
+
+    const deletedActive = Boolean(targetRecord.is_active || selectedAOI?.id === layerId);
+    const remainingRecords = businessLayers.filter((record) => record.id !== layerId);
+    const fallbackRecord = deletedActive ? (remainingRecords[0] || null) : null;
+    const fallbackAoi = fallbackRecord ? buildAoiFromBusinessLayerRecord({
+      ...fallbackRecord,
+      is_active: true,
+    }) : null;
+
+    if (deletedActive) {
+      setSelectedAOI(fallbackAoi || null);
+    }
+
+    removeBusinessLayerRecord(layerId, { nextSelectedAoi: fallbackAoi });
+    setWarning('');
+    return {
+      deleted: targetRecord,
+      fallback: fallbackRecord,
+    };
+  }, [businessLayers, removeBusinessLayerRecord, selectedAOI]);
+
+  const startNewAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
+    const nextSessionId = createAgentSessionId();
+    persistAgentSessionId(nextSessionId);
+    setAgentSessionId(nextSessionId);
+
+    const shouldSeedSelectedAoi = preserveSelectedAoi && isBusinessLayerAoiSource(selectedAOI?.source);
+    const seededLayers = shouldSeedSelectedAoi
+      ? [buildBusinessLayerRecordFromAoi(selectedAOI, {
+          id: selectedAOI?.id,
+          label: selectedAOI?.label,
+          source: selectedAOI?.source,
+          origin: selectedAOI?.origin || (selectedAOI?.source === 'draw' ? 'draw' : 'upload'),
+          is_active: true,
+        })].filter(Boolean)
+      : [];
+
+    setBusinessLayers(seededLayers);
+    setBusinessLayersReady(false);
+    saveBusinessLayerRecords(nextSessionId, seededLayers).catch((error) => {
+      console.error('Failed to seed business layers for new agent session:', error);
+    });
+
+    if (!preserveSelectedAoi) {
+      setSelectedAOI(null);
+      setSelectedGridCords(null);
+    }
+
+    return nextSessionId;
+  }, [selectedAOI]);
+
   const resetAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
@@ -181,6 +396,109 @@ export const AppProvider = ({ children }) => {
       setSelectedGridCords(null);
     }
   }, []);
+
+  useEffect(() => {
+    selectedAOIRef.current = selectedAOI;
+  }, [selectedAOI]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBusinessLayersReady(false);
+
+    listBusinessLayerRecords(agentSessionId)
+      .then((records) => {
+        if (cancelled) {
+          return;
+        }
+        const currentSelectedAoi = selectedAOIRef.current;
+        const fallbackSelectedAoi = (!records.length && currentSelectedAoi?.id && isBusinessLayerAoiSource(currentSelectedAoi?.source))
+          ? [buildBusinessLayerRecordFromAoi(currentSelectedAoi, {
+              id: currentSelectedAoi.id,
+              label: currentSelectedAoi.label,
+              source: currentSelectedAoi.source,
+              origin: currentSelectedAoi.origin || (currentSelectedAoi.source === 'draw' ? 'draw' : 'upload'),
+              is_active: true,
+            })].filter(Boolean)
+          : [];
+        setBusinessLayers(records.length ? records : fallbackSelectedAoi);
+        setBusinessLayersReady(true);
+      })
+      .catch((error) => {
+        console.error('Failed to load business layers from IndexedDB:', error);
+        if (cancelled) {
+          return;
+        }
+        setBusinessLayers([]);
+        setBusinessLayersReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentSessionId]);
+
+  useEffect(() => {
+    if (!businessLayersReady) {
+      return;
+    }
+
+    saveBusinessLayerRecords(agentSessionId, businessLayers).catch((error) => {
+      console.error('Failed to persist business layers to IndexedDB:', error);
+    });
+
+    syncBusinessLayers({
+      store_key: agentSessionId,
+      store_namespace: 'business_layer_store',
+      layers: businessLayers,
+    }).catch((error) => {
+      console.error('Failed to sync business layers to backend cache:', error);
+    });
+  }, [agentSessionId, businessLayers, businessLayersReady]);
+
+  useEffect(() => {
+    if (!selectedAOI?.id || !isBusinessLayerAoiSource(selectedAOI?.source)) {
+      return;
+    }
+
+    const existingLayer = businessLayers.find((record) => record.id === selectedAOI.id);
+    const nextRecord = buildBusinessLayerRecordFromAoi(selectedAOI, {
+      id: selectedAOI.id,
+      label: selectedAOI.label,
+      source: selectedAOI.source,
+      origin: selectedAOI.origin || (selectedAOI.source === 'draw' ? 'draw' : 'upload'),
+      is_active: true,
+      created_at: existingLayer?.created_at || selectedAOI.created_at,
+    });
+
+    if (!nextRecord) {
+      return;
+    }
+
+    const shouldSkipUpdate =
+      existingLayer
+      && existingLayer.is_active
+      && JSON.stringify(existingLayer.bounds || null) === JSON.stringify(nextRecord.bounds || null)
+      && JSON.stringify(existingLayer.geojson || null) === JSON.stringify(nextRecord.geojson || null)
+      && existingLayer.label === nextRecord.label
+      && existingLayer.source === nextRecord.source;
+
+    if (shouldSkipUpdate) {
+      return;
+    }
+
+    setBusinessLayers((previous) => {
+      const existingIndex = previous.findIndex((item) => item.id === nextRecord.id);
+      const merged = existingIndex >= 0
+        ? previous.map((item, index) => (index === existingIndex ? {
+          ...item,
+          ...nextRecord,
+          created_at: item.created_at || nextRecord.created_at,
+        } : item))
+        : [...previous, nextRecord];
+
+      return activateBusinessLayer(merged, nextRecord.id);
+    });
+  }, [businessLayers, selectedAOI]);
   
   // Toggle layer visibility
   const toggleLayerVisibility = useCallback((layerName) => {
@@ -296,11 +614,11 @@ export const AppProvider = ({ children }) => {
   const startAoiEdit = useCallback(() => {
     const editableAoi = selectedAOI || buildAoiFromAgentState(floodAgentState, {
       source: 'agent_geocode',
-      label: floodAgentState?.location || 'Agent-derived boundary',
+      label: floodAgentState?.location || 'Agent-derived scope',
     });
 
     if (!editableAoi) {
-      setWarning('Please select, upload, or resolve an AOI before editing.');
+      setWarning('Please select, upload, or resolve a spatial scope before editing.');
       return false;
     }
 
@@ -312,20 +630,34 @@ export const AppProvider = ({ children }) => {
 
   const applyDraftAoi = useCallback(() => {
     if (!draftAOI?.geojson) {
-      setWarning('Please draw or edit a valid AOI boundary before applying.');
+      setWarning('Please draw or edit a valid spatial scope before applying.');
       return false;
     }
 
-      const nextAoi = JSON.parse(JSON.stringify(draftAOI));
-      resetAskSession();
-      setSelectedGridCords(null);
-      setSelectedAOI(nextAoi);
+    const nextAoi = JSON.parse(JSON.stringify(draftAOI));
+    if (!isBusinessLayerAoiSource(nextAoi.source)) {
+      nextAoi.source = aoiEditorMode === 'edit' ? 'edited' : 'draw';
+      nextAoi.origin = aoiEditorMode === 'edit' ? 'draw' : 'draw';
+      if (nextAoi.geojson?.properties) {
+        nextAoi.geojson.properties.source = nextAoi.source;
+      }
+    }
+    resetAskSession();
+    setSelectedGridCords(null);
+    setSelectedAOI(nextAoi);
+    registerBusinessLayerFromAoi(nextAoi, {
+      id: nextAoi.id,
+      label: nextAoi.label,
+      source: nextAoi.source,
+      origin: nextAoi.source === 'draw' || nextAoi.source === 'edited' ? 'draw' : 'upload',
+      markActive: true,
+    });
     resetAgentSession({ preserveSelectedAoi: true });
     setDraftAOI(null);
     setAoiEditorMode('idle');
     setWarning('');
     return nextAoi;
-  }, [draftAOI, resetAgentSession, resetAskSession]);
+  }, [aoiEditorMode, draftAOI, registerBusinessLayerFromAoi, resetAgentSession, resetAskSession]);
 
   const clearAoiState = useCallback(() => {
     resetAskSession();
@@ -334,9 +666,10 @@ export const AppProvider = ({ children }) => {
     setAoiEditorMode('idle');
     setSelectedGridCords(null);
     setSelectedAOI(null);
+    setBusinessLayerActive(null);
     setWarning('');
     setAoiClearVersion((value) => value + 1);
-  }, [resetAgentSession, resetAskSession]);
+  }, [resetAgentSession, resetAskSession, setBusinessLayerActive]);
 
   const isAoiEditing = aoiEditorMode !== 'idle';
 
@@ -412,7 +745,23 @@ export const AppProvider = ({ children }) => {
     // GEE Code
     geeCodeUrl,
     setGeeCodeUrl,
-    
+
+    // Agent session + business layer inventory
+    agentSessionId,
+    businessLayers,
+    businessLayersReady,
+    agentVisualResetVersion,
+    setBusinessLayers,
+    setBusinessLayerActive,
+    activateBusinessLayerRecord,
+    fitAoiBoundsOnMap,
+    upsertBusinessLayerRecord,
+    registerBusinessLayerFromAoi,
+    removeBusinessLayerRecord,
+    deleteBusinessLayer,
+    startNewAgentSession,
+    clearAgentVisualState,
+
     // App Mode (ask/agent)
     appMode,
     setAppMode,

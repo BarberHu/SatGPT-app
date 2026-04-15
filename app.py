@@ -1,8 +1,9 @@
 import time
 from flask import Flask
 from flask import Response
-from flask import render_template
+from flask import jsonify
 from flask import request
+from flask import send_from_directory
 from datetime import datetime, timedelta
 import uuid
 ## Server .py 
@@ -11,12 +12,9 @@ import os
 
 import config
 import ee
-import jinja2
 
 import socket
-import json
 import re
-from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 import openai
 
@@ -39,6 +37,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LAYER_CATALOG_PATH = os.path.join(BASE_DIR, 'frontend', 'src', 'config', 'layerCatalog.json')
+FRONTEND_BUILD_DIR = os.path.join(BASE_DIR, 'frontend', 'build')
+FRONTEND_BUILD_STATIC_DIR = os.path.join(FRONTEND_BUILD_DIR, 'static')
 
 
 
@@ -71,7 +71,11 @@ Tiles      = ee.FeatureCollection("projects/servir-mekong/SWMT/Tiles")
 # LC8_BANDS   = ['B1',    'B2',   'B3',    'B4',  'B5',  'B6',    'B7']
 # STD_NAMES   = ['blue2', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2']
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder=FRONTEND_BUILD_STATIC_DIR,
+    static_url_path='/static',
+)
 # Enable CORS for all origins (支持内网/局域网访问)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
@@ -197,12 +201,6 @@ def attach_map_id(content, key, map_id):
 def health_check():
     return "healthy", 200
 
-@app.route("/")
-def mainHandler():
-    return render_template('index.html'
-                           ,GOOGLE_MAPS_API_KEY=config.GOOGLE_MAPS_API_KEY,
-                            MAPBOX_ACCESS_KEY=config.MAPBOX_ACCESS_KEY
-                           )
 @app.route('/get_default')
 def getDefaultHandler():
     default = SurfaceWaterToolStyle(ee.Image('users/arjenhaag/SERVIR-Mekong/SWMT_default_2017_2')).getMapId()
@@ -688,6 +686,24 @@ def hotspots_style(map):
       </ColorMap>\
     </RasterSymbolizer>'
     return map.sldStyle(water_style)
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    requested_path = os.path.join(FRONTEND_BUILD_DIR, path)
+
+    if path and os.path.isfile(requested_path):
+        return send_from_directory(FRONTEND_BUILD_DIR, path)
+
+    index_file = os.path.join(FRONTEND_BUILD_DIR, "index.html")
+    if os.path.isfile(index_file):
+        return send_from_directory(FRONTEND_BUILD_DIR, "index.html")
+
+    return (
+        "React build not found. Run `npm run build` in the frontend directory before serving the SPA.",
+        503,
+    )
 
 if __name__ == "__main__":
     port = int(os.environ.get('FLASK_RUN_PORT', 5001))
