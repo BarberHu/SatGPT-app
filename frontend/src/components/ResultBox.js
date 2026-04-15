@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppContext } from '../context/AppContext';
+import { useAskContext } from '../context/AppContext';
 
 function ResultBox() {
   const { 
@@ -9,7 +9,7 @@ function ResultBox() {
     setChatInput,
     setResultText,
     setGptResponse,
-  } = useAppContext();
+  } = useAskContext();
 
   const handleToggle = () => {
     setIsResultVisible(!isResultVisible);

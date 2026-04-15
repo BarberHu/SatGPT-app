@@ -17,9 +17,9 @@ const normalizeAgentApiError = (error, fallbackMessage) => {
   return normalized;
 };
 
-export const getFloodImages = async (params) => {
+export const getFloodImages = async (params, config = {}) => {
   try {
-    const response = await axios.post(`${AGENT_API_BASE}/api/flood-images`, params);
+    const response = await axios.post(`${AGENT_API_BASE}/api/flood-images`, params, config);
     return response.data;
   } catch (error) {
     console.error('Failed to fetch flood imagery:', error);
@@ -27,9 +27,9 @@ export const getFloodImages = async (params) => {
   }
 };
 
-export const getFloodImpact = async (params) => {
+export const getFloodImpact = async (params, config = {}) => {
   try {
-    const response = await axios.post(`${AGENT_API_BASE}/api/flood-impact`, params);
+    const response = await axios.post(`${AGENT_API_BASE}/api/flood-impact`, params, config);
     return response.data;
   } catch (error) {
     console.error('Failed to fetch flood impact assessment:', error);
@@ -47,9 +47,9 @@ export const refreshFloodConfirmation = async (params) => {
   }
 };
 
-export const renderRecommendedLayer = async (params) => {
+export const renderRecommendedLayer = async (params, config = {}) => {
   try {
-    const response = await axios.post(`${AGENT_API_BASE}/api/recommended-layer-render`, params);
+    const response = await axios.post(`${AGENT_API_BASE}/api/recommended-layer-render`, params, config);
     return response.data;
   } catch (error) {
     console.error('Failed to render recommended layer:', error);
@@ -57,9 +57,9 @@ export const renderRecommendedLayer = async (params) => {
   }
 };
 
-export const searchLocationCandidates = async (params) => {
+export const searchLocationCandidates = async (params, config = {}) => {
   try {
-    const response = await axios.post(`${AGENT_API_BASE}/api/location-search`, params);
+    const response = await axios.post(`${AGENT_API_BASE}/api/location-search`, params, config);
     return response.data;
   } catch (error) {
     console.error('Failed to search location candidates:', error);

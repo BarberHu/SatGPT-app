@@ -1,11 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { useAppContext } from '../context/AppContext';
+import { useAskContext, useMapContext, useUiContext } from '../context/AppContext';
 import AgentPanel from './AgentPanel';
 
 function ControlPanel() {
   const {
     isPanelVisible,
     setIsPanelVisible,
+    setActiveModal,
+    appMode,
+  } = useUiContext();
+
+  const {
     dataType,
     setDataType,
     yearControl,
@@ -20,12 +25,13 @@ function ControlPanel() {
     updateLayerOpacity,
     resetAllOpacity,
     geeCodeUrl,
-    setActiveModal,
+    resetAskSession,
+  } = useAskContext();
+
+  const {
     setCountries,
     selectedAOI,
-    appMode,
-    resetAskSession,
-  } = useAppContext();
+  } = useMapContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
 

@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'satgpt_ux_events';
+const MAX_STORED_EVENTS = 200;
 
 const canUseStorage = () => typeof window !== 'undefined' && window.localStorage;
 
@@ -19,7 +20,10 @@ export const writeUxEvents = (events) => {
     return;
   }
 
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(events.slice(-MAX_STORED_EVENTS))
+  );
 };
 
 export const trackUxEvent = (name, payload = {}) => {
@@ -30,7 +34,7 @@ export const trackUxEvent = (name, payload = {}) => {
     timestamp: new Date().toISOString(),
   };
 
-  const events = readUxEvents();
+  const events = readUxEvents().slice(-(MAX_STORED_EVENTS - 1));
   events.push(event);
   writeUxEvents(events);
 

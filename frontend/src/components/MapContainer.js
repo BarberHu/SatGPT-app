@@ -1,7 +1,13 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
-import { useAppContext } from '../context/AppContext';
+import {
+  useAgentContext,
+  useAskContext,
+  useBusinessLayerContext,
+  useMapContext,
+  useUiContext,
+} from '../context/AppContext';
 import {
   buildAoiFromDrawFeature,
   buildAoiFromDrawFeatures,
@@ -193,18 +199,22 @@ function MapContainer() {
     setGridClickEnabled,
     isAoiEditing,
     aoiEditorMode,
-    setWarning,
-    resetAgentSession,
-    resetAskSession,
+  } = useMapContext();
+
+  const { setWarning, appMode } = useUiContext();
+
+  const {
     layerData,
     layerVisibility,
     layerOpacity,
     is3DEnabled,
     isBuildingsEnabled,
-    appMode,
+    resetAskSession,
+  } = useAskContext();
+
+  const {
     agentImagery,
     floodAgentState,
-    // Agent control states
     agentSelectedPeriod,
     agentSelectedType,
     agentShowFloodDetection,
@@ -216,12 +226,16 @@ function MapContainer() {
     agentRecommendedLayerVisibility,
     setAgentLayerLoading,
     setAgentTileError,
+    clearAgentVisualState,
+    resetAgentSession,
+  } = useAgentContext();
+
+  const {
     businessLayers,
     agentVisualResetVersion,
     registerBusinessLayerFromAoi,
     removeBusinessLayerRecord,
-    clearAgentVisualState,
-  } = useAppContext();
+  } = useBusinessLayerContext();
 
   // Track if map is initialized
   const mapInitialized = useRef(false);
@@ -1103,18 +1117,21 @@ function MapContainer() {
     const finish = () => {
       if (resolved) return;
       resolved = true;
-      clearTimeout(timeout);
+      map.off('idle', finish);
+      clearTimeout(timeoutId);
       setAgentLayerLoading(prev => ({ ...prev, [layerKey]: false }));
     };
-    map.once('idle', finish);
-    const timeout = setTimeout(finish, 15000);
+    map.on('idle', finish);
+    const timeoutId = window.setTimeout(finish, 15000);
 
     return {
       cleanup: () => {
-        resolved = true;
-        setAgentLayerLoading(prev => ({ ...prev, [layerKey]: false }));
+        if (!resolved) {
+          resolved = true;
+          setAgentLayerLoading(prev => ({ ...prev, [layerKey]: false }));
+        }
         map.off('idle', finish);
-        clearTimeout(timeout);
+        window.clearTimeout(timeoutId);
       },
     };
   }, [setAgentLayerLoading]);
@@ -1173,7 +1190,8 @@ function MapContainer() {
     const finish = (isTimeout) => {
       if (resolved) return;
       resolved = true;
-      clearTimeout(timeout);
+      map.off('idle', onIdle);
+      window.clearTimeout(timeoutId);
       setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
       if (tileErrorCount > 0) {
         console.warn(`${tileErrorCount} tile(s) failed to load.`);
@@ -1188,15 +1206,18 @@ function MapContainer() {
         setAgentTileError(null);
       }
     };
-    map.once('idle', () => finish(false));
-    const timeout = setTimeout(() => finish(true), 15000);
+    const onIdle = () => finish(false);
+    map.on('idle', onIdle);
+    const timeoutId = window.setTimeout(() => finish(true), 15000);
 
     return () => {
-      resolved = true;
-      setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
+      if (!resolved) {
+        resolved = true;
+        setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
+      }
       map.off('error', onTileError);
-      map.off('idle', finish);
-      clearTimeout(timeout);
+      map.off('idle', onIdle);
+      window.clearTimeout(timeoutId);
     };
   }, [agentImagery, appMode, agentSelectedPeriod, agentSelectedType, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
 

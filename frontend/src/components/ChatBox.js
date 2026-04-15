@@ -5,7 +5,13 @@
  * Right side: chat input or agent chat interface
  */
 import React, { useState } from 'react';
-import { useAppContext } from '../context/AppContext';
+import {
+  useAgentContext,
+  useAskContext,
+  useBusinessLayerContext,
+  useMapContext,
+  useUiContext,
+} from '../context/AppContext';
 import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, getWaterRegimeChangeMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams } from '../utils/aoi';
 import { CopilotChat } from "@copilotkit/react-ui";
@@ -48,22 +54,29 @@ function ChatBox() {
     setChatInput,
     setGptResponse,
     setResultText,
-    setIsLoading,
-    setWarning,
-    selectedAOI,
     dataType,
     yearControl,
     updateLayerData,
     setGeeCodeUrl,
+  } = useAskContext();
+
+  const {
+    setIsLoading,
+    setWarning,
     setActiveModal,
-    countries,
-    mapInstance,
     chatMode,
     setChatMode,
     setAppMode,
-    resetAgentSession,
-    startNewAgentSession,
-  } = useAppContext();
+  } = useUiContext();
+
+  const {
+    selectedAOI,
+    countries,
+    mapInstance,
+  } = useMapContext();
+
+  const { resetAgentSession } = useAgentContext();
+  const { startNewAgentSession } = useBusinessLayerContext();
 
   const { setThreadId } = useCopilotContext();
 

@@ -7,8 +7,14 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import axios from 'axios';
 import { useCoAgent, useLangGraphInterrupt, useCopilotMessagesContext } from "@copilotkit/react-core";
-import { useAppContext } from '../context/AppContext';
+import {
+  useAgentContext,
+  useBusinessLayerContext,
+  useMapContext,
+  useUiContext,
+} from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import SourcesDrawer from './SourcesDrawer';
 import CatalogLayerPanel from './CatalogLayerPanel';
@@ -502,10 +508,11 @@ function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
 }
 
 function AgentPanel() {
-  const { 
+  const { setWarning } = useUiContext();
+
+  const {
     setFloodAgentState, 
     floodAgentState,
-    setWarning,
     setAgentImagery,
     setAgentImageryLoading,
     agentImagery,
@@ -535,11 +542,15 @@ function AgentPanel() {
     setAgentLayerLoading,
     agentTileError,
     setAgentTileError,
+  } = useAgentContext();
+
+  const {
     businessLayers,
-    selectedAOI,
     activateBusinessLayerRecord,
     deleteBusinessLayer,
-  } = useAppContext();
+  } = useBusinessLayerContext();
+
+  const { selectedAOI } = useMapContext();
   
   // Get chat messages from CopilotKit (with safety check)
   const messagesContext = useCopilotMessagesContext();
@@ -566,6 +577,8 @@ function AgentPanel() {
 
   const imageryRequestKeyRef = useRef(null);
   const impactRequestKeyRef = useRef(null);
+  const imageryRequestAbortRef = useRef(null);
+  const impactRequestAbortRef = useRef(null);
   const pendingRecommendedLayerRequestsRef = useRef(new Set());
 
   useEffect(() => {
@@ -691,6 +704,9 @@ function AgentPanel() {
     }
 
     imageryRequestKeyRef.current = requestKey;
+    imageryRequestAbortRef.current?.abort();
+    const controller = new AbortController();
+    imageryRequestAbortRef.current = controller;
     impactRequestKeyRef.current = null;
     setAgentImagery(null);
     setAgentImpactData(null);
@@ -707,7 +723,7 @@ function AgentPanel() {
         latitude: agentState.coordinates?.[1] || 0,
         bounds: aoi?.bounds || agentState.bounds || null,
         geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
-      });
+      }, { signal: controller.signal });
 
       if (imageryRequestKeyRef.current !== requestKey) {
         return;
@@ -724,6 +740,9 @@ function AgentPanel() {
         throw new Error('Flood imagery response was not successful.');
       }
     } catch (error) {
+      if (axios.isCancel(error) || error?.code === 'ERR_CANCELED') {
+        return;
+      }
       console.error('Failed to fetch imagery:', error);
       if (imageryRequestKeyRef.current !== requestKey) {
         return;
@@ -737,6 +756,9 @@ function AgentPanel() {
         error: error?.message || 'Unknown imagery error',
       });
     } finally {
+      if (imageryRequestAbortRef.current === controller) {
+        imageryRequestAbortRef.current = null;
+      }
       if (imageryRequestKeyRef.current === requestKey) {
         setAgentImageryLoading(false);
       }
@@ -745,6 +767,7 @@ function AgentPanel() {
 
   useEffect(() => {
     if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date || !currentState.after_date) {
+      imageryRequestAbortRef.current?.abort();
       imageryRequestKeyRef.current = null;
       return;
     }
@@ -779,6 +802,9 @@ function AgentPanel() {
     }
     
     impactRequestKeyRef.current = requestKey;
+    impactRequestAbortRef.current?.abort();
+    const controller = new AbortController();
+    impactRequestAbortRef.current = controller;
     setAgentImpactLoading(true);
     setWarning('');
     try {
@@ -787,7 +813,7 @@ function AgentPanel() {
         peek_date: currentState.peek_date,
         bounds: effectiveAoi?.bounds || currentState.bounds || null,
         geojson: effectiveAoi?.geojson?.geometry || currentState.geojson || null,
-      });
+      }, { signal: controller.signal });
 
       if (impactRequestKeyRef.current !== requestKey) {
         return;
@@ -802,6 +828,9 @@ function AgentPanel() {
         });
       }
     } catch (error) {
+      if (axios.isCancel(error) || error?.code === 'ERR_CANCELED') {
+        return;
+      }
       console.error('Failed to fetch impact data:', error);
       if (impactRequestKeyRef.current !== requestKey) {
         return;
@@ -815,6 +844,9 @@ function AgentPanel() {
         error: error?.message || 'Unknown impact error',
       });
     } finally {
+      if (impactRequestAbortRef.current === controller) {
+        impactRequestAbortRef.current = null;
+      }
       if (impactRequestKeyRef.current === requestKey) {
         setAgentImpactLoading(false);
       }
@@ -824,6 +856,7 @@ function AgentPanel() {
   // Auto-fetch impact data in background as soon as imagery arrives
   useEffect(() => {
     if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date) {
+      impactRequestAbortRef.current?.abort();
       impactRequestKeyRef.current = null;
       return;
     }
@@ -843,6 +876,11 @@ function AgentPanel() {
       fetchImpactData();
     }
   }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, analysisDisplayEnabled, fetchImpactData]);
+
+  useEffect(() => () => {
+    imageryRequestAbortRef.current?.abort();
+    impactRequestAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     const visibleCatalogLayers = recommendedCatalogLayers.filter((layer) => agentRecommendedLayerVisibility[layer.id]);

@@ -7,7 +7,7 @@ import ResultBox from './components/ResultBox';
 import Legends from './components/Legends';
 import Modals from './components/Modals';
 import Spinner from './components/Spinner';
-import { useAppContext } from './context/AppContext';
+import { useUiContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
 
 // CopilotKit 运行时地址 - 动态获取当前主机，支持内网访问
@@ -56,7 +56,7 @@ function App() {
 
 // ResultBox only shown in Ask mode
 function ModeBasedResultBox() {
-  const { appMode } = useAppContext();
+  const { appMode } = useUiContext();
   
   // Hide ResultBox in Agent mode
   if (appMode === 'agent') return null;
@@ -65,7 +65,7 @@ function ModeBasedResultBox() {
 }
 
 function SettingsButton() {
-  const { isPanelVisible, setIsPanelVisible } = useAppContext();
+  const { isPanelVisible, setIsPanelVisible } = useUiContext();
   
   if (isPanelVisible) return null;
   
@@ -80,7 +80,7 @@ function SettingsButton() {
 }
 
 function Warnings() {
-  const { warning } = useAppContext();
+  const { warning } = useUiContext();
   
   if (!warning) return null;
   

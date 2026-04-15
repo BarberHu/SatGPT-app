@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCopilotChatInternal } from '@copilotkit/react-core';
-import { useAppContext } from '../context/AppContext';
+import { useBusinessLayerContext } from '../context/AppContext';
 import {
   appendMentionContext,
   buildMentionCandidates,
@@ -73,7 +73,7 @@ function AgentChatInput({
   const [sendError, setSendError] = useState('');
 
   const { interrupt } = useCopilotChatInternal();
-  const { businessLayers, agentSessionId } = useAppContext();
+  const { businessLayers, agentSessionId } = useBusinessLayerContext();
 
   const mentionCandidates = useMemo(
     () => buildMentionCandidates({

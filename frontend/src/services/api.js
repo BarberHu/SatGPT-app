@@ -18,8 +18,8 @@ export const getDefaultMap = async () => {
 };
 
 // Get historical map data
-export const getHistoricalMap = async (params) => {
-  const response = await axios.post(`${API_BASE}/get_historical_map`, params);
+export const getHistoricalMap = async (params, config = {}) => {
+  const response = await axios.post(`${API_BASE}/get_historical_map`, params, config);
   return response.data;
 };
 
@@ -30,20 +30,20 @@ export const getUnsupervisedMap = async (params) => {
 };
 
 // Get flood hotspot map
-export const getFloodHotspotMap = async (params) => {
-  const response = await axios.post(`${API_BASE}/get_flood_hotspot_map`, params);
+export const getFloodHotspotMap = async (params, config = {}) => {
+  const response = await axios.post(`${API_BASE}/get_flood_hotspot_map`, params, config);
   return response.data;
 };
 
 // Get water regime change map
-export const getWaterRegimeChangeMap = async (params) => {
-  const response = await axios.post(`${API_BASE}/get_water_regime_change_map`, params);
+export const getWaterRegimeChangeMap = async (params, config = {}) => {
+  const response = await axios.post(`${API_BASE}/get_water_regime_change_map`, params, config);
   return response.data;
 };
 
 // ChatGPT API
-export const sendChatMessage = async (message) => {
-  const response = await axios.post(`${API_BASE}/chatGPT`, { message });
+export const sendChatMessage = async (message, config = {}) => {
+  const response = await axios.post(`${API_BASE}/chatGPT`, { message }, config);
   return response.data;
 };
 

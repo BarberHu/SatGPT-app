@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
-import { useAppContext } from '../context/AppContext';
+import axios from 'axios';
+import { useAskContext, useMapContext, useUiContext } from '../context/AppContext';
 import { getHistoricalMap, getFloodHotspotMap, getWaterRegimeChangeMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams } from '../utils/aoi';
 
@@ -7,24 +8,32 @@ const FLOOD_HOTSPOT_YEAR_FROM = 1988;
 const ASK_AUTOLOAD_AOI_SOURCES = new Set(['fishnet']);
 
 const isAskAutoloadAoi = (aoi) => ASK_AUTOLOAD_AOI_SOURCES.has(String(aoi?.source || '').toLowerCase());
+const buildAoiRequestKey = (aoi) => JSON.stringify({
+  id: aoi?.id || null,
+  source: aoi?.source || null,
+  updated_at: aoi?.updated_at || null,
+  bounds: aoi?.bounds || null,
+});
 
 export const useMapData = () => {
   const {
     selectedAOI,
     aoiClearVersion,
+  } = useMapContext();
+
+  const {
     dataType,
     yearControl,
-    appMode,
-    setIsLoading,
-    setWarning,
     updateLayerData,
     setGeeCodeUrl,
-  } = useAppContext();
+  } = useAskContext();
+  const { appMode, setIsLoading, setWarning } = useUiContext();
 
   // Track previous grid coords to detect changes
-  const prevAoiRef = useRef(null);
+  const prevAoiKeyRef = useRef('');
   const requestIdRef = useRef(0);
   const appModeRef = useRef(appMode);
+  const activeRequestControllerRef = useRef(null);
 
   useEffect(() => {
     appModeRef.current = appMode;
@@ -34,6 +43,9 @@ export const useMapData = () => {
   const fetchMapData = useCallback(async (aoi) => {
     if (!aoi || appModeRef.current !== 'ask' || !isAskAutoloadAoi(aoi)) return;
     const requestId = ++requestIdRef.current;
+    activeRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestControllerRef.current = controller;
 
     console.log('fetchMapData called with AOI:', aoi);
 
@@ -55,14 +67,14 @@ export const useMapData = () => {
       let data;
       
       if (dataType === 'historical') {
-        data = await getHistoricalMap(params);
+        data = await getHistoricalMap(params, { signal: controller.signal });
       } else if (dataType === 'waterRegimeChange') {
-        data = await getWaterRegimeChangeMap(params);
+        data = await getWaterRegimeChangeMap(params, { signal: controller.signal });
       } else {
         // Flood hotspot
         params.year_from = FLOOD_HOTSPOT_YEAR_FROM;
         params.year_count = yearControl;
-        data = await getFloodHotspotMap(params);
+        data = await getFloodHotspotMap(params, { signal: controller.signal });
       }
 
       if (requestIdRef.current !== requestId || appModeRef.current !== 'ask') {
@@ -92,12 +104,18 @@ export const useMapData = () => {
       }
 
     } catch (error) {
+      if (axios.isCancel(error) || error?.code === 'ERR_CANCELED') {
+        return;
+      }
       if (requestIdRef.current !== requestId || appModeRef.current !== 'ask') {
         return;
       }
       console.error('Error fetching map data:', error);
       setWarning('Error loading map data. Please try again.');
     } finally {
+      if (activeRequestControllerRef.current === controller) {
+        activeRequestControllerRef.current = null;
+      }
       if (requestIdRef.current === requestId) {
         setIsLoading(false);
       }
@@ -107,7 +125,8 @@ export const useMapData = () => {
   // Auto-fetch when AOI is selected or data type changes
   useEffect(() => {
     if (appMode !== 'ask') {
-      prevAoiRef.current = null;
+      activeRequestControllerRef.current?.abort();
+      prevAoiKeyRef.current = '';
       requestIdRef.current += 1;
       setIsLoading(false);
       return;
@@ -115,30 +134,35 @@ export const useMapData = () => {
 
     if (selectedAOI && isAskAutoloadAoi(selectedAOI)) {
       console.log('selectedAOI changed:', selectedAOI);
-      const currentAoiStr = JSON.stringify(selectedAOI);
-      const prevAoiStr = JSON.stringify(prevAoiRef.current);
+      const currentAoiKey = buildAoiRequestKey(selectedAOI);
       
-      if (currentAoiStr !== prevAoiStr || !prevAoiRef.current) {
+      if (currentAoiKey !== prevAoiKeyRef.current) {
         console.log('Fetching map data for new AOI...');
-        prevAoiRef.current = selectedAOI;
+        prevAoiKeyRef.current = currentAoiKey;
         fetchMapData(selectedAOI);
       }
     } else {
-      prevAoiRef.current = null;
+      activeRequestControllerRef.current?.abort();
+      prevAoiKeyRef.current = '';
       requestIdRef.current += 1;
       setIsLoading(false);
     }
   }, [appMode, selectedAOI, fetchMapData, setIsLoading]);
 
   useEffect(() => {
+    activeRequestControllerRef.current?.abort();
     requestIdRef.current += 1;
-    prevAoiRef.current = null;
+    prevAoiKeyRef.current = '';
     setIsLoading(false);
   }, [aoiClearVersion, setIsLoading]);
 
+  useEffect(() => () => {
+    activeRequestControllerRef.current?.abort();
+  }, []);
+
   // Also refetch when dataType or yearControl changes (if grid is selected)
   useEffect(() => {
-    if (appMode === 'ask' && selectedAOI && isAskAutoloadAoi(selectedAOI) && prevAoiRef.current) {
+    if (appMode === 'ask' && selectedAOI && isAskAutoloadAoi(selectedAOI) && prevAoiKeyRef.current) {
       fetchMapData(selectedAOI);
     }
   }, [appMode, dataType, yearControl]); // eslint-disable-line react-hooks/exhaustive-deps

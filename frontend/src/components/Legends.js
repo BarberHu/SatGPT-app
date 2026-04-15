@@ -1,8 +1,8 @@
 import React from 'react';
-import { useAppContext } from '../context/AppContext';
+import { useAskContext } from '../context/AppContext';
 
 function Legends() {
-  const { layerVisibility, dataType } = useAppContext();
+  const { layerVisibility, dataType } = useAskContext();
 
   return (
     <>

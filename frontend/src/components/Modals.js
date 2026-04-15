@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppContext } from '../context/AppContext';
+import { useUiContext } from '../context/AppContext';
 import {
   helpDocuments,
   helpIntro,
@@ -8,7 +8,7 @@ import {
 } from '../content/helpContent';
 
 function Modals() {
-  const { activeModal, setActiveModal } = useAppContext();
+  const { activeModal, setActiveModal } = useUiContext();
 
   return (
     <>

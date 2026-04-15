@@ -1,8 +1,8 @@
 import React from 'react';
-import { useAppContext } from '../context/AppContext';
+import { useUiContext } from '../context/AppContext';
 
 function Spinner() {
-  const { isLoading } = useAppContext();
+  const { isLoading } = useUiContext();
 
   if (!isLoading) return null;
 

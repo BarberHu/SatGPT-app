@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useAppContext } from '../context/AppContext';
+import axios from 'axios';
+import {
+  useAgentContext,
+  useBusinessLayerContext,
+  useMapContext,
+  useUiContext,
+} from '../context/AppContext';
 import { searchLocationCandidates } from '../services/agentApi';
 import './LocationScopePicker.css';
 
@@ -73,15 +79,22 @@ function getFitPadding(dialogHeight, dialogWidth) {
 }
 
 export default function LocationScopePicker({ isOpen, onClose }) {
+  const { setWarning } = useUiContext();
+
   const {
     mapInstance,
     selectedAOI,
     setSelectedAOI,
+  } = useMapContext();
+
+  const {
     registerBusinessLayerFromAoi,
     setBusinessLayerActive,
+  } = useBusinessLayerContext();
+
+  const {
     clearAgentVisualState,
-    setWarning,
-  } = useAppContext();
+  } = useAgentContext();
 
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -91,6 +104,7 @@ export default function LocationScopePicker({ isOpen, onClose }) {
   const [previewId, setPreviewId] = useState(null);
   const previousSelectedAoiRef = useRef(null);
   const pickerRef = useRef(null);
+  const activeSearchControllerRef = useRef(null);
 
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
 
@@ -168,10 +182,13 @@ export default function LocationScopePicker({ isOpen, onClose }) {
     setPreviewId(null);
 
     try {
+      activeSearchControllerRef.current?.abort();
+      const controller = new AbortController();
+      activeSearchControllerRef.current = controller;
       const response = await searchLocationCandidates({
         query: trimmedQuery,
         limit: 5,
-      });
+      }, { signal: controller.signal });
 
       const nextCandidates = response?.data || [];
       setCandidates(nextCandidates);
@@ -184,12 +201,20 @@ export default function LocationScopePicker({ isOpen, onClose }) {
 
       previewCandidateOnMap(nextCandidates[0]);
     } catch (searchError) {
+      if (axios.isCancel(searchError) || searchError?.code === 'ERR_CANCELED') {
+        return;
+      }
       setError(searchError?.message || 'Place search failed.');
       restorePreviousSelection();
     } finally {
+      activeSearchControllerRef.current = null;
       setLoading(false);
     }
   }, [previewCandidateOnMap, query, restorePreviousSelection]);
+
+  useEffect(() => () => {
+    activeSearchControllerRef.current?.abort();
+  }, []);
 
   const toggleChecked = useCallback((candidateId) => {
     setCheckedIds((previous) => (

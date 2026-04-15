@@ -6,7 +6,13 @@ import React, {
   useState,
 } from 'react';
 import shp from 'shpjs';
-import { useAppContext } from '../context/AppContext';
+import {
+  useAgentContext,
+  useAskContext,
+  useBusinessLayerContext,
+  useMapContext,
+  useUiContext,
+} from '../context/AppContext';
 import { buildAoiFromAgentState, buildAoiFromGeoJSON } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 
@@ -52,25 +58,29 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
   const [isParsing, setIsParsing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
 
+  const { setWarning } = useUiContext();
+
   const {
     selectedAOI,
     draftAOI,
     setSelectedAOI,
     setSelectedGridCords,
-    setWarning,
-    floodAgentState,
     isAoiEditing,
+    fitAoiBoundsOnMap,
+  } = useMapContext();
+
+  const {
+    floodAgentState,
     startAoiDraw,
     startAoiEdit,
     applyDraftAoi,
     cancelDraftAoi,
-    clearAoiState,
     resetAgentSession,
-    resetAskSession,
-    registerBusinessLayerFromAoi,
     clearAgentVisualState,
-    fitAoiBoundsOnMap,
-  } = useAppContext();
+  } = useAgentContext();
+
+  const { resetAskSession } = useAskContext();
+  const { clearAoiState, registerBusinessLayerFromAoi } = useBusinessLayerContext();
 
   const effectiveAoi = selectedAOI || buildAoiFromAgentState(floodAgentState, {
     source: 'agent_geocode',

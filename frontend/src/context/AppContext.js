@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  useMemo,
+} from 'react';
 import { buildAoiFromAgentState } from '../utils/aoi';
 import {
   buildBusinessLayerRecordFromAoi,
@@ -13,6 +21,25 @@ import {
 import { syncBusinessLayers } from '../services/agentApi';
 
 const AppContext = createContext();
+const UIContext = createContext();
+const AskContext = createContext();
+const MapContext = createContext();
+const AgentContext = createContext();
+const BusinessLayerContext = createContext();
+
+const useRequiredContext = (context, hookName) => {
+  const value = useContext(context);
+  if (!value) {
+    throw new Error(`${hookName} must be used within an AppProvider`);
+  }
+  return value;
+};
+
+export const useUiContext = () => useRequiredContext(UIContext, 'useUiContext');
+export const useAskContext = () => useRequiredContext(AskContext, 'useAskContext');
+export const useMapContext = () => useRequiredContext(MapContext, 'useMapContext');
+export const useAgentContext = () => useRequiredContext(AgentContext, 'useAgentContext');
+export const useBusinessLayerContext = () => useRequiredContext(BusinessLayerContext, 'useBusinessLayerContext');
 
 export const useAppContext = () => {
   const context = useContext(AppContext);
@@ -54,12 +81,34 @@ const defaultAgentLayerVisibility = {
   agentShowLandcoverLayer: false,
 };
 
-const activateBusinessLayer = (records = [], activeId = null) =>
-  records.map((record) => ({
-    ...record,
-    is_active: Boolean(activeId && record.id === activeId),
-    updated_at: new Date().toISOString(),
-  }));
+const BUSINESS_LAYER_SYNC_DEBOUNCE_MS = 400;
+
+const activateBusinessLayer = (records = [], activeId = null) => {
+  const now = new Date().toISOString();
+
+  return records.map((record) => {
+    const nextIsActive = Boolean(activeId && record.id === activeId);
+    if (record.is_active === nextIsActive) {
+      return record;
+    }
+
+    return {
+      ...record,
+      is_active: nextIsActive,
+      updated_at: now,
+    };
+  });
+};
+
+const buildBusinessLayerSyncKey = (namespace, records = []) => (
+  `${namespace}::${records.map((record) => [
+    record?.id,
+    record?.updated_at,
+    record?.is_active ? '1' : '0',
+    record?.source,
+    record?.label,
+  ].join(':')).join('|')}`
+);
 
 export const AppProvider = ({ children }) => {
   // UI State
@@ -143,6 +192,8 @@ export const AppProvider = ({ children }) => {
   const [businessLayersReady, setBusinessLayersReady] = useState(false);
   const [agentVisualResetVersion, setAgentVisualResetVersion] = useState(0);
   const selectedAOIRef = useRef(null);
+  const businessLayerSyncTimeoutRef = useRef(null);
+  const lastBusinessLayerSyncKeyRef = useRef('');
   
   // ========== FloodAgent 闁绘鍩栭埀?(闁哄懘缂氶崗妯绘媴閹捐尐浣割嚕? ==========
   const [floodAgentState, setFloodAgentState] = useState(defaultFloodAgentState);
@@ -442,17 +493,38 @@ export const AppProvider = ({ children }) => {
       return;
     }
 
-    saveBusinessLayerRecords(agentSessionId, businessLayers).catch((error) => {
-      console.error('Failed to persist business layers to IndexedDB:', error);
-    });
+    const syncKey = buildBusinessLayerSyncKey(agentSessionId, businessLayers);
+    if (syncKey === lastBusinessLayerSyncKeyRef.current) {
+      return;
+    }
 
-    syncBusinessLayers({
-      store_key: agentSessionId,
-      store_namespace: 'business_layer_store',
-      layers: businessLayers,
-    }).catch((error) => {
-      console.error('Failed to sync business layers to backend cache:', error);
-    });
+    if (businessLayerSyncTimeoutRef.current) {
+      window.clearTimeout(businessLayerSyncTimeoutRef.current);
+    }
+
+    businessLayerSyncTimeoutRef.current = window.setTimeout(() => {
+      saveBusinessLayerRecords(agentSessionId, businessLayers).catch((error) => {
+        console.error('Failed to persist business layers to IndexedDB:', error);
+      });
+
+      syncBusinessLayers({
+        store_key: agentSessionId,
+        store_namespace: 'business_layer_store',
+        layers: businessLayers,
+      }).catch((error) => {
+        console.error('Failed to sync business layers to backend cache:', error);
+      });
+
+      lastBusinessLayerSyncKeyRef.current = syncKey;
+      businessLayerSyncTimeoutRef.current = null;
+    }, BUSINESS_LAYER_SYNC_DEBOUNCE_MS);
+
+    return () => {
+      if (businessLayerSyncTimeoutRef.current) {
+        window.clearTimeout(businessLayerSyncTimeoutRef.current);
+        businessLayerSyncTimeoutRef.current = null;
+      }
+    };
   }, [agentSessionId, businessLayers, businessLayersReady]);
 
   useEffect(() => {
@@ -673,8 +745,7 @@ export const AppProvider = ({ children }) => {
 
   const isAoiEditing = aoiEditorMode !== 'idle';
 
-  const value = {
-    // UI State
+  const uiValue = useMemo(() => ({
     isPanelVisible,
     setIsPanelVisible,
     isLoading,
@@ -685,8 +756,20 @@ export const AppProvider = ({ children }) => {
     // Modal State
     activeModal,
     setActiveModal,
-    
-    // Map State
+    appMode,
+    setAppMode,
+    chatMode,
+    setChatMode,
+  }), [
+    activeModal,
+    appMode,
+    chatMode,
+    isLoading,
+    isPanelVisible,
+    warning,
+  ]);
+
+  const mapValue = useMemo(() => ({
     mapInstance,
     setMapInstance,
     selectedGridCords,
@@ -708,8 +791,26 @@ export const AppProvider = ({ children }) => {
     setCountries,
     gridClickEnabled,
     setGridClickEnabled,
-    
-    // Layer State
+    fitAoiBoundsOnMap,
+  }), [
+    aoiClearVersion,
+    aoiEditorMode,
+    applyDraftAoi,
+    cancelDraftAoi,
+    clearAoiState,
+    countries,
+    draftAOI,
+    fitAoiBoundsOnMap,
+    gridClickEnabled,
+    isAoiEditing,
+    mapInstance,
+    selectedAOI,
+    selectedGridCords,
+    startAoiDraw,
+    startAoiEdit,
+  ]);
+
+  const askValue = useMemo(() => ({
     dataType,
     setDataType,
     yearControl,
@@ -741,12 +842,29 @@ export const AppProvider = ({ children }) => {
     layerData,
     updateLayerData,
     resetAskSession,
-    
-    // GEE Code
     geeCodeUrl,
     setGeeCodeUrl,
+  }), [
+    chatInput,
+    dataType,
+    geeCodeUrl,
+    gptResponse,
+    is3DEnabled,
+    isBuildingsEnabled,
+    isResultVisible,
+    layerData,
+    layerOpacity,
+    layerVisibility,
+    resetAskSession,
+    resultText,
+    yearControl,
+    updateLayerData,
+    toggleLayerVisibility,
+    updateLayerOpacity,
+    resetAllOpacity,
+  ]);
 
-    // Agent session + business layer inventory
+  const businessLayerValue = useMemo(() => ({
     agentSessionId,
     businessLayers,
     businessLayersReady,
@@ -761,14 +879,23 @@ export const AppProvider = ({ children }) => {
     deleteBusinessLayer,
     startNewAgentSession,
     clearAgentVisualState,
+  }), [
+    activateBusinessLayerRecord,
+    agentSessionId,
+    agentVisualResetVersion,
+    businessLayers,
+    businessLayersReady,
+    clearAgentVisualState,
+    deleteBusinessLayer,
+    fitAoiBoundsOnMap,
+    registerBusinessLayerFromAoi,
+    removeBusinessLayerRecord,
+    setBusinessLayerActive,
+    startNewAgentSession,
+    upsertBusinessLayerRecord,
+  ]);
 
-    // App Mode (ask/agent)
-    appMode,
-    setAppMode,
-    chatMode,
-    setChatMode,
-    
-    // FloodAgent State
+  const agentValue = useMemo(() => ({
     floodAgentState,
     setFloodAgentState,
     updateFloodAgentField,
@@ -806,11 +933,51 @@ export const AppProvider = ({ children }) => {
     setAgentLayerLoading,
     agentTileError,
     setAgentTileError,
-  };
+    clearAgentVisualState,
+  }), [
+    agentImagery,
+    agentImageryLoading,
+    agentImpactData,
+    agentImpactLoading,
+    agentLayerLoading,
+    agentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
+    agentSelectedPeriod,
+    agentSelectedType,
+    agentShowFloodDetection,
+    agentShowLandcoverLayer,
+    agentShowPopulationLayer,
+    agentShowUrbanLayer,
+    agentTileError,
+    agentTileLoading,
+    clearAgentVisualState,
+    floodAgentState,
+    resetAgentSession,
+    resetFloodAgentState,
+    updateFloodAgentField,
+  ]);
+
+  const appValue = useMemo(() => ({
+    ...uiValue,
+    ...mapValue,
+    ...askValue,
+    ...businessLayerValue,
+    ...agentValue,
+  }), [agentValue, askValue, businessLayerValue, mapValue, uiValue]);
 
   return (
-    <AppContext.Provider value={value}>
-      {children}
+    <AppContext.Provider value={appValue}>
+      <UIContext.Provider value={uiValue}>
+        <AskContext.Provider value={askValue}>
+          <MapContext.Provider value={mapValue}>
+            <BusinessLayerContext.Provider value={businessLayerValue}>
+              <AgentContext.Provider value={agentValue}>
+                {children}
+              </AgentContext.Provider>
+            </BusinessLayerContext.Provider>
+          </MapContext.Provider>
+        </AskContext.Provider>
+      </UIContext.Provider>
     </AppContext.Provider>
   );
 };
