@@ -84,7 +84,7 @@ export const AppProvider = ({ children }) => {
   const [aoiEditorMode, setAoiEditorMode] = useState('idle');
   const [aoiClearVersion, setAoiClearVersion] = useState(0);
   const [countries, setCountries] = useState({});
-  const [gridClickEnabled, setGridClickEnabled] = useState(true);
+  const [gridClickEnabled, setGridClickEnabled] = useState(false);
   
   // Layer State
   const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot', 'waterRegimeChange'
