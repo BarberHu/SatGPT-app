@@ -246,6 +246,23 @@ function MapContainer() {
   }, [gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
 
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || !map.getLayer('grid_cell-layer')) {
+      return;
+    }
+
+    map.setLayoutProperty(
+      'grid_cell-layer',
+      'visibility',
+      gridClickEnabled ? 'visible' : 'none'
+    );
+
+    if (!gridClickEnabled) {
+      map.getCanvas().style.cursor = '';
+    }
+  }, [gridClickEnabled]);
+
+  useEffect(() => {
     isAoiEditingRef.current = isAoiEditing;
   }, [isAoiEditing]);
 
@@ -390,6 +407,9 @@ function MapContainer() {
       id: 'grid_cell-layer',
       type: 'fill',
       source: 'grid_cell',
+      layout: {
+        visibility: gridClickEnabledRef.current ? 'visible' : 'none',
+      },
       paint: {
         'fill-color': 'transparent',
         'fill-opacity': 1,
