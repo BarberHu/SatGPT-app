@@ -1,0 +1,217 @@
+.location-scope-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  pointer-events: none;
+}
+
+.location-scope-picker {
+  position: absolute;
+  top: 88px;
+  right: 96px;
+  width: min(420px, calc(100vw - 140px));
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.location-scope-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.location-scope-picker-title {
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.location-scope-picker-subtitle {
+  margin-top: 4px;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.location-scope-picker-close {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  cursor: pointer;
+}
+
+.location-scope-picker-search {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.location-scope-picker-input {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.location-scope-picker-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.location-scope-picker-search-btn,
+.location-scope-picker-action {
+  height: 40px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.location-scope-picker-search-btn {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+}
+
+.location-scope-picker-search-btn:disabled,
+.location-scope-picker-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.location-scope-picker-feedback {
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.location-scope-picker-feedback.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.location-scope-picker-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.location-scope-candidate {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid #dbe4ee;
+  background: #f8fafc;
+}
+
+.location-scope-candidate.previewing {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+}
+
+.location-scope-candidate-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-scope-candidate-title {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.location-scope-candidate-meta {
+  color: #64748b;
+  font-size: 10px;
+  text-transform: lowercase;
+}
+
+.location-scope-candidate-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.location-scope-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.location-scope-picker-action.secondary {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.location-scope-picker-action.primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .location-scope-picker-overlay {
+    pointer-events: auto;
+  }
+
+  .location-scope-picker {
+    position: fixed;
+    top: auto;
+    right: 16px;
+    left: 16px;
+    bottom: 16px;
+    width: auto;
+    max-height: calc(100vh - 32px);
+    padding: 16px;
+  }
+
+  .location-scope-picker-search {
+    flex-direction: column;
+  }
+
+  .location-scope-candidate {
+    grid-template-columns: 1fr;
+  }
+
+  .location-scope-picker-actions {
+    flex-direction: column-reverse;
+  }
+}

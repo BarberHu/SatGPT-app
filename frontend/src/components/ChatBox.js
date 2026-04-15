@@ -12,6 +12,8 @@ import { CopilotChat } from "@copilotkit/react-ui";
 import { useCopilotContext } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 import { trackUxEvent } from '../utils/analytics';
+import AgentChatInput from './AgentChatInput';
+import AgentUserMessage from './AgentUserMessage';
 
 const SUGGESTIONS = [
   'Tell me about the 2010 Bangkok floods',
@@ -30,6 +32,15 @@ const SUGGESTIONS_REGIME_CHANGE = [
   'Diagnose historical water regime transitions in the Nile Delta',
   'Map permanent and seasonal water changes for this AOI',
 ];
+
+const AGENT_MENTION_INSTRUCTIONS = `
+If the user's message contains a metadata block wrapped by <<SATGPT_MENTION_CONTEXT>> and <<END_SATGPT_MENTION_CONTEXT>>, parse that JSON first.
+Treat it as authoritative metadata for the spatial scope the user explicitly referenced in the text.
+The metadata only provides lightweight ids, labels, types, and sources. Do not treat it as raw geometry or as the full dataset payload.
+For spatial execution, only trust explicit uploaded or drawn scope mentions that resolve from the synced business layer store.
+If no explicit spatial mention is present, ask the user to provide one instead of silently falling back to a location-derived boundary.
+When you explain your reasoning, refer to the visible @label the user typed, but do not expose the raw metadata block back to the user unless they explicitly ask for it.
+`;
 
 function ChatBox() {
   const {
@@ -51,6 +62,7 @@ function ChatBox() {
     setChatMode,
     setAppMode,
     resetAgentSession,
+    startNewAgentSession,
   } = useAppContext();
 
   const { setThreadId } = useCopilotContext();
@@ -58,13 +70,19 @@ function ChatBox() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [agentExpanded, setAgentExpanded] = useState(true);
+  const [agentExpanded, setAgentExpanded] = useState(false);
 
   const handleNewChat = () => {
     const newId = crypto.randomUUID();
     setThreadId(newId);
+    startNewAgentSession({ preserveSelectedAoi: true });
     resetAgentSession({ preserveSelectedAoi: true });
+    setAgentExpanded(false);
     trackUxEvent('agent_new_chat', { mode: chatMode });
+  };
+
+  const openAgentPanel = () => {
+    setAgentExpanded(true);
   };
 
   const suggestions =
@@ -213,26 +231,34 @@ function ChatBox() {
     setAppMode(mode);
     setChatInput('');
     setError('');
+    if (mode === 'agent') {
+      setAgentExpanded(false);
+    }
   };
 
   if (chatMode === 'agent') {
     return (
       <div className="chat-box chat-box-gemini">
-        <div
-          className="expand-handle"
-          onClick={() => setAgentExpanded(!agentExpanded)}
-          title={agentExpanded ? 'Collapse' : 'Expand'}
-        >
-          <div className="handle-bar"></div>
-          <i className={`fa fa-chevron-${agentExpanded ? 'down' : 'up'}`}></i>
-        </div>
+        {agentExpanded && (
+          <div
+            className="expand-handle"
+            onClick={() => setAgentExpanded(false)}
+            title="Collapse"
+          >
+            <div className="handle-pill">
+              <div className="handle-bar"></div>
+              <i className="fa fa-chevron-down"></i>
+            </div>
+          </div>
+        )}
 
         {agentExpanded && (
           <div className="chat-main-area">
             <CopilotChat
+              instructions={AGENT_MENTION_INSTRUCTIONS}
               labels={{
                 title: "Flood Analysis Agent",
-                initial: "Hello! I'm the flood event analysis assistant. Which flood event would you like to analyze?",
+                initial: "Describe a flood event, then type @ to attach an uploaded or drawn spatial scope.",
                 placeholder: "Enter flood event information...",
               }}
               suggestions={[
@@ -250,6 +276,8 @@ function ChatBox() {
                 },
               ]}
               className="copilot-chat-full"
+              Input={AgentChatInput}
+              UserMessage={AgentUserMessage}
               onError={(copilotError) => {
                 if (
                   copilotError?.message?.includes('aborted') ||
@@ -261,6 +289,30 @@ function ChatBox() {
                 console.error('Chat error:', copilotError);
               }}
             />
+          </div>
+        )}
+
+        {!agentExpanded && (
+          <div className="chat-main-area agent-collapsed-area">
+            <div className="agent-collapsed-shell">
+              <button
+                type="button"
+                className="agent-collapsed-entry"
+                onClick={openAgentPanel}
+              >
+                <span className="agent-collapsed-placeholder">
+                  Enter flood event information...
+                </span>
+              </button>
+              <button
+                type="button"
+                className="agent-collapsed-send"
+                onClick={openAgentPanel}
+                aria-label="Open agent panel"
+              >
+                <i className="fa fa-paper-plane"></i>
+              </button>
+            </div>
           </div>
         )}
 
@@ -301,40 +353,168 @@ function ChatBox() {
           .chat-main-area {
             flex: 1;
             min-height: 0;
+            position: relative;
+          }
+          .chat-main-area.agent-collapsed-area {
+            display: flex;
+            align-items: center;
+            padding: 10px 16px 2px;
+          }
+          .agent-collapsed-shell {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+          }
+          .agent-collapsed-entry {
+            flex: 1;
+            min-height: 52px;
+            display: flex;
+            align-items: center;
+            padding: 0 18px;
+            border: none;
+            border-radius: 999px;
+            background: transparent;
+            color: inherit;
+            text-align: left;
+            cursor: pointer;
+          }
+          .agent-collapsed-placeholder {
+            color: #999;
+            font-size: 15px;
+          }
+          .agent-collapsed-send {
+            width: 42px;
+            height: 42px;
+            border: none;
+            background: #4a90d9;
+            color: #ffffff;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            transition: all 0.2s ease;
+          }
+          .agent-collapsed-send:hover {
+            background: #5a9fe9;
+            transform: scale(1.04);
           }
           .copilot-chat-full {
             height: 100%;
             min-height: 180px;
-            max-height: 480px;
-            background: #fafafa;
+            max-height: 440px;
+            background: transparent;
+          }
+          .chat-box-gemini .copilotKitChat,
+          .chat-box-gemini .copilotKitMessages {
+            background: transparent;
+            color: #0f172a;
+          }
+          .chat-box-gemini .copilotKitMessagesContainer {
+            padding: 10px 16px 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          .chat-box-gemini .copilotKitMessagesFooter {
+            width: calc(100% - 32px);
+            padding: 2px 0 6px;
+            margin: 0 auto;
+            background: transparent;
+          }
+          .chat-box-gemini .copilotKitMessage {
+            max-width: 94%;
+            border-radius: 14px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            font-size: 14px;
+            line-height: 1.6;
+          }
+          .chat-box-gemini .copilotKitMessage.copilotKitAssistantMessage {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            color: #1f2937;
+            padding: 4px 0;
+            margin-bottom: 4px;
+          }
+          .chat-box-gemini .copilotKitMessage.copilotKitAssistantMessage .copilotKitMessageControls {
+            display: none !important;
+          }
+          .chat-box-gemini .copilotKitMessageControls.currentMessage,
+          .chat-box-gemini .copilotKitMessage.copilotKitAssistantMessage:hover .copilotKitMessageControls {
+            display: none !important;
+            opacity: 0 !important;
+          }
+          .chat-box-gemini .copilotKitMessage.copilotKitUserMessage {
+            background: #4a90d9;
+            border: none;
+            box-shadow: none;
+            color: #ffffff;
+          }
+          .chat-box-gemini .copilotKitMessages footer h6 {
+            margin: 0 0 6px;
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            text-transform: none;
+          }
+          .chat-box-gemini .copilotKitMessages footer .suggestions {
+            gap: 8px;
+          }
+          .chat-box-gemini .copilotKitMessages footer .suggestions .suggestion {
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid #d6dbe4;
+            background: #ffffff;
+            color: #475569;
+            box-shadow: none;
+            font-size: 12px;
+          }
+          .chat-box-gemini .copilotKitMessages footer .suggestions button:not(:disabled):hover .suggestion,
+          .chat-box-gemini .copilotKitMessages footer .suggestions .suggestion:hover {
+            transform: none;
+            border-color: #bfd2eb;
+            background: #f7fbff;
+            color: #3b6ea5;
           }
           .expand-handle {
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 6px 0;
+            padding: 8px 0 2px;
             cursor: pointer;
-            background: #f8f8f8;
-            transition: background 0.2s;
-            gap: 2px;
+            background: transparent;
           }
-          .expand-handle:hover {
-            background: #f0f0f0;
+          .handle-pill {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            padding: 3px 12px 1px;
+            border-radius: 999px;
+            transition: background 0.2s ease;
+          }
+          .expand-handle:hover .handle-pill {
+            background: #f6f8fb;
           }
           .handle-bar {
-            width: 32px;
+            width: 34px;
             height: 4px;
-            background: #d0d0d0;
-            border-radius: 2px;
-            transition: background 0.2s;
+            background: #cbd5e1;
+            border-radius: 999px;
+            transition: background 0.2s ease, transform 0.2s ease;
           }
           .expand-handle:hover .handle-bar {
-            background: #bbb;
+            background: #94a3b8;
+            transform: scaleX(1.04);
           }
-          .expand-handle i {
-            color: #999;
-            font-size: 10px;
+          .handle-pill i {
+            color: #94a3b8;
+            font-size: 11px;
             line-height: 1;
           }
           .chat-bottom-toolbar {
@@ -343,8 +523,10 @@ function ChatBox() {
             align-items: center;
             padding: 4px 8px;
             margin: 0 8px 6px 8px;
-            background: #f5f5f5;
+            background: transparent;
+            border: none;
             border-radius: 20px;
+            box-shadow: none;
           }
           .toolbar-left, .toolbar-right {
             display: flex;
@@ -368,6 +550,7 @@ function ChatBox() {
           .toolbar-icon-btn:hover {
             background: #e8e8e8;
             color: #333;
+            box-shadow: none;
           }
           .mode-toggle {
             display: flex;
@@ -376,6 +559,7 @@ function ChatBox() {
             border-radius: 16px;
             padding: 2px;
             gap: 0;
+            border: none;
           }
           .mode-toggle-btn {
             padding: 4px 14px;
@@ -536,7 +720,7 @@ function ChatBox() {
           align-items: center;
           padding: 4px 8px;
           margin: 0 8px 6px 8px;
-          background: #f5f5f5;
+          background: transparent;
           border-radius: 20px;
         }
         .toolbar-left, .toolbar-right {

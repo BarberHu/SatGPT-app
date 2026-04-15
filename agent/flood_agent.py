@@ -30,6 +30,7 @@ from prompts import SYSTEM_PROMPT, FLOOD_REPORT_TEMPLATE, REPORT_GENERATION_PROM
 from gee_code_generator import generate_flood_gee_code
 from flood_aoi import aoi_to_legacy_fields
 from flood_dataset_service import build_confirmation_context
+from mention_context import resolve_mention_context
 
 load_dotenv()
 
@@ -174,6 +175,13 @@ Please return strictly in the following JSON format, do not include any other te
     except Exception as e:
         print(f"❌ LLM生成GeoJSON失败: {e}")
         return None
+
+
+def _get_latest_user_message_content(messages: list[Any]) -> Optional[str]:
+    for message in reversed(messages or []):
+        if isinstance(message, HumanMessage):
+            return str(message.content)
+    return None
 
 
 def _get_location_from_nominatim(location_name: str) -> Optional[Dict[str, Any]]:
@@ -565,6 +573,9 @@ async def entry_node(
                 "confirmed_aoi": None,
                 "recommended_layers": [],
                 "selected_layer_ids": [],
+                "mentioned_layer_refs": [],
+                "mentioned_aoi": None,
+                "mentioned_aoi_source": None,
                 "confirmation_version": 0,
                 "geo_data": None,
                 "search_sources": [],
@@ -700,6 +711,12 @@ async def extraction_node(
 async def pre_confirmation_node(
     state: FloodAgentState, config: RunnableConfig
 ) -> Command[NodeType]:
+    latest_user_message = _get_latest_user_message_content(state.get("messages", []))
+    mention_context = resolve_mention_context(
+        latest_user_message,
+        thread_id=(state.get("copilotkit") or {}).get("threadId"),
+    )
+
     confirmation_context = build_confirmation_context(
         event=state.get("event"),
         event_description=state.get("event_description"),
@@ -707,6 +724,7 @@ async def pre_confirmation_node(
         pre_date=state.get("pre_date"),
         peek_date=state.get("peek_date"),
         after_date=state.get("after_date"),
+        mention_context=mention_context,
         confirmation_version=(state.get("confirmation_version") or 0) + 1,
     )
 
@@ -723,6 +741,10 @@ async def pre_confirmation_node(
             "bounds": confirmation_context.get("bounds"),
             "geojson": confirmation_context.get("geojson"),
             "geo_data": confirmation_context.get("geo_data"),
+            "location": confirmation_context.get("location"),
+            "mentioned_layer_refs": confirmation_context.get("mentioned_layer_refs", []),
+            "mentioned_aoi": confirmation_context.get("mentioned_aoi"),
+            "mentioned_aoi_source": confirmation_context.get("mentioned_aoi_source"),
         }
     )
 
@@ -750,6 +772,9 @@ async def confirmation_node(
     selected_layer_ids = state.get("selected_layer_ids") or []
     confirmed_aoi = state.get("confirmed_aoi") or resolved_aoi
     confirmation_version = state.get("confirmation_version") or 1
+    mentioned_layer_refs = state.get("mentioned_layer_refs") or []
+    mentioned_aoi = state.get("mentioned_aoi")
+    mentioned_aoi_source = state.get("mentioned_aoi_source")
     
     # 使用 interrupt 暂停执行，等待用户确认
     confirmed_data_raw = interrupt({
@@ -768,6 +793,9 @@ async def confirmation_node(
             "selected_layer_ids": selected_layer_ids,
             "confirmed_aoi": confirmed_aoi,
             "confirmation_version": confirmation_version,
+            "mentioned_layer_refs": mentioned_layer_refs,
+            "mentioned_aoi": mentioned_aoi,
+            "mentioned_aoi_source": mentioned_aoi_source,
         }
     })
     
@@ -790,6 +818,9 @@ async def confirmation_node(
                 "messages": cancel_message,
                 "stage": "initial",
                 "user_confirmed": False,
+                "mentioned_layer_refs": [],
+                "mentioned_aoi": None,
+                "mentioned_aoi_source": None,
             }
         )
     
@@ -811,6 +842,9 @@ async def confirmation_node(
             "selected_layer_ids": confirmed_data.get("selected_layer_ids", selected_layer_ids),
             "confirmed_aoi": confirmed_data.get("confirmed_aoi", confirmed_aoi),
             "confirmation_version": confirmed_data.get("confirmation_version", confirmation_version),
+            "mentioned_layer_refs": confirmed_data.get("mentioned_layer_refs", mentioned_layer_refs),
+            "mentioned_aoi": confirmed_data.get("mentioned_aoi", mentioned_aoi),
+            "mentioned_aoi_source": confirmed_data.get("mentioned_aoi_source", mentioned_aoi_source),
             "stage": "confirmed",
             "user_confirmed": True,
         }
@@ -970,6 +1004,9 @@ This flood event has caused certain impacts. Further information collection is n
             "confirmed_aoi": confirmed_aoi,
             "recommended_layers": state.get("recommended_layers") or [],
             "selected_layer_ids": state.get("selected_layer_ids") or [],
+            "mentioned_layer_refs": state.get("mentioned_layer_refs") or [],
+            "mentioned_aoi": state.get("mentioned_aoi"),
+            "mentioned_aoi_source": state.get("mentioned_aoi_source"),
             "confirmation_version": state.get("confirmation_version") or 1,
             "geo_data": geo_data,
             "search_sources": search_sources,

@@ -101,7 +101,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
       });
 
       if (!result?.success) {
-        throw new Error('Boundary refresh failed.');
+        throw new Error('Spatial scope refresh failed.');
       }
 
       const nextData = result.data;
@@ -114,7 +114,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
       setIsAoiStale(false);
       previousLocationRef.current = nextData.location || formData.location || '';
     } catch (error) {
-      setRefreshError(error?.message || 'Failed to refresh boundary.');
+      setRefreshError(error?.message || 'Failed to refresh spatial scope.');
     } finally {
       setIsRefreshing(false);
     }
@@ -149,7 +149,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
           <div className="confirmation-header">
             <div className="confirmation-header-main">
               <Info size={22} className="header-icon" />
-              <span>{message || 'Confirm the flood event, boundary, and recommended datasets'}</span>
+              <span>{message || 'Confirm the flood event, spatial scope, and recommended datasets'}</span>
             </div>
             <button
               className="edit-toggle"
@@ -232,12 +232,12 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
             </section>
 
             <section className="confirmation-panel">
-              <div className="panel-title">Boundary</div>
+              <div className="panel-title">Spatial Scope</div>
 
               <div className="aoi-status-card">
                 <div className="aoi-status-row">
                   <span>Status</span>
-                  <strong>{formData.aoi_resolution_meta?.status || 'Boundary pending'}</strong>
+                  <strong>{formData.aoi_resolution_meta?.status || 'Scope pending'}</strong>
                 </div>
                 <div className="aoi-status-row">
                   <span>Source</span>
@@ -258,7 +258,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
 
               {isAoiStale && (
                 <div className="confirmation-banner warning">
-                  Boundary is stale because the location text changed. Re-resolve or update the AOI before confirming.
+                  The scope is stale because the location text changed. Re-resolve or update it before confirming.
                 </div>
               )}
               {refreshError && (
@@ -275,7 +275,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
                   disabled={isRefreshing}
                 >
                   {isRefreshing ? <Loader2 size={14} className="spin" /> : <RefreshCcw size={14} />}
-                  Re-resolve boundary
+                  Re-resolve scope
                 </button>
               </div>
 

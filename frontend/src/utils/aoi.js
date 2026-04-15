@@ -1,4 +1,8 @@
 const AOI_VERSION = 1;
+const createAoiId = () =>
+  (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : `aoi-${Date.now()}`;
 
 const isCoordinatePair = (value) =>
   Array.isArray(value) &&
@@ -38,6 +42,26 @@ export const getBoundsFromRing = (coordinates = []) => {
     south: Math.min(...lats),
     east: Math.max(...lngs),
     north: Math.max(...lats),
+  };
+};
+
+export const getCenterFromBounds = (bounds) => {
+  if (!bounds) {
+    return null;
+  }
+
+  const west = Number(bounds.west);
+  const south = Number(bounds.south);
+  const east = Number(bounds.east);
+  const north = Number(bounds.north);
+
+  if (![west, south, east, north].every(Number.isFinite)) {
+    return null;
+  }
+
+  return {
+    lng: (west + east) / 2,
+    lat: (south + north) / 2,
   };
 };
 
@@ -162,6 +186,7 @@ export const getBoundsFromGeometry = (geometry) => {
 export const buildAoiFromGeoJSON = (input, overrides = {}) => {
   const geometry = normalizeGeoJSONGeometry(input);
   const bounds = getBoundsFromGeometry(geometry);
+  const center = getCenterFromBounds(bounds);
 
   if (!geometry || !bounds) {
     return null;
@@ -169,15 +194,23 @@ export const buildAoiFromGeoJSON = (input, overrides = {}) => {
 
   return {
     version: AOI_VERSION,
+    id: Object.prototype.hasOwnProperty.call(overrides, 'id')
+      ? overrides.id
+      : (overrides.generateId === false ? null : createAoiId()),
     source: overrides.source || 'upload',
     kind: geometry.type === 'MultiPolygon' ? 'multipolygon' : 'polygon',
-    label: overrides.label || 'Uploaded boundary',
+    label: overrides.label || 'Uploaded scope',
     bounds,
+    center,
+    created_at: overrides.created_at || null,
+    updated_at: overrides.updated_at || null,
+    origin: overrides.origin || null,
     geojson: {
       type: 'Feature',
       properties: {
+        id: overrides.id || null,
         source: overrides.source || 'upload',
-        label: overrides.label || 'Uploaded boundary',
+        label: overrides.label || 'Uploaded scope',
       },
       geometry,
     },
@@ -212,8 +245,9 @@ export const buildAoiFromDrawFeatures = (features = [], overrides = {}) => {
   }
 
   return buildAoiFromGeoJSON(collection, {
+    id: overrides.id,
     source: overrides.source || 'draw',
-    label: overrides.label || 'Drawn boundary',
+    label: overrides.label || 'Drawn scope',
   });
 };
 
@@ -262,8 +296,9 @@ export const buildAoiFromDrawFeatureLegacy = (feature, overrides = {}) => {
       geometry,
     },
     {
+      id: overrides.id,
       source: overrides.source || 'draw',
-      label: overrides.label || 'Drawn boundary',
+      label: overrides.label || 'Drawn scope',
     }
   );
 };
@@ -289,28 +324,44 @@ export const buildAoiFromBounds = (bounds, overrides = {}) => {
 
   return buildAoiFromGridSelection(ring, {
     source: overrides.source || 'bounds',
-    label: overrides.label || 'Bounding box AOI',
+    label: overrides.label || 'Bounding box scope',
   });
 };
 
 export const buildAoiFromGridSelection = (coordinates, overrides = {}) => {
   const ring = closePolygonRing(coordinates);
   const bounds = getBoundsFromRing(ring);
+  const center = getCenterFromBounds(bounds);
 
   if (!ring.length || !bounds) {
     return null;
   }
 
+  const source = overrides.source || 'fishnet';
+  const id = Object.prototype.hasOwnProperty.call(overrides, 'id')
+    ? overrides.id
+    : createAoiId();
+  const createdAt = overrides.created_at || new Date().toISOString();
+  const updatedAt = overrides.updated_at || createdAt;
+  const origin = overrides.origin || (source === 'bounds' ? 'draw' : source);
+
   return {
     version: AOI_VERSION,
-    source: overrides.source || 'fishnet',
+    id,
+    source,
     kind: 'polygon',
     label: overrides.label || 'Fishnet selection',
     bounds,
+    center,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    origin,
     geojson: {
       type: 'Feature',
       properties: {
-        source: overrides.source || 'fishnet',
+        id,
+        source,
+        label: overrides.label || 'Fishnet selection',
       },
       geometry: {
         type: 'Polygon',
@@ -347,8 +398,9 @@ export const buildAoiFromAgentState = (state, overrides = {}) => {
 
   if (state.geojson) {
     return buildAoiFromGeoJSON(state.geojson, {
+      generateId: false,
       source: overrides.source || 'agent_geocode',
-      label: overrides.label || state.location || 'Agent-derived boundary',
+      label: overrides.label || state.location || 'Agent-derived scope',
     });
   }
 
@@ -405,10 +457,10 @@ export const getAoiGeometry = (aoi) => {
 export const getAoiLabel = (aoi) => {
   const parsed = parseSerializedAoi(aoi);
   if (!parsed) {
-    return 'No AOI selected';
+    return 'No spatial scope selected';
   }
 
-  return parsed.label || parsed.geojson?.properties?.label || parsed.source || 'AOI selected';
+  return parsed.label || parsed.geojson?.properties?.label || parsed.source || 'Spatial scope selected';
 };
 
 export const buildAskMapRequestParams = (aoi, extraParams = {}) => {

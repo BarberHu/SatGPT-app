@@ -11,10 +11,18 @@ import { useCoAgent, useLangGraphInterrupt, useCopilotMessagesContext } from "@c
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import SourcesDrawer from './SourcesDrawer';
+import CatalogLayerPanel from './CatalogLayerPanel';
+import LocationScopePicker from './LocationScopePicker';
 import AoiUploadPanel from './AoiUploadPanel';
 import { getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
 import { buildAoiFromAgentState } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
+import { extractVisibleMessageText } from '../utils/mentionUtils';
+import {
+  buildVisibleCatalogLegendEntries,
+  sortCatalogLayers,
+} from '../utils/catalogLayers';
+import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 import './AgentPanel.css';
 
 // FloodAgent 默认状态
@@ -50,165 +58,19 @@ const buildRecommendedLayerContextKey = (state, aoi) => JSON.stringify({
   geojson: aoi?.geojson?.geometry || aoi?.geojson || null,
 });
 
-const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
-
-const normalizeLegendColor = (value) => {
-  if (!value || typeof value !== 'string') {
-    return '#0ea5e9';
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '#0ea5e9';
-  }
-
-  if (trimmed.startsWith('#') || /^[a-z]+$/i.test(trimmed)) {
-    return trimmed;
-  }
-
-  if (/^[0-9a-f]{3,8}$/i.test(trimmed)) {
-    return `#${trimmed}`;
-  }
-
-  return trimmed;
-};
-
-const buildRecommendedLegendModel = (descriptor, fallbackTitle) => {
-  if (!descriptor) {
-    return null;
-  }
-
-  const legend = descriptor.legend || {};
-  const visRecipe = descriptor.vis_recipe || {};
-  const legendSpec = descriptor.source_meta?.legend_spec || descriptor.legend_spec || null;
-  const fallbackLabel = legend.label || descriptor.source_meta?.title || fallbackTitle || 'Recommended layer';
-
-  if (legendSpec?.type === 'categorical' && Array.isArray(legendSpec.items)) {
-    return {
-      type: 'classes',
-      label: legendSpec.label || fallbackLabel,
-      items: legendSpec.items.map((item) => ({
-        ...item,
-        color: normalizeLegendColor(item.color),
-      })),
-    };
-  }
-
-  if (legendSpec?.type === 'continuous' && Array.isArray(legendSpec.palette) && legendSpec.palette.length) {
-    return {
-      type: 'palette',
-      label: legendSpec.label || fallbackLabel,
-      palette: legendSpec.palette.map(normalizeLegendColor),
-      min: legendSpec.min,
-      max: legendSpec.max,
-    };
-  }
-
-  if (legendSpec?.type === 'vector' && legendSpec.style) {
-    return {
-      type: 'solid',
-      label: legendSpec.label || fallbackLabel,
-      color: normalizeLegendColor(legendSpec.style.color || legendSpec.style.fillColor),
-    };
-  }
-
-  if (legendSpec?.type === 'text') {
-    return {
-      type: 'text',
-      label: legendSpec.label || fallbackLabel,
-    };
-  }
-
-  if (Array.isArray(legend.palette) && legend.palette.length) {
-    return {
-      type: 'palette',
-      label: fallbackLabel,
-      palette: legend.palette.map(normalizeLegendColor),
-      min: legend.min,
-      max: legend.max,
-    };
-  }
-
-  const solidColor =
-    visRecipe?.style?.color
-    || visRecipe?.style?.fillColor
-    || (Array.isArray(visRecipe?.palette) && visRecipe.palette[visRecipe.palette.length - 1])
-    || '#0ea5e9';
-
-  return {
-    type: 'solid',
-    label: fallbackLabel,
-    color: normalizeLegendColor(solidColor),
-  };
-};
-
-function RecommendedLegendPreview({ legendModel }) {
-  if (!legendModel) {
-    return null;
-  }
-
-  if (legendModel.type === 'text') {
-    return (
-      <div className="recommended-legend-preview text-only">
-        <div className="recommended-legend-meta">
-          <span className="recommended-legend-label">{legendModel.label}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (legendModel.type === 'classes') {
-    return (
-      <div className="recommended-legend-preview classes">
-        <div className="recommended-legend-class-row">
-          {legendModel.items.map((item) => (
-            <div className="recommended-legend-class-chip" key={`${legendModel.label}-${item.value}`}>
-              <span
-                className="recommended-legend-class-color"
-                style={{ backgroundColor: item.color }}
-              />
-              <span className="recommended-legend-class-text">{item.value}</span>
-            </div>
-          ))}
-        </div>
-        <div className="recommended-legend-meta">
-          <span className="recommended-legend-range">{legendModel.label}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (legendModel.type === 'palette') {
-    return (
-      <div className="recommended-legend-preview">
-        <div
-          className="recommended-legend-swatch gradient"
-          style={{
-            backgroundImage: `linear-gradient(90deg, ${legendModel.palette.join(', ')})`,
-          }}
-        />
-        <div className="recommended-legend-meta">
-          <span className="recommended-legend-label">{legendModel.label}</span>
-          {(legendModel.min !== undefined && legendModel.max !== undefined) ? (
-            <span className="recommended-legend-range">{legendModel.min} - {legendModel.max}</span>
-          ) : null}
-        </div>
-      </div>
-    );
+const areAoiScopesEquivalent = (left, right) => {
+  if (!left?.geojson || !right?.geojson) {
+    return false;
   }
 
   return (
-    <div className="recommended-legend-preview">
-      <div
-        className="recommended-legend-swatch solid"
-        style={{ backgroundColor: legendModel.color }}
-      />
-      <div className="recommended-legend-meta">
-        <span className="recommended-legend-label">{legendModel.label}</span>
-      </div>
-    </div>
+    JSON.stringify(left.bounds || null) === JSON.stringify(right.bounds || null)
+    && JSON.stringify(left.geojson?.geometry || left.geojson || null)
+      === JSON.stringify(right.geojson?.geometry || right.geojson || null)
   );
-}
+};
+
+const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
 
 // Download report as Markdown file
 function downloadReport(report, eventName) {
@@ -643,7 +505,6 @@ function AgentPanel() {
   const { 
     setFloodAgentState, 
     floodAgentState,
-    selectedAOI,
     setWarning,
     setAgentImagery,
     setAgentImageryLoading,
@@ -674,6 +535,10 @@ function AgentPanel() {
     setAgentLayerLoading,
     agentTileError,
     setAgentTileError,
+    businessLayers,
+    selectedAOI,
+    activateBusinessLayerRecord,
+    deleteBusinessLayer,
   } = useAppContext();
   
   // Get chat messages from CopilotKit (with safety check)
@@ -682,12 +547,15 @@ function AgentPanel() {
   
   // Local UI state (for section expansion only)
   const [sourcesDrawerOpen, setSourcesDrawerOpen] = useState(false);
+  const [locationScopePickerOpen, setLocationScopePickerOpen] = useState(false);
+  const uploadPanelRef = useRef(null);
   const [expandedSections, setExpandedSections] = useState({
     event: true,
     dates: false,
     imagery: false,
     layers: false,
     impact: false,
+    spatialScope: true,
     chatHistory: false,
   });
 
@@ -707,12 +575,27 @@ function AgentPanel() {
   }, [state, setFloodAgentState]);
 
   const currentState = state || floodAgentState;
-  const effectiveAoi = selectedAOI || buildAoiFromAgentState(currentState, {
+  const agentDerivedAoi = buildAoiFromAgentState(currentState, {
     source: 'agent_geocode',
-    label: currentState.location || 'Agent-derived boundary',
+    label: currentState.location || 'Agent-derived scope',
   });
+  const selectedBusinessScope = isBusinessLayerAoiSource(selectedAOI?.source) ? selectedAOI : null;
+  const analysisScopeMatchesSelection = selectedBusinessScope
+    ? areAoiScopesEquivalent(selectedBusinessScope, agentDerivedAoi)
+    : true;
+  const hasResolvedAnalysisContext = Boolean(
+    currentState?.event
+    && currentState?.pre_date
+    && currentState?.peek_date
+    && currentState?.after_date
+    && (agentDerivedAoi || currentState?.coordinates)
+  );
+  const analysisDisplayEnabled = hasResolvedAnalysisContext && analysisScopeMatchesSelection;
+  const effectiveAoi = analysisDisplayEnabled ? agentDerivedAoi : null;
   const recommendedCatalogLayers = useMemo(
-    () => (currentState.recommended_layers || []).filter((layer) => layer.layer_family === 'catalog'),
+    () => sortCatalogLayers(
+      (currentState.recommended_layers || []).filter((layer) => layer.layer_family === 'catalog')
+    ),
     [currentState.recommended_layers]
   );
   const confirmedRecommendedCatalogLayers = useMemo(() => {
@@ -721,20 +604,29 @@ function AgentPanel() {
   }, [currentState.selected_layer_ids, recommendedCatalogLayers]);
   const recommendedLayerContextKey = buildRecommendedLayerContextKey(currentState, effectiveAoi);
   const recommendedLegendEntries = useMemo(
-    () => confirmedRecommendedCatalogLayers
-      .filter((layer) => agentRecommendedLayerVisibility[layer.id])
-      .map((layer) => ({
-        id: layer.id,
-        title: layer.title,
-        descriptor: agentRecommendedLayerData?.[layer.id] || null,
-        legendModel: buildRecommendedLegendModel(agentRecommendedLayerData?.[layer.id], layer.title),
-      }))
-      .filter((item) => item.descriptor?.tile_url && item.legendModel),
+    () => buildVisibleCatalogLegendEntries({
+      layers: confirmedRecommendedCatalogLayers,
+      runtimeData: agentRecommendedLayerData,
+      visibility: agentRecommendedLayerVisibility,
+    }),
     [agentRecommendedLayerData, agentRecommendedLayerVisibility, confirmedRecommendedCatalogLayers]
   );
+  const scopeSourceLabel = useCallback((source) => {
+    const normalizedSource = String(source || '').toLowerCase();
+    if (normalizedSource === 'place_search') return 'place search';
+    if (normalizedSource === 'draw') return 'draw';
+    if (normalizedSource === 'upload') return 'upload';
+    if (normalizedSource === 'edited') return 'edited';
+    return normalizedSource || 'scope';
+  }, []);
+
+  const handleOpenSpatialUpload = useCallback(() => {
+    uploadPanelRef.current?.openFilePicker?.();
+    trackUxEvent('agent_scope_upload_open', { mode: 'agent' });
+  }, []);
 
   useEffect(() => {
-    if (!(currentState.recommended_layers || []).length) {
+    if (!analysisDisplayEnabled || !(currentState.recommended_layers || []).length) {
       setAgentRecommendedLayerVisibility({});
       setAgentRecommendedLayerData({});
       return;
@@ -748,6 +640,7 @@ function AgentPanel() {
       return next;
     });
   }, [
+    analysisDisplayEnabled,
     currentState.confirmation_version,
     currentState.recommended_layers,
     currentState.selected_layer_ids,
@@ -756,12 +649,21 @@ function AgentPanel() {
   ]);
 
   useEffect(() => {
+    if (!analysisDisplayEnabled) {
+      setAgentShowFloodDetection(false);
+      setAgentShowPopulationLayer(false);
+      setAgentShowUrbanLayer(false);
+      setAgentShowLandcoverLayer(false);
+      return;
+    }
+
     const selectedIds = currentState.selected_layer_ids || [];
     setAgentShowFloodDetection(selectedIds.includes('core:flood_detection'));
     setAgentShowPopulationLayer(selectedIds.includes('core:population'));
     setAgentShowUrbanLayer(selectedIds.includes('core:urban'));
     setAgentShowLandcoverLayer(selectedIds.includes('core:landcover'));
   }, [
+    analysisDisplayEnabled,
     currentState.selected_layer_ids,
     setAgentShowFloodDetection,
     setAgentShowLandcoverLayer,
@@ -842,7 +744,7 @@ function AgentPanel() {
   }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentTileError, setWarning]);
 
   useEffect(() => {
-    if (!currentState.pre_date || !currentState.peek_date || !currentState.after_date) {
+    if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date || !currentState.after_date) {
       imageryRequestKeyRef.current = null;
       return;
     }
@@ -851,6 +753,7 @@ function AgentPanel() {
       fetchAgentImagery(currentState, effectiveAoi);
     }
   }, [
+    analysisDisplayEnabled,
     currentState,
     currentState.pre_date,
     currentState.peek_date,
@@ -862,7 +765,7 @@ function AgentPanel() {
 
   // Fetch flood impact assessment data
   const fetchImpactData = useCallback(async () => {
-    if (!currentState.pre_date || !currentState.peek_date) return;
+    if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date) return;
 
     const requestKey = JSON.stringify({
       pre_date: currentState.pre_date,
@@ -916,11 +819,11 @@ function AgentPanel() {
         setAgentImpactLoading(false);
       }
     }
-  }, [agentImpactData, currentState, effectiveAoi, setAgentImpactData, setAgentImpactLoading, setWarning]);
+  }, [agentImpactData, analysisDisplayEnabled, currentState, effectiveAoi, setAgentImpactData, setAgentImpactLoading, setWarning]);
 
   // Auto-fetch impact data in background as soon as imagery arrives
   useEffect(() => {
-    if (!currentState.pre_date || !currentState.peek_date) {
+    if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date) {
       impactRequestKeyRef.current = null;
       return;
     }
@@ -928,18 +831,22 @@ function AgentPanel() {
     if (agentImagery && !agentImpactData && !agentImpactLoading) {
       fetchImpactData();
     }
-  }, [agentImagery, agentImpactData, agentImpactLoading, currentState.pre_date, currentState.peek_date, fetchImpactData]);
+  }, [agentImagery, agentImpactData, agentImpactLoading, analysisDisplayEnabled, currentState.pre_date, currentState.peek_date, fetchImpactData]);
 
   // Also fetch if user enables an impact layer before data arrived
   useEffect(() => {
+    if (!analysisDisplayEnabled) {
+      return;
+    }
+
     if ((agentShowPopulationLayer || agentShowUrbanLayer || agentShowLandcoverLayer) && !agentImpactData && !agentImpactLoading) {
       fetchImpactData();
     }
-  }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, fetchImpactData]);
+  }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, analysisDisplayEnabled, fetchImpactData]);
 
   useEffect(() => {
     const visibleCatalogLayers = recommendedCatalogLayers.filter((layer) => agentRecommendedLayerVisibility[layer.id]);
-    if (!visibleCatalogLayers.length || !effectiveAoi) {
+    if (!analysisDisplayEnabled || !visibleCatalogLayers.length || !effectiveAoi) {
       return;
     }
 
@@ -1011,6 +918,7 @@ function AgentPanel() {
   }, [
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
+    analysisDisplayEnabled,
     currentState.after_date,
     currentState.peek_date,
     currentState.pre_date,
@@ -1376,44 +1284,18 @@ function AgentPanel() {
             </div>
 
             {confirmedRecommendedCatalogLayers.length > 0 && (
-              <div className="recommended-layer-panel">
-                <h5>Recommended Datasets</h5>
-                <div className="layer-toggles">
-                  {confirmedRecommendedCatalogLayers.map((layer) => (
-                    <div className="layer-toggle-row recommended-row" key={layer.id}>
-                      <label className="layer-toggle">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(agentRecommendedLayerVisibility[layer.id])}
-                          onChange={() => {
-                            setAgentRecommendedLayerVisibility((previous) => ({
-                              ...previous,
-                              [layer.id]: !previous[layer.id],
-                            }));
-                          }}
-                        />
-                        <div className="recommended-layer-copy">
-                          <span>{layer.title}</span>
-                          {agentRecommendedLayerVisibility[layer.id] && agentRecommendedLayerData?.[layer.id]?.tile_url ? (
-                            <RecommendedLegendPreview
-                              legendModel={buildRecommendedLegendModel(agentRecommendedLayerData?.[layer.id], layer.title)}
-                            />
-                          ) : null}
-                        </div>
-                      </label>
-                      {agentLayerLoading[layer.id] ? (
-                        <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                      ) : agentRecommendedLayerVisibility[layer.id] && agentRecommendedLayerData?.[layer.id]?.tile_url ? (
-                        <span className="recommended-layer-status ready">Tile ready</span>
-                      ) : agentRecommendedLayerVisibility[layer.id] ? (
-                        <span className="recommended-layer-status pending">Pending</span>
-                      ) : (
-                        <span className="recommended-layer-status idle">Not loaded</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <CatalogLayerPanel
+                layers={confirmedRecommendedCatalogLayers}
+                runtimeData={agentRecommendedLayerData}
+                visibility={agentRecommendedLayerVisibility}
+                loading={agentLayerLoading}
+                onToggle={(layerId) => {
+                  setAgentRecommendedLayerVisibility((previous) => ({
+                    ...previous,
+                    [layerId]: !previous[layerId],
+                  }));
+                }}
+              />
             )}
 
             {/* Tile Error Warning */}
@@ -1512,7 +1394,85 @@ function AgentPanel() {
         )}
       </div>
 
-      <AoiUploadPanel variant="agent" />
+      <div className={`control-section ${expandedSections.spatialScope ? 'expanded' : ''}`}>
+        <div className="section-header" onClick={() => toggleSection('spatialScope')}>
+          <span className="section-icon"><i className="fa fa-crop" aria-hidden="true" /></span>
+          <span className="section-title">Spatial Scope</span>
+          <span className={`expand-icon ${expandedSections.spatialScope ? 'expanded' : ''}`}>▼</span>
+        </div>
+        {expandedSections.spatialScope && (
+          <div className="section-body spatial-scope-body">
+            <div className="spatial-scope-action-row">
+              <button
+                type="button"
+                className="action-btn primary"
+                onClick={() => setLocationScopePickerOpen(true)}
+              >
+                <i className="fa fa-search" aria-hidden="true" />
+                Search Place
+              </button>
+              <button
+                type="button"
+                className="action-btn secondary"
+                onClick={handleOpenSpatialUpload}
+              >
+                <i className="fa fa-upload" aria-hidden="true" />
+                Upload Scope
+              </button>
+            </div>
+
+            {businessLayers?.length ? (
+              <div className="spatial-scope-list">
+                {businessLayers.map((layer) => (
+                  <div
+                    key={layer.id}
+                    className={`spatial-scope-item ${layer.is_active ? 'active' : ''}`}
+                    title={layer.id}
+                  >
+                    <button
+                      type="button"
+                      className="spatial-scope-item-main"
+                      onClick={() => activateBusinessLayerRecord(layer.id)}
+                    >
+                      <span className="spatial-scope-item-label">@{layer.label}</span>
+                      <span className="spatial-scope-item-meta">
+                        {scopeSourceLabel(layer.source)}
+                        {layer.is_active ? ' - active' : ''}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="spatial-scope-item-delete"
+                      aria-label={`Delete ${layer.label}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteBusinessLayer(layer.id);
+                      }}
+                    >
+                      <i className="fa fa-trash" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="no-data-hint">
+                No uploaded or drawn scope yet.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <LocationScopePicker
+        isOpen={locationScopePickerOpen}
+        onClose={() => setLocationScopePickerOpen(false)}
+      />
+      <AoiUploadPanel
+        ref={uploadPanelRef}
+        variant="agent"
+        presentation="hidden"
+        lightweight
+      />
 
       {/* Chat History Section */}
       <div className="control-section">
@@ -1534,9 +1494,7 @@ function AgentPanel() {
                       {msg.role === 'user' ? '👤 You' : '🤖 Agent'}
                     </div>
                     <div className="msg-content">
-                      {typeof msg.content === 'string' 
-                        ? msg.content 
-                        : (msg.content?.text || JSON.stringify(msg.content))}
+                      {extractVisibleMessageText(msg.content) || ''}
                     </div>
                   </div>
                 ))}

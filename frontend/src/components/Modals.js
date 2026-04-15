@@ -1,5 +1,11 @@
 import React from 'react';
 import { useAppContext } from '../context/AppContext';
+import {
+  helpDocuments,
+  helpIntro,
+  helpOverviewImage,
+  helpSections,
+} from '../content/helpContent';
 
 function Modals() {
   const { activeModal, setActiveModal } = useAppContext();
@@ -149,30 +155,50 @@ function HelpModal({ isOpen, onClose }) {
         <hr />
         <div className="help-details">
           <h2>SatGPT User Guide</h2>
-          <h3>Getting Started</h3>
-          <ol>
-            <li>Select a data type (Single Inundation Event or Inundation Hotspot)</li>
-            <li>Click on a grid cell on the map to select your area of interest</li>
-            <li>Type your question about flood events in the chat box</li>
-            <li>View the results on the map and in the result panel</li>
-          </ol>
-          
-          <h3>Layer Controls</h3>
-          <ul>
-            <li><strong>Inundated Area:</strong> Shows areas affected by flooding</li>
-            <li><strong>Permanent Water:</strong> Shows permanent water bodies</li>
-            <li><strong>LCLU:</strong> Land Cover Land Use classification</li>
-            <li><strong>Population Density:</strong> Population density data</li>
-            <li><strong>Soil Texture:</strong> Soil classification data</li>
-            <li><strong>Healthcare Access:</strong> Healthcare accessibility data</li>
-          </ul>
-          
-          <h3>Tips</h3>
-          <ul>
-            <li>Use the transparency slider to adjust layer visibility</li>
-            <li>Enable 3D mode for terrain visualization</li>
-            <li>Download GEE code to use in Google Earth Engine</li>
-          </ul>
+          <div className="help-download-row">
+            {helpDocuments.map((document) => (
+              <a
+                key={document.href}
+                href={document.href}
+                download
+                className="help-download-btn"
+              >
+                {document.label}
+              </a>
+            ))}
+          </div>
+
+          <div className="help-intro">
+            {helpIntro.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+          </div>
+
+          <section className="help-section">
+            <h3>Interface Overview</h3>
+            <div className="help-figure">
+              <img src={helpOverviewImage} alt="SATGPT interface overview" />
+            </div>
+          </section>
+
+          {helpSections.map((section) => (
+            <section key={section.title} className="help-section">
+              <h3>{section.title}</h3>
+              <ol className="help-step-list">
+                {section.steps.map((step) => (
+                  <li key={`${section.title}-${step.text}`}>
+                    <p>{step.text}</p>
+                    {step.note ? <p className="help-note">{step.note}</p> : null}
+                    {step.image ? (
+                      <div className="help-figure">
+                        <img src={step.image} alt={step.text} />
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
         </div>
       </div>
     </div>

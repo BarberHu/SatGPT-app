@@ -74,6 +74,15 @@ class FloodAgentState(CopilotKitState, total=False):
     # 当前选中的推荐图层 id 列表
     selected_layer_ids: List[str]
 
+    # 用户在消息中显式 @ 的图层引用
+    mentioned_layer_refs: List[Dict[str, Any]]
+
+    # mention 优先解析出的 AOI
+    mentioned_aoi: Dict[str, Any]
+
+    # mention AOI 来源说明
+    mentioned_aoi_source: str
+
     # 统一确认版本号
     confirmation_version: int
 
