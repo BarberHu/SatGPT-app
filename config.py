@@ -25,8 +25,21 @@ def get_env_var(*names, required=True, default=None):
     return default
 
 
+def resolve_root_relative_path(raw_value):
+    if raw_value in (None, ""):
+        return raw_value
+
+    candidate = Path(raw_value)
+    if candidate.is_absolute():
+        return str(candidate)
+
+    return str((PROJECT_ROOT / candidate).resolve())
+
+
 EE_ACCOUNT = get_env_var("EE_ACCOUNT", required=False, default=None)
-EE_PRIVATE_KEY_FILE = get_env_var("GOOGLE_APPLICATION_CREDENTIALS", "EE_PRIVATE_KEY_FILE")
+EE_PRIVATE_KEY_FILE = resolve_root_relative_path(
+    get_env_var("GOOGLE_APPLICATION_CREDENTIALS", "EE_PRIVATE_KEY_FILE")
+)
 GOOGLE_MAPS_API_KEY = get_env_var("GOOGLE_MAPS_API_KEY", required=False, default="")
 MAPBOX_ACCESS_KEY = get_env_var(
     "MAPBOX_ACCESS_KEY",

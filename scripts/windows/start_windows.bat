@@ -56,7 +56,10 @@ for /f "usebackq delims=" %%A in (`powershell -ExecutionPolicy Bypass -File "%SC
 if not "%SATGPT_HTTP_PROXY%"=="" (
     set "HTTP_PROXY=%SATGPT_HTTP_PROXY%"
     set "HTTPS_PROXY=%SATGPT_HTTP_PROXY%"
+    set "NO_PROXY=localhost,127.0.0.1,::1"
+    set "no_proxy=localhost,127.0.0.1,::1"
     echo Using proxy: %SATGPT_HTTP_PROXY%
+    echo NO_PROXY: %NO_PROXY%
     echo.
 )
 

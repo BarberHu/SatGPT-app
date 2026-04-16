@@ -17,6 +17,33 @@ const normalizeAgentApiError = (error, fallbackMessage) => {
   return normalized;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const postWithRetry = async (url, payload, options = {}) => {
+  const {
+    retries = 0,
+    retryDelayMs = 300,
+  } = options;
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await axios.post(url, payload);
+    } catch (error) {
+      lastError = error;
+      const isNetworkError = !error?.response;
+      const canRetry = attempt < retries && isNetworkError;
+      if (!canRetry) {
+        throw error;
+      }
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+};
+
 export const getFloodImages = async (params) => {
   try {
     const response = await axios.post(`${AGENT_API_BASE}/api/flood-images`, params);
@@ -69,7 +96,11 @@ export const searchLocationCandidates = async (params) => {
 
 export const syncBusinessLayers = async (params) => {
   try {
-    const response = await axios.post(`${AGENT_API_BASE}/api/business-layers/upsert`, params);
+    const response = await postWithRetry(
+      `${AGENT_API_BASE}/api/business-layers/upsert`,
+      params,
+      { retries: 2, retryDelayMs: 400 }
+    );
     return response.data;
   } catch (error) {
     console.error('Failed to sync business layers:', error);

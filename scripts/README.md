@@ -31,3 +31,17 @@ If Google Earth Engine or other services require a proxy, set:
 `set SATGPT_HTTP_PROXY=http://127.0.0.1:7890`
 
 before launching `start_windows.bat`.
+
+When proxy is enabled, local service-to-service calls should bypass the proxy:
+
+`set NO_PROXY=localhost,127.0.0.1,::1`
+
+`start_windows.bat` now sets this automatically.
+
+## Manual startup note
+
+If you start services manually, make sure Python points to the project virtual environment first, for example:
+
+`SatGPT-app\flood-venv\Scripts\python.exe SatGPT-app\agent\server.py`
+
+Using a global Python interpreter may cause dependency/version drift and unstable local behavior.
