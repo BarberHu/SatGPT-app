@@ -6,7 +6,6 @@ import os
 import re
 import traceback
 from copy import deepcopy
-from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
@@ -19,8 +18,7 @@ from pydantic import BaseModel, Field
 # SATGPT_TRACE_DELETE_ME_START
 from debug_trace import new_debug_trace, summarize_tool_result, trace_event
 # SATGPT_TRACE_DELETE_ME_END
-from adapter import execute_tool
-from assets_library import get_recommendable_assets
+from adapter import execute_tool, preflight_asset_recommendation
 from token_utils import empty_token_usage, record_llm_usage
 from tool_library import (
     TOOL_LIBRARY,
@@ -237,26 +235,6 @@ def _primary_tool_from_plan(execution_plan: Dict[str, Any]) -> str:
     return execution_plan["primary_tool"]
 
 
-def _parse_iso_date(value: Optional[str]) -> Optional[date]:
-    if not value:
-        return None
-    return date.fromisoformat(value)
-
-
-def _asset_available_for_window(asset: Dict[str, Any], start_date: Optional[str], end_date: Optional[str]) -> bool:
-    availability = asset.get("availability", {})
-    request_start = _parse_iso_date(start_date)
-    request_end = _parse_iso_date(end_date)
-    available_start = _parse_iso_date(availability.get("start_date"))
-    available_end = _parse_iso_date(availability.get("end_date"))
-
-    if request_end and available_start and request_end < available_start:
-        return False
-    if request_start and available_end and request_start > available_end:
-        return False
-    return True
-
-
 def _build_execution_plan(query: str, parsed: Dict[str, Any]) -> Dict[str, Any]:
     normalized_query = _normalize_query(query)
     selected_tool = parsed["selected_tool"]
@@ -312,35 +290,10 @@ def _build_execution_plan(query: str, parsed: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _preflight_asset_checks(parsed: Dict[str, Any], execution_plan: Dict[str, Any]) -> Dict[str, Any]:
-    asset_tool_enabled = execution_plan["mode"] in {"assets_only", "hybrid"}
-    if not asset_tool_enabled:
-        return {"blocking_issues": [], "warnings": []}
-
-    dates = parsed.get("dates") or []
-    start_date = dates[0] if dates else None
-    end_date = dates[1] if len(dates) > 1 else start_date
-    if not start_date and not end_date:
-        return {"blocking_issues": [], "warnings": []}
-
-    available_assets = []
-    unavailable_assets = []
-    for asset in get_recommendable_assets():
-        if asset.get("execution_profile", {}).get("supports_tile", False) is False:
-            continue
-        if _asset_available_for_window(asset, start_date, end_date):
-            available_assets.append(asset["asset_id"])
-        else:
-            unavailable_assets.append(asset["asset_id"])
-
-    blocking_issues: List[str] = []
-    warnings: List[str] = []
-    if not available_assets:
-        blocking_issues.append("所选时间窗与当前可推荐资产的可用期冲突。")
-    elif unavailable_assets:
-        warnings.append(
-            "部分资产与所选时间窗不匹配: " + ", ".join(unavailable_assets[:3])
-        )
-    return {"blocking_issues": blocking_issues, "warnings": warnings}
+    return preflight_asset_recommendation(
+        parsed,
+        enabled=execution_plan["mode"] in {"assets_only", "hybrid"},
+    )
 
 
 def _preflight_sensor_checks(parsed: Dict[str, Any], execution_plan: Dict[str, Any]) -> Dict[str, Any]:

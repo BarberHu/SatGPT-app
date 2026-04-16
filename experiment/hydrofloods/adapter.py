@@ -198,6 +198,54 @@ def _availability_penalty(asset: Dict[str, Any], start_date: Optional[str], end_
     return 0.0
 
 
+def _asset_available_for_window(asset: Dict[str, Any], start_date: Optional[str], end_date: Optional[str]) -> bool:
+    availability = asset.get("availability", {})
+    request_start = _parse_iso_date(start_date)
+    request_end = _parse_iso_date(end_date)
+    available_start = _parse_iso_date(availability.get("start_date"))
+    available_end = _parse_iso_date(availability.get("end_date"))
+
+    if request_end and available_start and request_end < available_start:
+        return False
+    if request_start and available_end and request_start > available_end:
+        return False
+    return True
+
+
+def preflight_asset_recommendation(
+    parsed_request: Dict[str, Any],
+    *,
+    enabled: bool,
+) -> Dict[str, Any]:
+    if not enabled:
+        return {"blocking_issues": [], "warnings": []}
+
+    dates = parsed_request.get("dates") or []
+    start_date = dates[0] if dates else None
+    end_date = dates[1] if len(dates) > 1 else start_date
+    if not start_date and not end_date:
+        return {"blocking_issues": [], "warnings": []}
+
+    available_assets: List[str] = []
+    unavailable_assets: List[str] = []
+    for asset in get_recommendable_assets():
+        if asset.get("execution_profile", {}).get("supports_tile", False) is False:
+            continue
+        if _asset_available_for_window(asset, start_date, end_date):
+            available_assets.append(asset["asset_id"])
+        else:
+            unavailable_assets.append(asset["asset_id"])
+
+    blocking_issues: List[str] = []
+    warnings: List[str] = []
+    if not available_assets:
+        blocking_issues.append("所选时间窗与当前可推荐资产的可用期冲突。")
+    elif unavailable_assets:
+        warnings.append("部分资产与所选时间窗不匹配: " + ", ".join(unavailable_assets[:3]))
+
+    return {"blocking_issues": blocking_issues, "warnings": warnings}
+
+
 def _recommend_assets_for_request(
     *,
     query: str,
@@ -468,11 +516,23 @@ def describe_hydrafloods_tools() -> Dict[str, Any]:
 
 
 def execute_tool(tool_name: str, parsed_request: Dict[str, Any], query: str) -> Dict[str, Any]:
+    no_arg_dispatch = {
+        "describe_hydrafloods_tools": describe_hydrafloods_tools,
+    }
+    query_dispatch = {
+        "recommend_flood_asset_layers": recommend_asset_layers,
+    }
+    compute_dispatch = {
+        "get_water_extent_tile": get_water_extent_tile,
+        "get_flood_extent_tile": get_flood_extent_tile,
+        "estimate_flood_depth_tile": estimate_flood_depth_tile,
+    }
+
     if tool_name == "describe_hydrafloods_tools":
-        return describe_hydrafloods_tools()
+        return no_arg_dispatch[tool_name]()
 
     if tool_name == "recommend_flood_asset_layers":
-        return recommend_asset_layers(query=query, parsed_request=parsed_request)
+        return query_dispatch[tool_name](query=query, parsed_request=parsed_request)
 
     common_kwargs = {
         "dataset": parsed_request["dataset"],
@@ -482,10 +542,10 @@ def execute_tool(tool_name: str, parsed_request: Dict[str, Any], query: str) -> 
         "algorithm": parsed_request["algorithm"],
     }
     if tool_name == "get_water_extent_tile":
-        return get_water_extent_tile(**common_kwargs)
+        return compute_dispatch[tool_name](**common_kwargs)
 
     if tool_name in {"get_flood_extent_tile", "estimate_flood_depth_tile"}:
-        return globals()[tool_name](
+        return compute_dispatch[tool_name](
             **common_kwargs,
             reference=parsed_request["reference"],
         )
