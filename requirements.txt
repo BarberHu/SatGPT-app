@@ -1,3 +1,4 @@
+setuptools<81
 backports.functools-lru-cache==1.6.4
 blessed==1.18.1
 blessings==1.7

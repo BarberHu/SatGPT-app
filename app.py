@@ -706,5 +706,6 @@ def serve_frontend(path):
     )
 
 if __name__ == "__main__":
-    port = int(os.environ.get('FLASK_RUN_PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    host = os.environ.get("FLASK_RUN_HOST", "0.0.0.0")
+    port = int(os.environ.get("FLASK_RUN_PORT", 5001))
+    app.run(host=host, port=port, debug=False)

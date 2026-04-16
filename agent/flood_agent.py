@@ -15,7 +15,6 @@ import json
 import requests
 from typing import Literal, Optional, Dict, Any
 
-from dotenv import load_dotenv
 from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
@@ -31,8 +30,9 @@ from gee_code_generator import generate_flood_gee_code
 from flood_aoi import aoi_to_legacy_fields
 from flood_dataset_service import build_confirmation_context
 from mention_context import resolve_mention_context
+from project_env import load_project_env
 
-load_dotenv()
+load_project_env()
 
 # 配置代理
 http_proxy = os.getenv("HTTP_PROXY")
@@ -90,11 +90,11 @@ Please return strictly in the following JSON format, do not include any other te
         location_type = data.get("type", "administrative")
         reason = data.get("reason", "")
         
-        print(f"🔍 地名类型判断: {location_name} -> {location_type} ({reason})")
+        print(f"[DEBUG] Location type: {location_name} -> {location_type} ({reason})")
         return {"type": location_type, "reason": reason}
         
     except Exception as e:
-        print(f"⚠️ LLM判断地名类型失败: {e}，默认为行政区域")
+        print(f"[WARN] Failed to classify location type with LLM: {e}; defaulting to administrative area")
         return {"type": "administrative", "reason": "判断失败，使用默认值"}
 
 
@@ -162,7 +162,7 @@ Please return strictly in the following JSON format, do not include any other te
             'geometry': data['geometry']
         }
         
-        print(f"✅ LLM成功生成地理数据: {location_name}")
+        print(f"[INFO] LLM generated geographic data: {location_name}")
         return {
             "location": location_name,
             "coordinates": data['center'],
@@ -173,7 +173,7 @@ Please return strictly in the following JSON format, do not include any other te
         }
         
     except Exception as e:
-        print(f"❌ LLM生成GeoJSON失败: {e}")
+        print(f"[ERROR] LLM failed to generate GeoJSON: {e}")
         return None
 
 
@@ -279,7 +279,7 @@ def _get_location_from_nominatim(location_name: str) -> Optional[Dict[str, Any]]
         }
         
     except Exception as e:
-        print(f"⚠️ Nominatim查询失败: {e}")
+        print(f"[WARN] Nominatim query failed: {e}")
         return None
 
 
@@ -293,37 +293,37 @@ def _get_location_coordinates_internal(location_name: str) -> Optional[Dict[str,
     3. 组合/自然区域 → 使用LLM生成大致GeoJSON
     4. 如果Nominatim失败，回退到LLM生成
     """
-    print(f"📍 正在获取地理数据: {location_name}")
+    print(f"[INFO] Resolving geographic data: {location_name}")
     
     # 使用LLM判断地名类型
     classification = _classify_location_type(location_name)
     is_composite = classification["type"] == "composite"
     
     if is_composite:
-        print(f"🔍 检测到组合区域，使用LLM生成GeoJSON: {location_name}")
+        print(f"[DEBUG] Composite region detected, generating GeoJSON with LLM: {location_name}")
         result = _generate_geojson_with_llm(location_name)
         if result:
             return result
         # LLM失败时尝试Nominatim
-        print(f"⚠️ LLM生成失败，尝试Nominatim...")
+        print("[WARN] LLM generation failed, falling back to Nominatim...")
     
     # 尝试Nominatim API
-    print(f"🌐 尝试从Nominatim获取: {location_name}")
+    print(f"[INFO] Trying Nominatim lookup: {location_name}")
     result = _get_location_from_nominatim(location_name)
     
     if result:
-        print(f"✅ 成功获取地理数据: {location_name}")
+        print(f"[INFO] Geographic data resolved: {location_name}")
         return result
     
     # Nominatim失败，尝试LLM
     if not is_composite:
-        print(f"⚠️ Nominatim未找到，尝试LLM生成: {location_name}")
+        print(f"[WARN] Nominatim returned no result, trying LLM generation: {location_name}")
         result = _generate_geojson_with_llm(location_name)
         if result:
             return result
     
     # 所有方法都失败
-    print(f"❌ 无法获取地理数据: {location_name}")
+    print(f"[ERROR] Failed to resolve geographic data: {location_name}")
     return {
         "location": location_name,
         "coordinates": [0.0, 0.0],
@@ -516,7 +516,7 @@ def search_flood_event(query: str) -> str:
         _pending_search_sources = [{"title": s["title"], "url": s["url"]} for s in all_sources]
         _pending_search_contents = all_sources  # Store full content for report generation
         
-        print(f"📚 搜索完成，获取到 {len(all_sources)} 条信息来源")
+        print(f"[INFO] Search completed with {len(all_sources)} sources")
         
         return "\n---\n".join(results) if results else "No relevant flood event information found"
         
@@ -649,14 +649,14 @@ async def extraction_node(
     """
     # 获取最后一条消息的内容
     messages = state.get("messages", [])
-    print(f"📍 提取节点处理消息，共 {len(messages)} 条")
+    print(f"[DEBUG] Extracting node messages, count={len(messages)}")
     if not messages:
         return Command(goto="__end__")
     
     last_message = messages[-1]
     content = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
     
-    print(f"🔍 提取节点分析内容:\n{content}\n")
+    print(f"[DEBUG] Extracted analysis content:\n{content}\n")
     # 提取洪水信息
     extracted_info = _extract_flood_info_from_content(content)
     
@@ -825,7 +825,7 @@ async def confirmation_node(
         )
     
     # 用户确认，更新数据并进入处理节点
-    print(f"📍 用户已确认事件信息")
+    print("[INFO] User confirmed event details")
     
     return Command(
         goto="processing_node",
@@ -872,7 +872,7 @@ async def processing_node(
     after_date = state.get("after_date")
     confirmed_aoi = state.get("confirmed_aoi") or state.get("resolved_aoi")
     
-    print(f"📍 正在获取地理坐标: {location}")
+    print(f"[INFO] Resolving coordinates for location: {location}")
     
     # 获取地理坐标
     existing_geo_data = dict(state.get("geo_data") or {})
@@ -910,7 +910,7 @@ async def processing_node(
         search_contents_text = "No search materials available. Please analyze based on the event description."
     
     # 使用 LLM 生成详细报告
-    print(f"📝 正在使用 LLM 生成详细报告...")
+    print("[INFO] Generating detailed report with LLM...")
     model = _get_model()
     
     report_prompt = REPORT_GENERATION_PROMPT.format(
@@ -925,9 +925,9 @@ async def processing_node(
     try:
         response = model.invoke([HumanMessage(content=report_prompt)])
         detailed_report = response.content
-        print(f"✅ LLM 生成报告成功，字数: {len(detailed_report)}")
+        print(f"[INFO] Detailed report generated by LLM, length={len(detailed_report)}")
     except Exception as e:
-        print(f"⚠️ LLM 生成报告失败: {e}，使用默认内容")
+        print(f"[WARN] LLM report generation failed: {e}; using fallback content")
         detailed_report = f"""### 1. Event Overview
 {event_description or 'No detailed description available'}
 
@@ -978,11 +978,11 @@ This flood event has caused certain impacts. Further information collection is n
             bounds=bounds,
             geojson=geojson
         )
-        print(f"✅ GEE 代码生成成功，共 {len(gee_code)} 字符")
+        print(f"[INFO] GEE code generated successfully, length={len(gee_code)}")
     except Exception as e:
-        print(f"⚠️ GEE 代码生成失败: {e}")
+        print(f"[WARN] GEE code generation failed: {e}")
     
-    print(f"✅ 报告生成完成，共 {len(search_sources)} 条参考来源")
+    print(f"[INFO] Report generation completed with {len(search_sources)} reference sources")
     
     return Command(
         goto="__end__",

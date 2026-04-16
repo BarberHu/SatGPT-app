@@ -11,8 +11,7 @@ import { useAppContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
 
 // CopilotKit 运行时地址 - 动态获取当前主机，支持内网访问
-const COPILOTKIT_URL = process.env.REACT_APP_COPILOTKIT_URL 
-  || `http://${window.location.hostname}:5000/copilotkit`;
+const COPILOTKIT_URL = process.env.REACT_APP_COPILOTKIT_URL || '/copilotkit';
 
 function App() {
   // Initialize map data loading hook

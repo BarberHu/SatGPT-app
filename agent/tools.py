@@ -4,9 +4,9 @@
 import os
 from langchain_core.tools import tool
 from tavily import TavilyClient
-from dotenv import load_dotenv
+from project_env import load_project_env
 
-load_dotenv()
+load_project_env()
 
 
 @tool

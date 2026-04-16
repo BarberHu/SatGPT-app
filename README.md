@@ -81,6 +81,12 @@ GEE_PROJECT_ID=your-gcp-project
 REACT_APP_MAPBOX_ACCESS_KEY=your-mapbox-token
 ```
 
+`.env.example` is the version-controlled template.
+Your local `.env` is the actual runtime configuration file.
+When you use the Windows scripts, public frontend variables are synced from
+the root `.env` into `frontend/.env.local` automatically.
+Flask / Agent / Runtime / Frontend ports are also configured from the root `.env`.
+
 ### Start Services
 
 ```bash

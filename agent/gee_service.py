@@ -11,16 +11,16 @@ import os
 import ee
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from project_env import load_project_env
 
-load_dotenv()
+load_project_env()
 
 # 设置代理（如果配置了的话）
 http_proxy = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
 if http_proxy:
     os.environ["HTTP_PROXY"] = http_proxy
     os.environ["HTTPS_PROXY"] = http_proxy
-    print(f"🌐 使用代理: {http_proxy}")
+    print(f"[INFO] Using proxy: {http_proxy}")
 
 
 class GEEService:
@@ -44,16 +44,16 @@ class GEEService:
                     key_file=credentials_path
                 )
                 ee.Initialize(credentials, project=self.project_id)
-                print(f"✅ Earth Engine 使用服务账户初始化成功 (project: {self.project_id})")
+                print(f"[INFO] Earth Engine initialized with service account (project: {self.project_id})")
             else:
                 # 使用默认认证 (需要先运行 ee.Authenticate())
                 ee.Initialize(project=self.project_id)
-                print(f"✅ Earth Engine 使用默认认证初始化成功 (project: {self.project_id})")
+                print(f"[INFO] Earth Engine initialized with default credentials (project: {self.project_id})")
             
             self.initialized = True
         except Exception as e:
-            print(f"❌ Earth Engine 初始化失败: {e}")
-            print("提示: 请确保已设置 GOOGLE_APPLICATION_CREDENTIALS 或先运行 ee.Authenticate()")
+            print(f"[ERROR] Earth Engine initialization failed: {e}")
+            print("[HINT] Set GOOGLE_APPLICATION_CREDENTIALS or run ee.Authenticate() first.")
             self.initialized = False
     
     def _get_collection_date_range(self, collection: ee.ImageCollection) -> Dict[str, Any]:

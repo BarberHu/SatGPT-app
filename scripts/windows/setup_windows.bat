@@ -47,7 +47,15 @@ if "%DRY_RUN%"=="1" (
     if errorlevel 1 exit /b 1
 )
 
-echo [3/5] Installing Python dependencies...
+echo [3/6] Pinning setuptools compatibility...
+if "%DRY_RUN%"=="1" (
+    echo DRY-RUN: "%PYTHON_EXE%" -m pip install "setuptools<81"
+) else (
+    "%PYTHON_EXE%" -m pip install "setuptools<81"
+    if errorlevel 1 exit /b 1
+)
+
+echo [4/6] Installing Python dependencies...
 if "%DRY_RUN%"=="1" (
     echo DRY-RUN: "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\requirements.txt"
     echo DRY-RUN: "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\agent\requirements.txt"
@@ -58,7 +66,7 @@ if "%DRY_RUN%"=="1" (
     if errorlevel 1 exit /b 1
 )
 
-echo [4/5] Installing frontend dependencies...
+echo [5/6] Installing frontend dependencies...
 if "%DRY_RUN%"=="1" (
     echo DRY-RUN: cd /d "%ROOT_DIR%\frontend" ^&^& call npm install
 ) else (
@@ -71,7 +79,7 @@ if "%DRY_RUN%"=="1" (
     popd
 )
 
-echo [5/5] Installing runtime dependencies...
+echo [6/6] Installing runtime dependencies...
 if "%DRY_RUN%"=="1" (
     echo DRY-RUN: cd /d "%ROOT_DIR%\runtime" ^&^& call npm install
 ) else (
@@ -117,10 +125,20 @@ if not exist "%ROOT_DIR%\.env" (
 )
 
 echo.
+echo Syncing frontend public environment from root .env...
+if "%DRY_RUN%"=="1" (
+    echo DRY-RUN: powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
+) else (
+    powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
+    if errorlevel 1 exit /b 1
+)
+
+echo.
 echo ==========================================
 echo Setup completed.
 echo Next:
 echo 1. Fill in "%ROOT_DIR%\.env" with your API keys and service account path.
-echo 2. Run "scripts\windows\start_windows.bat" to start all services.
+echo 2. frontend\.env.local will be generated from the root .env.
+echo 3. Run "scripts\windows\start_windows.bat" to start all services.
 echo ==========================================
 exit /b 0
