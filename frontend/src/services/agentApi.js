@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const AGENT_API_BASE =
-  process.env.REACT_APP_AGENT_API_URL || `http://${window.location.hostname}:8000`;
+  process.env.REACT_APP_AGENT_API_URL || '';
 
 const normalizeAgentApiError = (error, fallbackMessage) => {
   const detail =

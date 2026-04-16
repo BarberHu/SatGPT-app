@@ -4,6 +4,8 @@
  */
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CopilotRuntime,
   copilotRuntimeNodeHttpEndpoint,
@@ -13,7 +15,9 @@ import { LangGraphHttpAgent } from '@copilotkit/runtime/langgraph';
 
 import dotenv from "dotenv";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+dotenv.config({ path: resolve(__dirname, "..", ".env") });
 
 const app = express();
 
@@ -28,7 +32,9 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Python LangGraph 后端地址 (FastAPI)
-const AGENT_URL = process.env.AGENT_URL || "http://localhost:8000";
+const PUBLIC_HOST = process.env.SATGPT_PUBLIC_HOST || "localhost";
+const AGENT_PORT = process.env.AGENT_PORT || "8000";
+const AGENT_URL = process.env.AGENT_URL || `http://${PUBLIC_HOST}:${AGENT_PORT}`;
 
 // 使用空适配器（因为我们只用一个 agent）
 const serviceAdapter = new EmptyAdapter();
@@ -58,7 +64,7 @@ const wrappedHandler = async (req: Request, res: Response, next: NextFunction) =
     if (error?.message?.includes('aborted') || 
         error?.message?.includes('Aborted') ||
         error?.name === 'AbortError') {
-      console.log('ℹ️ Request aborted by client');
+      console.log('[INFO] Request aborted by client');
       // 如果响应还没发送，返回一个友好的响应
       if (!res.headersSent) {
         res.status(499).json({ message: 'Request cancelled by client' });
@@ -86,7 +92,7 @@ app.get("/health", (_req: Request, res: Response) => {
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   // 忽略 abort 错误
   if (err?.message?.includes('aborted') || err?.message?.includes('Aborted')) {
-    console.log('ℹ️ Operation cancelled');
+    console.log('[INFO] Operation cancelled');
     if (!res.headersSent) {
       res.status(499).end();
     }
@@ -104,7 +110,7 @@ const PORT = parseInt(process.env.RUNTIME_PORT || "5000");
 const HOST = process.env.RUNTIME_HOST || "0.0.0.0";
 
 app.listen(PORT, HOST, () => {
-  console.log(`🚀 CopilotKit 运行时服务器已启动`);
-  console.log(`   - 运行时地址: http://${HOST}:${PORT}/copilotkit`);
-  console.log(`   - LangGraph 后端: ${AGENT_URL}`);
+  console.log("[INFO] CopilotKit runtime started");
+  console.log(`   - Runtime URL: http://${HOST}:${PORT}/copilotkit`);
+  console.log(`   - LangGraph backend: ${AGENT_URL}`);
 });

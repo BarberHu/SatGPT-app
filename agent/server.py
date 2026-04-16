@@ -7,11 +7,11 @@ import warnings
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 from pydantic.warnings import UnsupportedFieldAttributeWarning
-from dotenv import load_dotenv
 import uvicorn
 
 # CopilotKit AG-UI 集成
@@ -26,6 +26,19 @@ from gee_code_generator import generate_flood_gee_code
 from flood_dataset_service import build_confirmation_context, renderer
 from flood_aoi import search_location_candidates
 from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
+from legacy_flask_compat import (
+    build_script_pdf,
+    get_chatgpt_response,
+    get_code_response,
+    get_default_map_payload,
+    get_flood_hotspot_map_payload,
+    get_historical_map_payload,
+    get_latest_script,
+    get_unsupervised_map_payload,
+    get_water_regime_change_map_payload,
+    remember_latest_script,
+)
+from project_env import load_project_env
 
 
 # 继承 LangGraphAGUIAgent，只覆写 prepare_stream 一个方法来修 bug
@@ -64,7 +77,7 @@ class PatchedLangGraphAGUIAgent(LangGraphAGUIAgent):
         # 最终事件流变成: RunStartedEvent(来自148行) → interrupt → RunFinishedEvent ✅
         return result
 
-load_dotenv()
+load_project_env()
 warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
 # 配置代理
@@ -79,9 +92,9 @@ if https_proxy:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    print("🚀 洪水智能体服务启动中...")
+    print("[INFO] Flood agent service starting...")
     yield
-    print("👋 洪水智能体服务关闭")
+    print("[INFO] Flood agent service stopped.")
 
 
 # 创建 FastAPI 应用
@@ -190,6 +203,33 @@ class BusinessLayerResolveRequest(BaseModel):
     layer_ids: list[str]
 
 
+class LegacyChatRequest(BaseModel):
+    message: str
+
+
+async def _get_legacy_payload(request: Request) -> dict:
+    if request.method == "POST":
+        payload = await request.json()
+        return payload if isinstance(payload, dict) else {}
+    return dict(request.query_params)
+
+
+def _ensure_gee_ready() -> None:
+    if not gee_service.initialized:
+        raise HTTPException(
+            status_code=503,
+            detail="GEE service is not initialized. Check your Earth Engine credentials.",
+        )
+
+
+def _ensure_openai_ready() -> None:
+    if not (os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")):
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key is not configured.",
+        )
+
+
 # ============== API 端点 ==============
 
 @app.get("/")
@@ -210,6 +250,88 @@ async def health():
         "service": "flood-agent",
         "gee_initialized": gee_service.initialized
     }
+
+
+@app.get("/flask-health-check", response_class=PlainTextResponse)
+async def legacy_flask_health():
+    return "healthy"
+
+
+@app.get("/get_default")
+async def legacy_get_default():
+    _ensure_gee_ready()
+    try:
+        return get_default_map_payload()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/get_unsupervised_map", methods=["GET", "POST"])
+async def legacy_get_unsupervised_map(request: Request):
+    _ensure_gee_ready()
+    try:
+        return get_unsupervised_map_payload(await _get_legacy_payload(request))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/get_historical_map", methods=["GET", "POST"])
+async def legacy_get_historical_map(request: Request):
+    _ensure_gee_ready()
+    try:
+        return get_historical_map_payload(await _get_legacy_payload(request))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/get_flood_hotspot_map", methods=["GET", "POST"])
+async def legacy_get_flood_hotspot_map(request: Request):
+    _ensure_gee_ready()
+    try:
+        return get_flood_hotspot_map_payload(await _get_legacy_payload(request))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/get_water_regime_change_map", methods=["GET", "POST"])
+async def legacy_get_water_regime_change_map(request: Request):
+    _ensure_gee_ready()
+    try:
+        return get_water_regime_change_map_payload(await _get_legacy_payload(request))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chatGPT")
+async def legacy_chatgpt(request: LegacyChatRequest):
+    _ensure_openai_ready()
+    chatgpt_response = get_chatgpt_response(request.message)
+    if not chatgpt_response:
+        raise HTTPException(status_code=500, detail="Error with ChatGPT.")
+    return {"message": chatgpt_response}
+
+
+@app.post("/get_script")
+async def legacy_get_script(request: LegacyChatRequest):
+    _ensure_openai_ready()
+    code_snippet = get_code_response(request.message)
+    if not code_snippet:
+        raise HTTPException(status_code=500, detail="Error with ChatGPT.")
+    remember_latest_script(code_snippet)
+    return {"message": code_snippet}
+
+
+@app.get("/get_pdf")
+async def legacy_get_pdf():
+    latest_script = get_latest_script()
+    if not latest_script:
+        raise HTTPException(status_code=500, detail="No generated script is available.")
+    pdf_bytes = build_script_pdf(latest_script)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename=GEE_Script.pdf'},
+    )
 
 
 @app.post("/api/flood-images")
@@ -508,13 +630,13 @@ async def update_state(state: FloodState):
 if __name__ == "__main__":
     import uvicorn
     
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
-    debug = os.getenv("DEBUG", "True").lower() == "true"
+    host = os.getenv("AGENT_HOST") or os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("AGENT_PORT") or os.getenv("PORT", 8000))
+    debug = (os.getenv("AGENT_DEBUG") or os.getenv("DEBUG", "True")).lower() == "true"
     
-    print(f"🌊 启动洪水智能体服务: http://{host}:{port}")
-    print(f"📚 API文档: http://{host}:{port}/docs")
-    print(f"🤖 Agent端点: http://{host}:{port}/agent")
+    print(f"[INFO] Flood agent listening at http://{host}:{port}")
+    print(f"[INFO] API docs: http://{host}:{port}/docs")
+    print(f"[INFO] Agent endpoint: http://{host}:{port}/agent")
     
     uvicorn.run(
         "server:app",

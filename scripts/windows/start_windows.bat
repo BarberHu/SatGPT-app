@@ -51,6 +51,8 @@ if not exist "%ROOT_DIR%\runtime\node_modules\.bin\tsx.cmd" (
     exit /b 1
 )
 
+for /f "usebackq delims=" %%A in (`powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%load_launch_env.ps1" -RootDir "%ROOT_DIR%"`) do set "%%A"
+
 if not "%SATGPT_HTTP_PROXY%"=="" (
     set "HTTP_PROXY=%SATGPT_HTTP_PROXY%"
     set "HTTPS_PROXY=%SATGPT_HTTP_PROXY%"
@@ -58,28 +60,29 @@ if not "%SATGPT_HTTP_PROXY%"=="" (
     echo.
 )
 
-echo [1/4] Checking port usage...
-for %%P in (5001 8000 5000 3000) do (
-    netstat -ano | findstr :%%P >nul 2>&1
+echo Syncing frontend public environment from root .env...
+if "%DRY_RUN%"=="1" (
+    echo DRY-RUN: powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
+) else (
+    powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
+    if errorlevel 1 exit /b 1
+)
+
+echo [1/3] Checking port usage...
+for %%P in (%AGENT_PORT% %RUNTIME_PORT% %FRONTEND_PORT%) do (
+    powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort %%P -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>&1
     if not errorlevel 1 echo Warning: Port %%P is already in use.
 )
 
 echo.
-echo [2/4] Starting Flask backend on 5001...
+echo [2/3] Starting FastAPI agent on %AGENT_PORT%...
 if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "Flask Backend" cmd /k cd /d "%ROOT_DIR%" ^&^& "%PYTHON_EXE%" app.py
+    echo DRY-RUN: start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" server.py
 ) else (
-    start "Flask Backend" cmd /k cd /d "%ROOT_DIR%" ^&^& "%PYTHON_EXE%" app.py
+    start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" server.py
 )
 
-echo [3/4] Starting FastAPI agent on 8000...
-if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" -m uvicorn server:app --host 0.0.0.0 --port 8000
-) else (
-    start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" -m uvicorn server:app --host 0.0.0.0 --port 8000
-)
-
-echo [4/4] Starting Node services...
+echo [3/3] Starting Node services...
 if "%DRY_RUN%"=="1" (
     echo DRY-RUN: start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& call npm start
     echo DRY-RUN: start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
@@ -91,9 +94,8 @@ if "%DRY_RUN%"=="1" (
 echo.
 echo ==========================================
 echo Startup commands dispatched.
-echo Flask Backend:      http://localhost:5001
-echo FastAPI Agent:      http://localhost:8000
-echo CopilotKit Runtime: http://localhost:5000
-echo React Frontend:     http://localhost:3000
+echo FastAPI Agent:      http://%SATGPT_PUBLIC_HOST%:%AGENT_PORT%
+echo CopilotKit Runtime: http://%SATGPT_PUBLIC_HOST%:%RUNTIME_PORT%
+echo React Frontend:     http://%SATGPT_PUBLIC_HOST%:%FRONTEND_PORT%
 echo ==========================================
 exit /b 0

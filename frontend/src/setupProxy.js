@@ -1,29 +1,44 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
-  // Proxy API requests to Flask backend (端口 5001)
+  const agentTarget =
+    process.env.REACT_APP_AGENT_API_URL || 'http://localhost:8000';
+  const runtimeTarget =
+    process.env.REACT_APP_COPILOTKIT_PROXY_TARGET || 'http://localhost:5000';
+
+  // Proxy legacy routes to FastAPI for backward compatibility.
   app.use(
-  ['/get_default', '/get_historical_map', '/get_unsupervised_map', '/get_flood_hotspot_map', '/get_water_regime_change_map', '/chatGPT', '/get_script', '/get_pdf', '/flask-health-check'],
+    [
+      '/get_default',
+      '/get_historical_map',
+      '/get_unsupervised_map',
+      '/get_flood_hotspot_map',
+      '/get_water_regime_change_map',
+      '/chatGPT',
+      '/get_script',
+      '/get_pdf',
+      '/flask-health-check',
+    ],
     createProxyMiddleware({
-      target: 'http://localhost:5001',
+      target: agentTarget,
       changeOrigin: true,
     })
   );
 
-  // Proxy FloodAgent API requests to FastAPI backend (端口 8000)
+  // Proxy FloodAgent API requests to FastAPI.
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'http://localhost:8000',
+      target: agentTarget,
       changeOrigin: true,
     })
   );
-  
-  // Proxy CopilotKit requests to Runtime (端口 5000)
+
+  // Proxy CopilotKit requests to the runtime service.
   app.use(
     '/copilotkit',
     createProxyMiddleware({
-      target: 'http://localhost:5000',
+      target: runtimeTarget,
       changeOrigin: true,
     })
   );
