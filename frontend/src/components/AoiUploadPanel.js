@@ -66,15 +66,15 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
     setSelectedAOI,
     setSelectedGridCords,
     isAoiEditing,
+    startAoiDraw,
+    startAoiEdit,
+    applyDraftAoi,
+    cancelDraftAoi,
     fitAoiBoundsOnMap,
   } = useMapContext();
 
   const {
     floodAgentState,
-    startAoiDraw,
-    startAoiEdit,
-    applyDraftAoi,
-    cancelDraftAoi,
     resetAgentSession,
     clearAgentVisualState,
   } = useAgentContext();
