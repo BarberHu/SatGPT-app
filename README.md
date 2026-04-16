@@ -85,7 +85,7 @@ REACT_APP_MAPBOX_ACCESS_KEY=your-mapbox-token
 Your local `.env` is the actual runtime configuration file.
 When you use the Windows scripts, public frontend variables are synced from
 the root `.env` into `frontend/.env.local` automatically.
-Flask / Agent / Runtime / Frontend ports are also configured from the root `.env`.
+Agent / Runtime / Frontend ports are also configured from the root `.env`.
 
 ### Start Services
 
@@ -94,16 +94,13 @@ Flask / Agent / Runtime / Frontend ports are also configured from the root `.env
 .\start_all.bat
 
 # Or start individually:
-# Terminal 1: Flask Backend (port 5001)
-python app.py
-
-# Terminal 2: FastAPI Agent (port 8000)
+# Terminal 1: FastAPI Agent (port 8000)
 cd agent && python server.py
 
-# Terminal 3: CopilotKit Runtime (port 5000)
+# Terminal 2: CopilotKit Runtime (port 5000)
 cd runtime && npm run dev
 
-# Terminal 4: React Frontend (port 3000)
+# Terminal 3: React Frontend (port 3000)
 cd frontend && npm start
 ```
 

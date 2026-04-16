@@ -12,9 +12,8 @@
 
 - `scripts\windows\start_windows.bat`
   - Treat the repository root `.env` as the actual runtime config file.
-  - Read Flask / Agent / Runtime / Frontend ports from the root `.env`.
+  - Read Agent / Runtime / Frontend ports from the root `.env`.
   - Sync public `REACT_APP_*` variables from the root `.env` into `frontend\.env.local`.
-  - Start Flask backend on `5001`.
   - Start FastAPI agent on `8000`.
   - Start CopilotKit runtime on `5000`.
   - Start React frontend on `3000`.

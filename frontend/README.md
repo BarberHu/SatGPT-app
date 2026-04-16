@@ -149,7 +149,7 @@ For production deployment, you have several options:
 
 ## API Endpoints
 
-The Flask backend provides these API endpoints:
+The FastAPI backend provides these legacy-compatible endpoints:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
