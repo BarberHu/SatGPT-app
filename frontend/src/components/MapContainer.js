@@ -180,6 +180,7 @@ function MapContainer() {
   const gridClickButtonRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
   const lastConfirmationFocusRef = useRef(null);
+  const catalogLayerSignatureRef = useRef({});
   const gridClickEnabledRef = useRef(true);
   const programmaticDrawMutationRef = useRef(false);
   const isAoiEditingRef = useRef(false);
@@ -347,7 +348,18 @@ function MapContainer() {
         if (map.getSource(id)) {
           map.removeSource(id);
         }
+        delete catalogLayerSignatureRef.current[id];
       });
+  }, []);
+
+  const removeCatalogMapLayer = useCallback((map, mapLayerId) => {
+    if (map.getLayer(mapLayerId)) {
+      map.removeLayer(mapLayerId);
+    }
+    if (map.getSource(mapLayerId)) {
+      map.removeSource(mapLayerId);
+    }
+    delete catalogLayerSignatureRef.current[mapLayerId];
   }, []);
 
   const getExistingLayerBands = useCallback((map) => {
@@ -1334,17 +1346,7 @@ function MapContainer() {
     if (!map || !map.isStyleLoaded()) return;
 
     if (appMode !== 'agent') {
-      (map.getStyle()?.layers || [])
-        .map((layer) => layer.id)
-        .filter((id) => isCatalogMapLayerId(id))
-        .forEach((id) => {
-          if (map.getLayer(id)) {
-            map.removeLayer(id);
-          }
-          if (map.getSource(id)) {
-            map.removeSource(id);
-          }
-        });
+      removeCatalogMapLayers(map);
       return;
     }
 
@@ -1361,38 +1363,42 @@ function MapContainer() {
 
       activeLayerIds.add(mapLayerId);
 
-      if (map.getLayer(mapLayerId)) {
-        map.removeLayer(mapLayerId);
-      }
-      if (map.getSource(mapLayerId)) {
-        map.removeSource(mapLayerId);
-      }
-
       if (!descriptor?.tile_url || !agentRecommendedLayerVisibility?.[layerId]) {
+        removeCatalogMapLayer(map, mapLayerId);
         return;
       }
 
+      const nextSignature = JSON.stringify({
+        tile_url: descriptor.tile_url,
+        opacity: mapDefinition.layer?.paint?.['raster-opacity'] ?? null,
+      });
+      const existingSignature = catalogLayerSignatureRef.current[mapLayerId];
+      const layerExists = Boolean(map.getLayer(mapLayerId));
+      const sourceExists = Boolean(map.getSource(mapLayerId));
+
+      // Keep already-mounted raster layers stable while other recommended layers finish loading.
+      if (layerExists && sourceExists && existingSignature === nextSignature) {
+        return;
+      }
+
+      removeCatalogMapLayer(map, mapLayerId);
       map.addSource(mapLayerId, mapDefinition.source);
       map.addLayer({
         ...mapDefinition.layer,
         source: mapLayerId,
       });
+      catalogLayerSignatureRef.current[mapLayerId] = nextSignature;
     });
 
     (map.getStyle()?.layers || [])
       .map((layer) => layer.id)
       .filter((id) => isCatalogMapLayerId(id) && !activeLayerIds.has(id))
       .forEach((id) => {
-        if (map.getLayer(id)) {
-          map.removeLayer(id);
-        }
-        if (map.getSource(id)) {
-          map.removeSource(id);
-        }
+        removeCatalogMapLayer(map, id);
       });
 
     reconcileLayerOrder(map);
-  }, [agentRecommendedLayerData, agentRecommendedLayerVisibility, appMode, reconcileLayerOrder]);
+  }, [agentRecommendedLayerData, agentRecommendedLayerVisibility, appMode, reconcileLayerOrder, removeCatalogMapLayer, removeCatalogMapLayers]);
 
   const displayedAoi = isAoiEditing
     ? null
