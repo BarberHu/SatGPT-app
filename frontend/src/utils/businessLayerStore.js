@@ -150,6 +150,7 @@ export function buildBusinessLayerRecordFromAoi(aoi, overrides = {}) {
     created_at: createdAt,
     updated_at: now,
     is_active: Boolean(overrides.is_active ?? true),
+    is_visible: Boolean(overrides.is_visible ?? true),
     origin: overrides.origin || (isDrawLike ? 'draw' : 'upload'),
     layer_role: overrides.layer_role || 'business_layer',
   };
@@ -201,7 +202,10 @@ export async function listBusinessLayerRecords(namespace) {
     request.onsuccess = () => {
       db.close();
       const records = (request.result || [])
-        .map(({ storage_key, namespace: recordNamespace, ...record }) => record)
+        .map(({ storage_key, namespace: recordNamespace, ...record }) => ({
+          ...record,
+          is_visible: record.is_visible !== false,
+        }))
         .sort((left, right) => {
           const leftSortIndex = Number.isFinite(left.sort_index) ? left.sort_index : null;
           const rightSortIndex = Number.isFinite(right.sort_index) ? right.sort_index : null;

@@ -515,6 +515,8 @@ function AgentPanel() {
     setAgentSelectedPeriod,
     agentSelectedType,
     setAgentSelectedType,
+    agentShowBaseImagery,
+    setAgentShowBaseImagery,
     agentShowFloodDetection,
     setAgentShowFloodDetection,
     agentShowPopulationLayer,
@@ -537,6 +539,7 @@ function AgentPanel() {
     setAgentTileError,
     businessLayers,
     selectedAOI,
+    toggleBusinessLayerVisibility,
     activateBusinessLayerRecord,
     deleteBusinessLayer,
   } = useAppContext();
@@ -554,6 +557,7 @@ function AgentPanel() {
     dates: false,
     imagery: false,
     layers: false,
+    layerManager: true,
     impact: false,
     spatialScope: true,
     chatHistory: false,
@@ -619,7 +623,219 @@ function AgentPanel() {
     if (normalizedSource === 'edited') return 'edited';
     return normalizedSource || 'scope';
   }, []);
+  const selectedPeriodMeta = useMemo(
+    () => ({
+      pre_date: { label: 'Pre-Flood' },
+      peek_date: { label: 'Peak' },
+      after_date: { label: 'Post-Flood' },
+    }[agentSelectedPeriod] || { label: agentSelectedPeriod || 'Period' }),
+    [agentSelectedPeriod]
+  );
+  const activeImageryDescriptor = agentImagery?.[agentSelectedPeriod]?.[agentSelectedType] || null;
+  const layerManagerGroups = useMemo(() => {
+    const baseImageryTitle = agentSelectedType === 'sentinel2' ? 'Base Imagery · Sentinel-2' : 'Base Imagery · Sentinel-1';
+    const baseImagerySubtitleParts = [selectedPeriodMeta.label];
+    if (activeImageryDescriptor?.date) {
+      baseImagerySubtitleParts.push(activeImageryDescriptor.date);
+    }
+    if (activeImageryDescriptor?.resolution) {
+      baseImagerySubtitleParts.push(`${activeImageryDescriptor.resolution}m`);
+    }
 
+    const groups = [
+      {
+        key: 'imagery',
+        label: 'Imagery',
+        items: [
+          {
+            id: 'base-imagery',
+            title: baseImageryTitle,
+            subtitle: baseImagerySubtitleParts.join(' · '),
+            checked: Boolean(agentShowBaseImagery && activeImageryDescriptor?.tile_url),
+            disabled: !activeImageryDescriptor?.tile_url,
+            loading: Boolean(agentImageryLoading || agentLayerLoading['base-imagery']),
+            status: activeImageryDescriptor?.tile_url
+              ? (agentShowBaseImagery ? 'Visible' : 'Hidden')
+              : 'Unavailable',
+            tone: activeImageryDescriptor?.tile_url
+              ? (agentShowBaseImagery ? 'ready' : 'off')
+              : 'idle',
+            onToggle: () => {
+              if (activeImageryDescriptor?.tile_url) {
+                setAgentShowBaseImagery((previous) => !previous);
+              }
+            },
+          },
+        ],
+      },
+      {
+        key: 'analysis',
+        label: 'Analysis',
+        items: [
+          {
+            id: 'analysis-flood-detection',
+            title: 'Flood Detection',
+            subtitle: analysisDisplayEnabled ? 'Core flood mask generated from Sentinel imagery' : 'Available after event confirmation',
+            checked: Boolean(agentShowFloodDetection && analysisDisplayEnabled),
+            disabled: !analysisDisplayEnabled,
+            loading: Boolean(agentLayerLoading['flood-detection']),
+            status: !analysisDisplayEnabled ? 'Unavailable' : (agentShowFloodDetection ? 'Visible' : 'Hidden'),
+            tone: !analysisDisplayEnabled ? 'idle' : (agentShowFloodDetection ? 'ready' : 'off'),
+            onToggle: () => {
+              if (analysisDisplayEnabled) {
+                setAgentShowFloodDetection((previous) => !previous);
+              }
+            },
+          },
+          {
+            id: 'analysis-population',
+            title: 'Population Impact',
+            subtitle: agentImpactData?.layers?.population?.tile_url
+              ? 'WorldPop exposure overlay'
+              : 'Impact tiles will load on demand',
+            checked: Boolean(agentShowPopulationLayer && analysisDisplayEnabled),
+            disabled: !analysisDisplayEnabled,
+            loading: Boolean(agentLayerLoading.population || (agentShowPopulationLayer && agentImpactLoading)),
+            status: !analysisDisplayEnabled
+              ? 'Unavailable'
+              : (agentShowPopulationLayer ? 'Visible' : (agentImpactData?.layers?.population?.tile_url ? 'Hidden' : 'Pending')),
+            tone: !analysisDisplayEnabled
+              ? 'idle'
+              : (agentShowPopulationLayer ? 'ready' : (agentImpactData?.layers?.population?.tile_url ? 'off' : 'pending')),
+            onToggle: () => {
+              if (analysisDisplayEnabled) {
+                setAgentShowPopulationLayer((previous) => !previous);
+              }
+            },
+          },
+          {
+            id: 'analysis-urban',
+            title: 'Built-up Area',
+            subtitle: agentImpactData?.layers?.urban?.tile_url
+              ? 'Built-up footprint impact overlay'
+              : 'Impact tiles will load on demand',
+            checked: Boolean(agentShowUrbanLayer && analysisDisplayEnabled),
+            disabled: !analysisDisplayEnabled,
+            loading: Boolean(agentLayerLoading.urban || (agentShowUrbanLayer && agentImpactLoading)),
+            status: !analysisDisplayEnabled
+              ? 'Unavailable'
+              : (agentShowUrbanLayer ? 'Visible' : (agentImpactData?.layers?.urban?.tile_url ? 'Hidden' : 'Pending')),
+            tone: !analysisDisplayEnabled
+              ? 'idle'
+              : (agentShowUrbanLayer ? 'ready' : (agentImpactData?.layers?.urban?.tile_url ? 'off' : 'pending')),
+            onToggle: () => {
+              if (analysisDisplayEnabled) {
+                setAgentShowUrbanLayer((previous) => !previous);
+              }
+            },
+          },
+          {
+            id: 'analysis-landcover',
+            title: 'Land Cover',
+            subtitle: agentImpactData?.layers?.landcover?.tile_url
+              ? 'ESA WorldCover class overlay'
+              : 'Impact tiles will load on demand',
+            checked: Boolean(agentShowLandcoverLayer && analysisDisplayEnabled),
+            disabled: !analysisDisplayEnabled,
+            loading: Boolean(agentLayerLoading.landcover || (agentShowLandcoverLayer && agentImpactLoading)),
+            status: !analysisDisplayEnabled
+              ? 'Unavailable'
+              : (agentShowLandcoverLayer ? 'Visible' : (agentImpactData?.layers?.landcover?.tile_url ? 'Hidden' : 'Pending')),
+            tone: !analysisDisplayEnabled
+              ? 'idle'
+              : (agentShowLandcoverLayer ? 'ready' : (agentImpactData?.layers?.landcover?.tile_url ? 'off' : 'pending')),
+            onToggle: () => {
+              if (analysisDisplayEnabled) {
+                setAgentShowLandcoverLayer((previous) => !previous);
+              }
+            },
+          },
+        ],
+      },
+    ];
+
+    if (confirmedRecommendedCatalogLayers.length > 0) {
+      groups.push({
+        key: 'recommended',
+        label: 'Recommended',
+        items: confirmedRecommendedCatalogLayers.map((layer) => {
+          const descriptor = agentRecommendedLayerData?.[layer.id] || null;
+          const visible = Boolean(agentRecommendedLayerVisibility?.[layer.id]);
+          const loading = Boolean(agentLayerLoading?.[layer.id]);
+          return {
+            id: `recommended-${layer.id}`,
+            title: layer.title,
+            subtitle: layer.summary || layer.ui_profile?.group_label || 'Recommended catalog layer',
+            checked: visible,
+            disabled: !analysisDisplayEnabled,
+            loading,
+            status: !analysisDisplayEnabled
+              ? 'Unavailable'
+              : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')),
+            tone: !analysisDisplayEnabled
+              ? 'idle'
+              : (loading ? 'loading' : (visible ? (descriptor?.tile_url ? 'ready' : 'pending') : 'off')),
+            badge: layer.ui_profile?.badge_label || null,
+            onToggle: () => {
+              if (analysisDisplayEnabled) {
+                setAgentRecommendedLayerVisibility((previous) => ({
+                  ...previous,
+                  [layer.id]: !previous[layer.id],
+                }));
+              }
+            },
+          };
+        }),
+      });
+    }
+
+    if (businessLayers?.length) {
+      groups.push({
+        key: 'scopes',
+        label: 'Spatial Scopes',
+        items: businessLayers.map((layer) => ({
+          id: `scope-${layer.id}`,
+          title: `@${layer.label}`,
+          subtitle: `${scopeSourceLabel(layer.source)}${layer.is_active ? ' · active scope' : ''}`,
+          checked: layer.is_visible !== false,
+          disabled: false,
+          loading: false,
+          status: layer.is_visible !== false ? 'Visible' : 'Hidden',
+          tone: layer.is_visible !== false ? 'ready' : 'off',
+          badge: layer.is_active ? 'Active' : null,
+          onToggle: () => toggleBusinessLayerVisibility(layer.id),
+        })),
+      });
+    }
+
+    return groups.filter((group) => group.items.length > 0);
+  }, [
+    activeImageryDescriptor,
+    agentImageryLoading,
+    agentImpactData,
+    agentImpactLoading,
+    agentLayerLoading,
+    agentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
+    agentSelectedType,
+    agentShowBaseImagery,
+    agentShowFloodDetection,
+    agentShowLandcoverLayer,
+    agentShowPopulationLayer,
+    agentShowUrbanLayer,
+    analysisDisplayEnabled,
+    businessLayers,
+    confirmedRecommendedCatalogLayers,
+    scopeSourceLabel,
+    selectedPeriodMeta.label,
+    setAgentRecommendedLayerVisibility,
+    setAgentShowBaseImagery,
+    setAgentShowFloodDetection,
+    setAgentShowLandcoverLayer,
+    setAgentShowPopulationLayer,
+    setAgentShowUrbanLayer,
+    toggleBusinessLayerVisibility,
+  ]);
   const handleOpenSpatialUpload = useCallback(() => {
     uploadPanelRef.current?.openFilePicker?.();
     trackUxEvent('agent_scope_upload_open', { mode: 'agent' });
@@ -1389,6 +1605,55 @@ function AgentPanel() {
                   )
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className={`control-section ${expandedSections.layerManager ? 'expanded' : ''}`}>
+        <div className="section-header" onClick={() => toggleSection('layerManager')}>
+          <span className="section-icon"><i className="fa fa-layer-group" aria-hidden="true" /></span>
+          <span className="section-title">Layer Manager</span>
+          <span className={`expand-icon ${expandedSections.layerManager ? 'expanded' : ''}`}>▼</span>
+        </div>
+        {expandedSections.layerManager && (
+          <div className="section-body layer-manager-body">
+            <div className="layer-manager-groups">
+              {layerManagerGroups.map((group) => (
+                <div className="layer-manager-group" key={group.key}>
+                  <div className="layer-manager-group-header">
+                    <span className="layer-manager-group-title">{group.label}</span>
+                    <span className="layer-manager-group-count">{group.items.length}</span>
+                  </div>
+                  <div className="layer-manager-items">
+                    {group.items.map((item) => (
+                      <div
+                        className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${item.disabled ? 'is-disabled' : ''}`}
+                        key={item.id}
+                      >
+                        <label className="layer-manager-item-main">
+                          <input
+                            type="checkbox"
+                            checked={item.checked}
+                            onChange={item.onToggle}
+                            disabled={item.disabled}
+                          />
+                          <div className="layer-manager-item-copy">
+                            <span className="layer-manager-item-title">{item.title}</span>
+                          </div>
+                        </label>
+                        <div className="layer-manager-item-side">
+                          {item.loading ? (
+                            <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
+                          ) : (
+                            <span className={`layer-manager-status ${item.tone || 'idle'}`}>{item.status}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
