@@ -48,6 +48,7 @@ const defaultFloodAgentState = {
 const defaultAgentLayerVisibility = {
   agentSelectedPeriod: 'peek_date',
   agentSelectedType: 'sentinel2',
+  agentShowBaseImagery: true,
   agentShowFloodDetection: true,
   agentShowPopulationLayer: false,
   agentShowUrbanLayer: false,
@@ -154,6 +155,7 @@ export const AppProvider = ({ children }) => {
   // ========== Agent Mode Control States ==========
   const [agentSelectedPeriod, setAgentSelectedPeriod] = useState('peek_date'); // 'pre_date' | 'peek_date' | 'after_date'
   const [agentSelectedType, setAgentSelectedType] = useState('sentinel2'); // 'sentinel2' | 'sentinel1'
+  const [agentShowBaseImagery, setAgentShowBaseImagery] = useState(true);
   const [agentShowFloodDetection, setAgentShowFloodDetection] = useState(true);
   const [agentShowPopulationLayer, setAgentShowPopulationLayer] = useState(false);
   const [agentShowUrbanLayer, setAgentShowUrbanLayer] = useState(false);
@@ -193,6 +195,7 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerVisibility({});
     setAgentLayerLoading({});
     setAgentTileError(null);
+    setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
     setAgentShowFloodDetection(false);
     setAgentShowPopulationLayer(false);
     setAgentShowUrbanLayer(false);
@@ -205,8 +208,28 @@ export const AppProvider = ({ children }) => {
       if (!previous.length) {
         return previous;
       }
-      return activateBusinessLayer(previous, activeLayerId);
+      return activateBusinessLayer(previous, activeLayerId).map((record) => (
+        activeLayerId && record.id === activeLayerId
+          ? { ...record, is_visible: true }
+          : record
+      ));
     });
+  }, []);
+
+  const toggleBusinessLayerVisibility = useCallback((layerId) => {
+    if (!layerId) {
+      return;
+    }
+
+    setBusinessLayers((previous) => previous.map((record) => (
+      record.id === layerId
+        ? {
+          ...record,
+          is_visible: !(record.is_visible !== false),
+          updated_at: new Date().toISOString(),
+        }
+        : record
+    )));
   }, []);
 
   const fitAoiBoundsOnMap = useCallback((aoi, { padding = 64, duration = 700 } = {}) => {
@@ -305,11 +328,19 @@ export const AppProvider = ({ children }) => {
       }
 
       if (nextSelectedAoi?.id) {
-        return activateBusinessLayer(remaining, nextSelectedAoi.id);
+        return activateBusinessLayer(remaining, nextSelectedAoi.id).map((record) => (
+          record.id === nextSelectedAoi.id
+            ? { ...record, is_visible: true }
+            : record
+        ));
       }
 
       const activeCandidate = remaining.find((item) => item.is_active) || remaining[0];
-      return activateBusinessLayer(remaining, activeCandidate?.id || null);
+      return activateBusinessLayer(remaining, activeCandidate?.id || null).map((record) => (
+        activeCandidate?.id && record.id === activeCandidate.id
+          ? { ...record, is_visible: true }
+          : record
+      ));
     });
   }, []);
 
@@ -386,6 +417,7 @@ export const AppProvider = ({ children }) => {
     setAgentTileError(null);
     setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
     setAgentSelectedType(defaultAgentLayerVisibility.agentSelectedType);
+    setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
     setAgentShowFloodDetection(defaultAgentLayerVisibility.agentShowFloodDetection);
     setAgentShowPopulationLayer(defaultAgentLayerVisibility.agentShowPopulationLayer);
     setAgentShowUrbanLayer(defaultAgentLayerVisibility.agentShowUrbanLayer);
@@ -753,6 +785,7 @@ export const AppProvider = ({ children }) => {
     agentVisualResetVersion,
     setBusinessLayers,
     setBusinessLayerActive,
+    toggleBusinessLayerVisibility,
     activateBusinessLayerRecord,
     fitAoiBoundsOnMap,
     upsertBusinessLayerRecord,
@@ -784,6 +817,8 @@ export const AppProvider = ({ children }) => {
     setAgentSelectedPeriod,
     agentSelectedType,
     setAgentSelectedType,
+    agentShowBaseImagery,
+    setAgentShowBaseImagery,
     agentShowFloodDetection,
     setAgentShowFloodDetection,
     agentShowPopulationLayer,

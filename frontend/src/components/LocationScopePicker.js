@@ -7,6 +7,19 @@ import './LocationScopePicker.css';
 const PREVIEW_SOURCE = 'location_search_preview';
 const IMPORT_SOURCE = 'place_search';
 
+function buildPlaceScopeLabel(rawLabel) {
+  const normalized = String(rawLabel || '').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  const firstSegment = normalized
+    .split(/[，,]/)[0]
+    ?.trim();
+
+  return firstSegment || normalized;
+}
+
 function normalizeImportedAoi(candidate) {
   const baseAoi = candidate?.resolved_aoi;
   if (!baseAoi?.geojson) {
@@ -14,7 +27,9 @@ function normalizeImportedAoi(candidate) {
   }
 
   const nextId = `${IMPORT_SOURCE}:${candidate.id}`;
-  const nextLabel = candidate.label || baseAoi.label || candidate.location || 'Place scope';
+  const nextLabel = buildPlaceScopeLabel(
+    candidate.label || baseAoi.label || candidate.location || 'Place scope'
+  );
 
   return {
     ...baseAoi,
@@ -41,7 +56,9 @@ function buildPreviewAoi(candidate) {
   }
 
   const nextId = `${PREVIEW_SOURCE}:${candidate.id}`;
-  const nextLabel = candidate.label || baseAoi.label || candidate.location || 'Preview scope';
+  const nextLabel = buildPlaceScopeLabel(
+    candidate.label || baseAoi.label || candidate.location || 'Preview scope'
+  );
 
   return {
     ...baseAoi,

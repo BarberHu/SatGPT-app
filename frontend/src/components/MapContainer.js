@@ -207,6 +207,7 @@ function MapContainer() {
     // Agent control states
     agentSelectedPeriod,
     agentSelectedType,
+    agentShowBaseImagery,
     agentShowFloodDetection,
     agentShowPopulationLayer,
     agentShowUrbanLayer,
@@ -1133,7 +1134,7 @@ function MapContainer() {
       if (map.getSource(id)) map.removeSource(id);
     });
 
-    if (!agentImagery) return;
+    if (!agentImagery || !agentShowBaseImagery) return;
 
     setAgentTileError(null);
 
@@ -1198,7 +1199,7 @@ function MapContainer() {
       map.off('idle', finish);
       clearTimeout(timeout);
     };
-  }, [agentImagery, appMode, agentSelectedPeriod, agentSelectedType, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
+  }, [agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, agentSelectedType, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
 
   // ========== Effect B: Flood Detection Overlay ==========
   useEffect(() => {
@@ -1397,10 +1398,7 @@ function MapContainer() {
         .filter(Boolean)
     );
 
-    const activeLayers = (businessLayers || []).filter((layer) => layer?.is_active);
-    const visibleLayers = activeLayers.length
-      ? activeLayers
-      : ((businessLayers || []).length ? [businessLayers[0]] : []);
+    const visibleLayers = (businessLayers || []).filter((layer) => layer?.is_visible !== false);
 
     const features = visibleLayers
       .filter((layer) => layer?.geojson)
