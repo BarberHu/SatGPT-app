@@ -7,6 +7,7 @@ import ResultBox from './components/ResultBox';
 import Legends from './components/Legends';
 import Modals from './components/Modals';
 import Spinner from './components/Spinner';
+import AgentWorkspaceSidebar from './components/AgentWorkspaceSidebar';
 import { useAppContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
 
@@ -14,6 +15,8 @@ import useMapData from './hooks/useMapData';
 const COPILOTKIT_URL = process.env.REACT_APP_COPILOTKIT_URL || '/copilotkit';
 
 function App() {
+  const { appMode, agentSidebarCollapsed } = useAppContext();
+
   // Initialize map data loading hook
   useMapData();
   
@@ -36,21 +39,30 @@ function App() {
       agent="flood_agent"
       onError={handleCopilotError}
     >
-      <div className="water">
+      <div className={`water ${appMode === 'agent' ? 'water--agent' : ''} ${agentSidebarCollapsed ? 'water--agent-sidebar-collapsed' : ''}`}>
         <MapContainer />
         <div className="ui">
           <SettingsButton />
           <Legends />
-          <ChatBox />
+          <ModeBasedChatBox />
           <ModeBasedResultBox />
           <ControlPanel />
           <Warnings />
         </div>
+        <AgentWorkspaceSidebar />
         <Modals />
         <Spinner />
       </div>
     </CopilotKit>
   );
+}
+
+function ModeBasedChatBox() {
+  const { appMode } = useAppContext();
+
+  if (appMode === 'agent') return null;
+
+  return <ChatBox />;
 }
 
 // ResultBox only shown in Ask mode

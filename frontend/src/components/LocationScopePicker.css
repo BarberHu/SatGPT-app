@@ -23,6 +23,26 @@
   pointer-events: auto;
 }
 
+.location-scope-picker.embedded {
+  position: static;
+  width: 100%;
+  max-height: none;
+  padding: 12px;
+  gap: 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f8fafc 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: none;
+}
+
+.location-scope-picker-inline-note {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+  padding-bottom: 2px;
+}
+
 .location-scope-picker-header {
   display: flex;
   align-items: flex-start;
@@ -59,6 +79,10 @@
   gap: 10px;
 }
 
+.location-scope-picker.embedded .location-scope-picker-search {
+  gap: 8px;
+}
+
 .location-scope-picker-input {
   flex: 1;
   min-width: 0;
@@ -69,6 +93,13 @@
   background: #fff;
   color: #0f172a;
   font-size: 14px;
+}
+
+.location-scope-picker.embedded .location-scope-picker-input {
+  height: 38px;
+  padding: 0 12px;
+  font-size: 13px;
+  border-radius: 10px;
 }
 
 .location-scope-picker-input:focus {
@@ -86,6 +117,13 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.location-scope-picker.embedded .location-scope-picker-search-btn,
+.location-scope-picker.embedded .location-scope-picker-action {
+  height: 38px;
+  border-radius: 10px;
+  font-size: 12px;
 }
 
 .location-scope-picker-search-btn {
@@ -120,10 +158,15 @@
   padding-right: 4px;
 }
 
+.location-scope-picker.embedded .location-scope-picker-results {
+  max-height: 220px;
+  padding: 2px 2px 2px 0;
+}
+
 .location-scope-candidate {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: center;
   padding: 10px 12px;
   border-radius: 14px;
@@ -165,16 +208,35 @@
 .location-scope-candidate-check {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 54px;
+  justify-content: flex-end;
+  flex-shrink: 0;
   color: #334155;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.location-scope-candidate-check input {
+  margin: 0;
 }
 
 .location-scope-picker-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.location-scope-picker.embedded .location-scope-picker-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.location-scope-picker.embedded .location-scope-picker-action {
+  width: 100%;
+  justify-content: center;
 }
 
 .location-scope-picker-action.secondary {

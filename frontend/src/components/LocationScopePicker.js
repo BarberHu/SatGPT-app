@@ -89,7 +89,7 @@ function getFitPadding(dialogHeight, dialogWidth) {
   };
 }
 
-export default function LocationScopePicker({ isOpen, onClose }) {
+export default function LocationScopePicker({ isOpen = true, onClose, embedded = false }) {
   const {
     mapInstance,
     selectedAOI,
@@ -110,9 +110,10 @@ export default function LocationScopePicker({ isOpen, onClose }) {
   const pickerRef = useRef(null);
 
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
+  const isVisible = embedded || isOpen;
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isVisible) {
       return;
     }
 
@@ -121,7 +122,7 @@ export default function LocationScopePicker({ isOpen, onClose }) {
     setCandidates([]);
     setCheckedIds([]);
     setPreviewId(null);
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isVisible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const restorePreviousSelection = useCallback(() => {
     if (selectedAOI?.source !== PREVIEW_SOURCE) {
@@ -136,7 +137,7 @@ export default function LocationScopePicker({ isOpen, onClose }) {
   }, [onClose, restorePreviousSelection]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || embedded) {
       return undefined;
     }
 
@@ -149,7 +150,7 @@ export default function LocationScopePicker({ isOpen, onClose }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleClose, isOpen]);
+  }, [embedded, handleClose, isOpen]);
 
   const previewCandidateOnMap = useCallback((candidate) => {
     const previewAoi = buildPreviewAoi(candidate);
@@ -253,11 +254,20 @@ export default function LocationScopePicker({ isOpen, onClose }) {
     setBusinessLayerActive(firstImportedAoi.id);
     setSelectedAOI(firstImportedAoi);
     setWarning('');
-    onClose?.();
+
+    if (embedded) {
+      setCandidates([]);
+      setCheckedIds([]);
+      setPreviewId(null);
+      setQuery('');
+    } else {
+      onClose?.();
+    }
   }, [
     candidates,
     checkedSet,
     clearAgentVisualState,
+    embedded,
     onClose,
     registerBusinessLayerFromAoi,
     setBusinessLayerActive,
@@ -265,97 +275,103 @@ export default function LocationScopePicker({ isOpen, onClose }) {
     setWarning,
   ]);
 
-  if (!isOpen) {
+  if (!isVisible) {
     return null;
   }
 
-  return createPortal(
-    <div className="location-scope-picker-overlay">
-      <div
-        ref={pickerRef}
-        className="location-scope-picker"
-      >
+  const pickerContent = (
+    <div
+      ref={pickerRef}
+      className={`location-scope-picker ${embedded ? 'embedded' : ''}`}
+    >
+      {!embedded ? (
         <div className="location-scope-picker-header">
           <div>
             <div className="location-scope-picker-title">Search Place</div>
             <div className="location-scope-picker-subtitle">
-              Type a place name, preview candidate boundaries, then add the selected ones to Spatial Scope.
+              Type a place name, preview candidate boundaries, then add the selected ones to Vector Layers.
             </div>
           </div>
           <button type="button" className="location-scope-picker-close" onClick={handleClose}>
             <i className="fa fa-times" aria-hidden="true" />
           </button>
         </div>
-
-        <div className="location-scope-picker-search">
-          <input
-            type="text"
-            className="location-scope-picker-input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleSearch();
-              }
-            }}
-            placeholder="e.g. Guangxi, China"
-          />
-          <button
-            type="button"
-            className="location-scope-picker-search-btn"
-            onClick={handleSearch}
-            disabled={loading}
-          >
-            {loading ? 'Searching...' : 'Search'}
-          </button>
+      ) : (
+        <div className="location-scope-picker-inline-note">
+          Search a place name, preview the boundary on the map, then add it to Vector Layers.
         </div>
+      )}
 
-        {error ? <div className="location-scope-picker-feedback error">{error}</div> : null}
+      <div className="location-scope-picker-search">
+        <input
+          type="text"
+          className="location-scope-picker-input"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              handleSearch();
+            }
+          }}
+          placeholder="e.g. Guangxi, China"
+        />
+        <button
+          type="button"
+          className="location-scope-picker-search-btn"
+          onClick={handleSearch}
+          disabled={loading}
+        >
+          {loading ? 'Searching...' : 'Search'}
+        </button>
+      </div>
 
-        {candidates.length ? (
-          <div className="location-scope-picker-results">
-            {candidates.map((candidate) => {
-              const isChecked = checkedSet.has(candidate.id);
-              const isPreviewing = previewId === candidate.id;
+      {error ? <div className="location-scope-picker-feedback error">{error}</div> : null}
 
-              return (
-                <div
-                  key={candidate.id}
-                  className={`location-scope-candidate ${isPreviewing ? 'previewing' : ''}`}
+      {candidates.length ? (
+        <div className="location-scope-picker-results">
+          {candidates.map((candidate) => {
+            const isChecked = checkedSet.has(candidate.id);
+            const isPreviewing = previewId === candidate.id;
+
+            return (
+              <div
+                key={candidate.id}
+                className={`location-scope-candidate ${isPreviewing ? 'previewing' : ''}`}
+              >
+                <button
+                  type="button"
+                  className="location-scope-candidate-main"
+                  onClick={() => previewCandidateOnMap(candidate)}
                 >
-                  <button
-                    type="button"
-                    className="location-scope-candidate-main"
-                    onClick={() => previewCandidateOnMap(candidate)}
-                  >
-                    <span className="location-scope-candidate-title">{candidate.label}</span>
-                    <span className="location-scope-candidate-meta">
-                      {candidate.source}
-                      {candidate.raw_type ? ` - ${candidate.raw_type}` : ''}
-                    </span>
-                  </button>
-                  <label className="location-scope-candidate-check">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => toggleChecked(candidate.id)}
-                    />
-                    <span>Select</span>
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+                  <span className="location-scope-candidate-title">{candidate.label}</span>
+                  <span className="location-scope-candidate-meta">
+                    {candidate.source}
+                    {candidate.raw_type ? ` - ${candidate.raw_type}` : ''}
+                  </span>
+                </button>
+                <label className="location-scope-candidate-check">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleChecked(candidate.id)}
+                  />
+                  <span>Add</span>
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
+      {(candidates.length || error) ? (
         <div className="location-scope-picker-actions">
           <button
             type="button"
             className="location-scope-picker-action secondary"
-            onClick={handleClose}
+            onClick={embedded ? restorePreviousSelection : handleClose}
           >
-            Cancel
+            {embedded ? 'Reset' : 'Cancel'}
           </button>
           <button
             type="button"
@@ -363,10 +379,20 @@ export default function LocationScopePicker({ isOpen, onClose }) {
             onClick={handleConfirm}
             disabled={!checkedIds.length}
           >
-            Add To Spatial Scope
+            Add To Layers
           </button>
         </div>
-      </div>
+      ) : null}
+    </div>
+  );
+
+  if (embedded) {
+    return pickerContent;
+  }
+
+  return createPortal(
+    <div className="location-scope-picker-overlay">
+      {pickerContent}
     </div>,
     document.body
   );

@@ -70,6 +70,7 @@ export const AppProvider = ({ children }) => {
   
   // 婵☆垪鈧磭纭€闁告帒娲﹀畷? 'ask' 闁?'agent'
   const [appMode, setAppMode] = useState('ask');
+  const [agentSidebarCollapsed, setAgentSidebarCollapsed] = useState(false);
   
   // ChatBox 婵☆垪鈧磭纭€闁告帒娲﹀畷?(濞?appMode 闁告艾鏈?
   const [chatMode, setChatMode] = useState('ask');
@@ -798,6 +799,8 @@ export const AppProvider = ({ children }) => {
     // App Mode (ask/agent)
     appMode,
     setAppMode,
+    agentSidebarCollapsed,
+    setAgentSidebarCollapsed,
     chatMode,
     setChatMode,
     

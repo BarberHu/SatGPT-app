@@ -1,0 +1,101 @@
+.agent-workspace-sidebar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(420px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 20px;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.18);
+  z-index: 6;
+  overflow: hidden;
+  transition: width 0.22s ease, box-shadow 0.22s ease;
+}
+
+.agent-workspace-sidebar.is-collapsed {
+  width: 56px;
+}
+
+.agent-workspace-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(255, 255, 255, 0.98) 100%);
+}
+
+.agent-workspace-sidebar.is-collapsed .agent-workspace-sidebar__header {
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 12px 8px;
+}
+
+.agent-workspace-sidebar__title-block {
+  min-width: 0;
+}
+
+.agent-workspace-sidebar__eyebrow {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-workspace-sidebar__title {
+  margin: 4px 0 0;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.agent-workspace-sidebar__collapse-btn {
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.agent-workspace-sidebar__collapse-btn:hover {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.agent-workspace-sidebar__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+@media only screen and (max-width: 900px) {
+  .agent-workspace-sidebar {
+    top: auto;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+    height: min(72vh, 760px);
+  }
+
+  .agent-workspace-sidebar.is-collapsed {
+    width: 56px;
+    height: 132px;
+    left: auto;
+  }
+}

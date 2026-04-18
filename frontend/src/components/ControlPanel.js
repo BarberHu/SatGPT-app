@@ -113,16 +113,15 @@ function ControlPanel() {
       
       <hr style={{ margin: '10px 0px 20px 0px' }} />
 
-      {/* Content based on mode - synced with ChatBox toggle */}
       {appMode === 'agent' ? (
         <div className="agent-mode-content">
           <AgentPanel />
         </div>
       ) : (
-        <>
-          {/* Layer Control Section */}
-          <div className="slect-c">
-            <h2>Layer Control</h2>
+      <>
+        {/* Layer Control Section */}
+        <div className="slect-c">
+          <h2>Layer Control</h2>
         
         <div style={{ paddingLeft: '10px' }}>
           <div>
@@ -330,7 +329,7 @@ function ControlPanel() {
           <p>Help</p>
         </div>
       </div>
-        </>
+      </>
       )}
     </div>
   );
