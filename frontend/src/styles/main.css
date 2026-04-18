@@ -876,7 +876,16 @@ p.error {
 
 .mapboxgl-ctrl-top-right .mapboxgl-ctrl {
   float: left !important;
-  margin: 10px 0px 0px 10px !important;
+  margin: 20px 0px 0px 10px !important;
+}
+
+.water--agent .mapboxgl-ctrl-top-right {
+  right: 440px;
+  transition: right 0.22s ease;
+}
+
+.water--agent.water--agent-sidebar-collapsed .mapboxgl-ctrl-top-right {
+  right: 76px;
 }
 
 .satgpt-map-shell {
@@ -890,17 +899,24 @@ p.error {
 }
 
 .satgpt-map-toggle-btn {
-  min-width: 54px;
+  width: 34px;
+  min-width: 34px;
   height: 34px;
-  padding: 0 10px;
+  padding: 0;
   border: 0;
   background: #ffffff;
   color: #475569;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 14px;
   border-radius: 10px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.satgpt-map-toggle-btn i {
+  line-height: 1;
 }
 
 .satgpt-map-toggle-btn:hover {
@@ -985,6 +1001,11 @@ a.mapboxgl-ctrl-logo {
 /*****************************/
 
 @media only screen and (max-width: 600px) {
+  .water--agent .mapboxgl-ctrl-top-right,
+  .water--agent.water--agent-sidebar-collapsed .mapboxgl-ctrl-top-right {
+    right: 12px;
+  }
+
   .chat-box {
     width: 95vw;
     left: 2.5vw;
@@ -1006,6 +1027,13 @@ a.mapboxgl-ctrl-logo {
 
   .population-health-soil-container {
     left: 60px;
+  }
+}
+
+@media only screen and (max-width: 900px) {
+  .water--agent .mapboxgl-ctrl-top-right,
+  .water--agent.water--agent-sidebar-collapsed .mapboxgl-ctrl-top-right {
+    right: 12px;
   }
 }
 

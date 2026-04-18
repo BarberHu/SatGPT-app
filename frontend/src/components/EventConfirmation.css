@@ -28,8 +28,8 @@
 
 /* 模态弹窗容器 */
 .event-confirmation-modal {
-  max-width: 1200px;
-  width: 90%;
+  max-width: 960px;
+  width: min(960px, calc(100vw - 48px));
   max-height: 90vh;
   overflow-y: auto;
   animation: slideUp 0.3s ease;
@@ -105,7 +105,7 @@
 
 .confirmation-grid {
   display: grid;
-  grid-template-columns: 1.05fr 0.95fr 1fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
   gap: 16px;
   padding: 20px;
 }
@@ -184,57 +184,6 @@
   margin-top: 20px;
   padding-top: 20px;
   border-top: 1px solid #e5e7eb;
-}
-
-.aoi-status-card {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border-radius: 12px;
-  background: white;
-  border: 1px solid #dbe4ee;
-}
-
-.aoi-status-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 13px;
-  color: #475569;
-}
-
-.aoi-bounds {
-  margin-top: 12px;
-  padding: 12px;
-  border-radius: 12px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.boundary-actions {
-  margin: 12px 0 14px;
-}
-
-.confirmation-banner {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.confirmation-banner.warning {
-  background: #fff7ed;
-  color: #9a3412;
-  border: 1px solid #fdba74;
-}
-
-.confirmation-banner.error {
-  background: #fef2f2;
-  color: #991b1b;
-  border: 1px solid #fca5a5;
 }
 
 .recommended-layers-list {

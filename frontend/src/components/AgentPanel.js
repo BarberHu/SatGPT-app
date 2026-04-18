@@ -7,25 +7,20 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useCoAgent, useLangGraphInterrupt, useCopilotMessagesContext } from "@copilotkit/react-core";
+import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
-import SourcesDrawer from './SourcesDrawer';
-import CatalogLayerPanel from './CatalogLayerPanel';
 import LocationScopePicker from './LocationScopePicker';
-import AoiUploadPanel from './AoiUploadPanel';
 import { getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
 import { buildAoiFromAgentState } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
-import { extractVisibleMessageText } from '../utils/mentionUtils';
 import {
-  buildVisibleCatalogLegendEntries,
   sortCatalogLayers,
 } from '../utils/catalogLayers';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 import './AgentPanel.css';
 
-// FloodAgent 默认状态
+// FloodAgent 榛樿鐘舵€?
 const defaultAgentState = {
   event: null,
   event_description: null,
@@ -72,19 +67,6 @@ const areAoiScopesEquivalent = (left, right) => {
 
 const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
 
-// Download report as Markdown file
-function downloadReport(report, eventName) {
-  const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${eventName || 'flood_analysis_report'}_${new Date().toISOString().split('T')[0]}.md`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
 // Download GEE JavaScript code file
 function downloadGEECode(code, eventName) {
   const blob = new Blob([code], { type: 'text/javascript;charset=utf-8' });
@@ -99,9 +81,10 @@ function downloadGEECode(code, eventName) {
 }
 
 /**
- * 影像信息图标组件
- * 显示每种影像类型在各个时期的元数据（来源、拼接、可用性等）
+ * 褰卞儚淇℃伅鍥炬爣缁勪欢
+ * 鏄剧ず姣忕褰卞儚绫诲瀷鍦ㄥ悇涓椂鏈熺殑鍏冩暟鎹紙鏉ユ簮銆佹嫾鎺ャ€佸彲鐢ㄦ€х瓑锛?
  */
+// eslint-disable-next-line no-unused-vars
 function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
   const [showPopover, setShowPopover] = useState(false);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
@@ -109,7 +92,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
   const popoverRef = useRef(null);
   const iconRef = useRef(null);
 
-  // 点击外部关闭 popover
+  // 鐐瑰嚮澶栭儴鍏抽棴 popover
   useEffect(() => {
     if (!showPopover) return;
     const handleClickOutside = (e) => {
@@ -124,7 +107,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showPopover]);
 
-  // 复制到剪贴板
+  // 澶嶅埗鍒板壀璐存澘
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(text);
@@ -141,25 +124,25 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     });
   };
 
-  // 计算 popover 位置
+  // 璁＄畻 popover 浣嶇疆
   const handleTogglePopover = (e) => {
     e.stopPropagation();
     if (!showPopover && iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect();
       const popoverWidth = 290;
       const popoverHeight = 380;
-      // 默认在图标右侧显示
+      // 榛樿鍦ㄥ浘鏍囧彸渚ф樉绀?
       let left = rect.right + 8;
       let top = rect.top - 10;
-      // 如果右边放不下，放到左侧
+      // 濡傛灉鍙宠竟鏀句笉涓嬶紝鏀惧埌宸︿晶
       if (left + popoverWidth > window.innerWidth - 10) {
         left = rect.left - popoverWidth - 8;
       }
-      // 如果左边也放不下，居中显示
+      // 濡傛灉宸﹁竟涔熸斁涓嶄笅锛屽眳涓樉绀?
       if (left < 10) {
         left = Math.max(10, (window.innerWidth - popoverWidth) / 2);
       }
-      // 如果底部超出，往上调
+      // 濡傛灉搴曢儴瓒呭嚭锛屽線涓婅皟
       if (top + popoverHeight > window.innerHeight - 10) {
         top = window.innerHeight - popoverHeight - 10;
       }
@@ -169,11 +152,11 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     setShowPopover(!showPopover);
   };
 
-  // 当前选中时期的影像数据
+  // 褰撳墠閫変腑鏃舵湡鐨勫奖鍍忔暟鎹?
   const currentPeriodData = imageryData?.[selectedPeriod]?.[type];
   const hasError = currentPeriodData?.error;
 
-  // 汇总三个时期的信息
+  // 姹囨€讳笁涓椂鏈熺殑淇℃伅
   const allPeriodsInfo = [
     { key: 'pre_date', label: 'Pre-Flood' },
     { key: 'peek_date', label: 'Peak' },
@@ -184,7 +167,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     data: imageryData?.[key]?.[type],
   }));
 
-  // 统计无影像的时期数量
+  // 缁熻鏃犲奖鍍忕殑鏃舵湡鏁伴噺
   const missingCount = allPeriodsInfo.filter(p => p.data?.error || p.data?.image_count === 0).length;
 
   const popoverContent = showPopover ? createPortal(
@@ -195,9 +178,9 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     >
       <div className="popover-header">
         <span className="popover-title">
-          {type === 'sentinel2' ? '🌍 Sentinel-2 Optical' : '📡 Sentinel-1 SAR'}
+          {type === 'sentinel2' ? 'Sentinel-2 Optical' : 'Sentinel-1 SAR'}
         </span>
-        <button className="popover-close" onClick={() => setShowPopover(false)}>✕</button>
+        <button className="popover-close" onClick={() => setShowPopover(false)}>x</button>
       </div>
       <div className="popover-body">
         {allPeriodsInfo.map(({ key, label, data }) => (
@@ -212,7 +195,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
             </div>
             {data?.error ? (
               <div className="no-imagery-detail">
-                <div className="no-imagery-msg">⚠️ {data.error}</div>
+                <div className="no-imagery-msg">{data.error}</div>
                 {data.search_range && (
                   <div className="imagery-meta-row">
                     <span className="meta-label">Search Range</span>
@@ -286,7 +269,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
                       title={`${data.id}\nClick to copy`}
                       onClick={() => copyToClipboard(data.id)}
                     >
-                      {copiedId === data.id ? '✓ Copied!' : data.id}
+                      {copiedId === data.id ? '鉁?Copied!' : data.id}
                     </span>
                   </div>
                 )}
@@ -323,7 +306,6 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
  */
 const LAYER_META = {
   flood_detection: {
-    icon: '🌊',
     title: 'Flood Detection',
     source: 'Sentinel-1 GRD (C-band SAR)',
     method: 'Otsu Change Detection',
@@ -332,16 +314,14 @@ const LAYER_META = {
     description: 'Detects newly flooded areas by comparing pre-flood and peak SAR backscatter, using Otsu thresholding on the change index. Permanent water bodies are excluded via JRC occurrence data.',
   },
   population: {
-    icon: '👥',
     title: 'Population Impact',
-    source: 'WorldPop — Global 100m Population',
+    source: 'WorldPop - Global 100m Population',
     method: 'Zonal Statistics',
     resolution: '100m',
     auxiliary: null,
     description: 'Estimates affected population by overlaying the flood mask on WorldPop gridded population density.',
   },
   urban: {
-    icon: '🏙️',
     title: 'Built-up Area',
     source: 'GHSL Built-up Surface 2020 (JRC)',
     method: 'Zonal Statistics',
@@ -350,7 +330,6 @@ const LAYER_META = {
     description: 'Calculates the flooded built-up area using the Global Human Settlement Layer.',
   },
   landcover: {
-    icon: '🌳',
     title: 'Land Cover',
     source: 'ESA WorldCover 2021 (v200)',
     method: 'Per-class Area Calculation',
@@ -361,8 +340,9 @@ const LAYER_META = {
 };
 
 /**
- * Analysis Layer info icon — shows data source & stats for each layer
+ * Analysis Layer info icon 鈥?shows data source & stats for each layer
  */
+// eslint-disable-next-line no-unused-vars
 function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
   const [showPopover, setShowPopover] = useState(false);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
@@ -410,7 +390,7 @@ function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
   const statsRows = [];
   if (layerType === 'flood_detection' && floodDetectionData) {
     if (floodDetectionData.stats?.flood_area_km2 != null) {
-      statsRows.push({ label: 'Flooded Area', value: `${floodDetectionData.stats.flood_area_km2} km²` });
+      statsRows.push({ label: 'Flooded Area', value: `${floodDetectionData.stats.flood_area_km2} km虏` });
     }
     if (floodDetectionData.pre_date) statsRows.push({ label: 'Pre-flood Date', value: floodDetectionData.pre_date });
     if (floodDetectionData.peek_date) statsRows.push({ label: 'Peak Date', value: floodDetectionData.peek_date });
@@ -424,15 +404,15 @@ function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
   }
   if (layerType === 'urban' && impactData?.urban && !impactData.urban.error) {
     const u = impactData.urban;
-    statsRows.push({ label: 'Affected Built-up', value: `${u.affected_area_km2} km²` });
-    statsRows.push({ label: 'Total Built-up', value: `${u.total_area_km2} km²` });
+    statsRows.push({ label: 'Affected Built-up', value: `${u.affected_area_km2} km虏` });
+    statsRows.push({ label: 'Total Built-up', value: `${u.total_area_km2} km虏` });
     if (u.percentage != null) statsRows.push({ label: 'Percentage', value: `${u.percentage}%` });
   }
   if (layerType === 'landcover' && impactData?.landcover && !impactData.landcover.error) {
     const lc = impactData.landcover;
     if (lc.breakdown) {
       Object.entries(lc.breakdown).forEach(([key, val]) => {
-        statsRows.push({ label: key.charAt(0).toUpperCase() + key.slice(1), value: `${val.area_km2} km²` });
+        statsRows.push({ label: key.charAt(0).toUpperCase() + key.slice(1), value: `${val.area_km2} km虏` });
       });
     }
   }
@@ -446,8 +426,8 @@ function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
       style={{ top: popoverPos.top, left: popoverPos.left }}
     >
       <div className="popover-header">
-        <span className="popover-title">{meta.icon} {meta.title}</span>
-        <button className="popover-close" onClick={() => setShowPopover(false)}>✕</button>
+        <span className="popover-title">{meta.title}</span>
+        <button className="popover-close" onClick={() => setShowPopover(false)}>x</button>
       </div>
       <div className="popover-body">
         <div className="layer-meta-section">
@@ -495,7 +475,7 @@ function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
       onClick={handleToggle}
       title="Click to view data source info"
     >
-      ⓘ
+      i
       {popoverContent}
     </span>
   );
@@ -512,7 +492,6 @@ function AgentPanel() {
     agentImageryLoading,
     // Agent control states from context
     agentSelectedPeriod,
-    setAgentSelectedPeriod,
     agentSelectedType,
     setAgentSelectedType,
     agentShowBaseImagery,
@@ -535,7 +514,6 @@ function AgentPanel() {
     setAgentRecommendedLayerVisibility,
     agentLayerLoading,
     setAgentLayerLoading,
-    agentTileError,
     setAgentTileError,
     businessLayers,
     selectedAOI,
@@ -543,24 +521,10 @@ function AgentPanel() {
     activateBusinessLayerRecord,
     deleteBusinessLayer,
   } = useAppContext();
-  
-  // Get chat messages from CopilotKit (with safety check)
-  const messagesContext = useCopilotMessagesContext();
-  const messages = messagesContext?.messages || [];
-  
+
   // Local UI state (for section expansion only)
-  const [sourcesDrawerOpen, setSourcesDrawerOpen] = useState(false);
-  const [locationScopePickerOpen, setLocationScopePickerOpen] = useState(false);
-  const uploadPanelRef = useRef(null);
   const [expandedSections, setExpandedSections] = useState({
-    event: true,
-    dates: false,
-    imagery: false,
-    layers: false,
     layerManager: true,
-    impact: false,
-    spatialScope: true,
-    chatHistory: false,
   });
 
   const { state } = useCoAgent({
@@ -607,14 +571,6 @@ function AgentPanel() {
     return recommendedCatalogLayers.filter((layer) => confirmedIds.has(layer.id));
   }, [currentState.selected_layer_ids, recommendedCatalogLayers]);
   const recommendedLayerContextKey = buildRecommendedLayerContextKey(currentState, effectiveAoi);
-  const recommendedLegendEntries = useMemo(
-    () => buildVisibleCatalogLegendEntries({
-      layers: confirmedRecommendedCatalogLayers,
-      runtimeData: agentRecommendedLayerData,
-      visibility: agentRecommendedLayerVisibility,
-    }),
-    [agentRecommendedLayerData, agentRecommendedLayerVisibility, confirmedRecommendedCatalogLayers]
-  );
   const scopeSourceLabel = useCallback((source) => {
     const normalizedSource = String(source || '').toLowerCase();
     if (normalizedSource === 'place_search') return 'place search';
@@ -631,42 +587,41 @@ function AgentPanel() {
     }[agentSelectedPeriod] || { label: agentSelectedPeriod || 'Period' }),
     [agentSelectedPeriod]
   );
-  const activeImageryDescriptor = agentImagery?.[agentSelectedPeriod]?.[agentSelectedType] || null;
   const layerManagerGroups = useMemo(() => {
-    const baseImageryTitle = agentSelectedType === 'sentinel2' ? 'Base Imagery · Sentinel-2' : 'Base Imagery · Sentinel-1';
-    const baseImagerySubtitleParts = [selectedPeriodMeta.label];
-    if (activeImageryDescriptor?.date) {
-      baseImagerySubtitleParts.push(activeImageryDescriptor.date);
-    }
-    if (activeImageryDescriptor?.resolution) {
-      baseImagerySubtitleParts.push(`${activeImageryDescriptor.resolution}m`);
-    }
-
     const groups = [
       {
         key: 'imagery',
         label: 'Imagery',
-        items: [
-          {
-            id: 'base-imagery',
-            title: baseImageryTitle,
-            subtitle: baseImagerySubtitleParts.join(' · '),
-            checked: Boolean(agentShowBaseImagery && activeImageryDescriptor?.tile_url),
-            disabled: !activeImageryDescriptor?.tile_url,
-            loading: Boolean(agentImageryLoading || agentLayerLoading['base-imagery']),
-            status: activeImageryDescriptor?.tile_url
-              ? (agentShowBaseImagery ? 'Visible' : 'Hidden')
-              : 'Unavailable',
-            tone: activeImageryDescriptor?.tile_url
-              ? (agentShowBaseImagery ? 'ready' : 'off')
-              : 'idle',
+        items: ['sentinel2', 'sentinel1'].map((type) => {
+          const descriptor = agentImagery?.[agentSelectedPeriod]?.[type] || null;
+          const isCurrent = agentSelectedType === type;
+          const subtitleParts = [selectedPeriodMeta.label];
+
+          if (descriptor?.date) {
+            subtitleParts.push(descriptor.date);
+          }
+          if (descriptor?.resolution) {
+            subtitleParts.push(`${descriptor.resolution}m`);
+          }
+
+          return {
+            id: `base-imagery-${type}`,
+            title: type === 'sentinel2' ? 'Optical Imagery' : 'SAR Imagery',
+            subtitle: subtitleParts.join(' / '),
+            checked: Boolean(isCurrent && agentShowBaseImagery && descriptor?.tile_url),
+            disabled: !descriptor?.tile_url,
+            loading: Boolean((agentImageryLoading || agentLayerLoading['base-imagery']) && isCurrent),
+            badge: isCurrent ? 'Current' : null,
             onToggle: () => {
-              if (activeImageryDescriptor?.tile_url) {
-                setAgentShowBaseImagery((previous) => !previous);
+              if (!descriptor?.tile_url) {
+                return;
               }
+
+              setAgentSelectedType(type);
+              setAgentShowBaseImagery((previous) => (isCurrent ? !previous : true));
             },
-          },
-        ],
+          };
+        }),
       },
       {
         key: 'analysis',
@@ -792,26 +747,32 @@ function AgentPanel() {
     if (businessLayers?.length) {
       groups.push({
         key: 'scopes',
-        label: 'Spatial Scopes',
-        items: businessLayers.map((layer) => ({
-          id: `scope-${layer.id}`,
-          title: `@${layer.label}`,
-          subtitle: `${scopeSourceLabel(layer.source)}${layer.is_active ? ' · active scope' : ''}`,
-          checked: layer.is_visible !== false,
-          disabled: false,
-          loading: false,
-          status: layer.is_visible !== false ? 'Visible' : 'Hidden',
-          tone: layer.is_visible !== false ? 'ready' : 'off',
-          badge: layer.is_active ? 'Active' : null,
-          onToggle: () => toggleBusinessLayerVisibility(layer.id),
-        })),
+        label: 'Vector Layers',
+        items: businessLayers.map((layer) => {
+          const isVisible = layer.is_visible !== false;
+          return {
+            id: `scope-${layer.id}`,
+            title: layer.label,
+            subtitle: scopeSourceLabel(layer.source),
+            checked: isVisible,
+            disabled: false,
+            loading: false,
+            status: isVisible ? 'Visible' : 'Hidden',
+            tone: isVisible ? 'ready' : 'off',
+            badge: layer.is_active ? 'Current' : null,
+            actionLabel: 'Delete',
+            onToggle: () => toggleBusinessLayerVisibility(layer.id),
+            onSelect: () => activateBusinessLayerRecord(layer.id),
+            onAction: () => deleteBusinessLayer(layer.id),
+          };
+        }),
       });
     }
 
     return groups.filter((group) => group.items.length > 0);
   }, [
-    activeImageryDescriptor,
     agentImageryLoading,
+    agentImagery,
     agentImpactData,
     agentImpactLoading,
     agentLayerLoading,
@@ -827,8 +788,12 @@ function AgentPanel() {
     businessLayers,
     confirmedRecommendedCatalogLayers,
     scopeSourceLabel,
+    agentSelectedPeriod,
     selectedPeriodMeta.label,
+    activateBusinessLayerRecord,
+    deleteBusinessLayer,
     setAgentRecommendedLayerVisibility,
+    setAgentSelectedType,
     setAgentShowBaseImagery,
     setAgentShowFloodDetection,
     setAgentShowLandcoverLayer,
@@ -836,11 +801,6 @@ function AgentPanel() {
     setAgentShowUrbanLayer,
     toggleBusinessLayerVisibility,
   ]);
-  const handleOpenSpatialUpload = useCallback(() => {
-    uploadPanelRef.current?.openFilePicker?.();
-    trackUxEvent('agent_scope_upload_open', { mode: 'agent' });
-  }, []);
-
   useEffect(() => {
     if (!analysisDisplayEnabled || !(currentState.recommended_layers || []).length) {
       setAgentRecommendedLayerVisibility({});
@@ -1174,450 +1134,24 @@ function AgentPanel() {
     },
   });
 
-  const hasValidDates = currentState.pre_date && currentState.peek_date && currentState.after_date;
-
   // Toggle section expansion
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  // Date periods for display
-  const periods = [
-    { key: 'pre_date', label: 'Pre-Flood', date: currentState.pre_date },
-    { key: 'peek_date', label: 'Peak', date: currentState.peek_date },
-    { key: 'after_date', label: 'Post-Flood', date: currentState.after_date },
-  ];
-
   return (
     <div className="agent-panel-controls">
-      {/* Sources Drawer */}
-      <SourcesDrawer
-        sources={currentState.search_sources || []}
-        isOpen={sourcesDrawerOpen}
-        onClose={() => setSourcesDrawerOpen(false)}
-      />
-
-      {/* Event Info Section */}
-      <div className={`control-section ${expandedSections.event ? 'expanded' : ''}`}>
-        <div className="section-header" onClick={() => toggleSection('event')}>
-          <span className="section-icon">📍</span>
-          <span className="section-title">Event Info</span>
-          <span className={`expand-icon ${expandedSections.event ? 'expanded' : ''}`}>▼</span>
-        </div>
-        {expandedSections.event && (
-          <div className="section-body">
-            {currentState.event ? (
-              <>
-                <div className="info-row">
-                  <span className="info-label">Event:</span>
-                  <span className="info-value">{currentState.event}</span>
-                </div>
-                {currentState.location && (
-                  <div className="info-row">
-                    <span className="info-label">Location:</span>
-                    <span className="info-value">{currentState.location}</span>
-                  </div>
-                )}
-                {currentState.event_description && (
-                  <div className="info-row description">
-                    <span className="info-value">{currentState.event_description}</span>
-                  </div>
-                )}
-                {(currentState.search_sources?.length > 0 || currentState.flood_report) && (
-                  <div className="action-buttons">
-                    {currentState.search_sources?.length > 0 && (
-                      <button 
-                        className="action-btn"
-                        onClick={() => setSourcesDrawerOpen(true)}
-                      >
-                        🌐 Sources ({currentState.search_sources.length})
-                      </button>
-                    )}
-                    {currentState.flood_report && (
-                      <button 
-                        className="action-btn"
-                        onClick={() => {
-                          trackUxEvent('export_report', {
-                            event: currentState.event || null,
-                            mode: 'agent',
-                          });
-                          downloadReport(currentState.flood_report, currentState.event);
-                        }}
-                      >
-                        📥 Download Report
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="no-data-hint">
-                <span>💬 Ask about a flood event in the chat below</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Impact Assessment Section */}
-      <div className={`control-section ${expandedSections.impact ? 'expanded' : ''}`}>
-        <div className="section-header" onClick={() => toggleSection('impact')}>
-          <span className="section-icon">📊</span>
-          <span className="section-title">Impact Assessment</span>
-          <span className={`expand-icon ${expandedSections.impact ? 'expanded' : ''}`}>▼</span>
-        </div>
-        {expandedSections.impact && (
-          <div className="section-body">
-            {agentImpactLoading ? (
-              <div className="loading-indicator">
-                <span className="spinner">⏳</span> Calculating impact assessment...
-              </div>
-            ) : agentImpactData ? (
-              <div className="impact-stats">
-                <div className="impact-stat-item">
-                  <span className="impact-icon">🌊</span>
-                  <span className="impact-label">Flooded Area</span>
-                  <span className="impact-value">
-                    {agentImagery?.flood_detection?.stats?.flood_area_km2 || agentImpactData.flood_area?.value?.toFixed(2) || 0} km²
-                  </span>
-                </div>
-                <div className="impact-stat-item">
-                  <span className="impact-icon">👥</span>
-                  <span className="impact-label">Affected Population</span>
-                  <span className="impact-value">
-                    {(agentImpactData.population?.affected || 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="impact-stat-item">
-                  <span className="impact-icon">🏙️</span>
-                  <span className="impact-label">Built-up Flooded</span>
-                  <span className="impact-value">
-                    {agentImpactData.urban?.affected_area_km2?.toFixed(2) || 0} km²
-                  </span>
-                </div>
-                <div className="impact-source">
-                  Data: WorldPop · ESA WorldCover · GHSL
-                </div>
-              </div>
-            ) : (
-              <div className="no-impact-data">
-                <p>Enable analysis layers to calculate impact</p>
-                <button 
-                  className="load-impact-btn"
-                  onClick={() => {
-                    trackUxEvent('impact_request_manual', {
-                      mode: 'agent',
-                      event: currentState.event || null,
-                    });
-                    fetchImpactData();
-                  }}
-                  disabled={!currentState?.pre_date || !currentState?.peek_date}
-                >
-                  Calculate Now
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Date Selection Section */}
-      <div className={`control-section ${expandedSections.dates ? 'expanded' : ''}`}>
-        <div className="section-header" onClick={() => toggleSection('dates')}>
-          <span className="section-icon">📅</span>
-          <span className="section-title">Date Selection</span>
-          <span className={`expand-icon ${expandedSections.dates ? 'expanded' : ''}`}>▼</span>
-        </div>
-        {expandedSections.dates && (
-          <div className="section-body">
-            {hasValidDates ? (
-              <div className="date-timeline">
-                {periods.map((p, i) => (
-                  <div key={p.key} className="timeline-item">
-                    <button
-                      className={`date-btn ${agentSelectedPeriod === p.key ? 'active' : ''}`}
-                      onClick={() => setAgentSelectedPeriod(p.key)}
-                      disabled={agentLayerLoading['base-imagery']}
-                    >
-                      <span className="period-label">{p.label}</span>
-                      <span className="period-date">{p.date || '-'}</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="no-data-hint">
-                <span>Dates will appear after analyzing an event</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Imagery Type Section */}
-      <div className={`control-section ${expandedSections.imagery ? 'expanded' : ''}`}>
-        <div className="section-header" onClick={() => toggleSection('imagery')}>
-          <span className="section-icon">🛰️</span>
-          <span className="section-title">Imagery Type</span>
-          <span className={`expand-icon ${expandedSections.imagery ? 'expanded' : ''}`}>▼</span>
-        </div>
-        {expandedSections.imagery && (
-          <div className="section-body">
-            <div className="imagery-type-buttons">
-              <div className="imagery-type-item">
-                <button
-                  className={`type-btn ${agentSelectedType === 'sentinel2' ? 'active' : ''}`}
-                  onClick={() => setAgentSelectedType('sentinel2')}
-                  disabled={agentLayerLoading['base-imagery']}
-                >
-                  🌍 Optical (S2)
-                </button>
-                {(agentImageryLoading || (agentLayerLoading['base-imagery'] && agentSelectedType === 'sentinel2')) ? (
-                  <span className="imagery-spinner" title="Loading..." />
-                ) : agentImagery ? (
-                  <ImageryInfoIcon
-                    imageryData={agentImagery}
-                    type="sentinel2"
-                    selectedPeriod={agentSelectedPeriod}
-                  />
-                ) : null}
-              </div>
-              <div className="imagery-type-item">
-                <button
-                  className={`type-btn ${agentSelectedType === 'sentinel1' ? 'active' : ''}`}
-                  onClick={() => setAgentSelectedType('sentinel1')}
-                  disabled={agentLayerLoading['base-imagery']}
-                >
-                  📡 SAR Radar (S1)
-                </button>
-                {(agentImageryLoading || (agentLayerLoading['base-imagery'] && agentSelectedType === 'sentinel1')) ? (
-                  <span className="imagery-spinner" title="Loading..." />
-                ) : agentImagery ? (
-                  <ImageryInfoIcon
-                    imageryData={agentImagery}
-                    type="sentinel1"
-                    selectedPeriod={agentSelectedPeriod}
-                  />
-                ) : null}
-              </div>
-            </div>
-
-    
-          </div>
-        )}
-      </div>
-
-      {/* Analysis Layers Section */}
-      <div className={`control-section ${expandedSections.layers ? 'expanded' : ''}`}>
-        <div className="section-header" onClick={() => toggleSection('layers')}>
-          <span className="section-icon">🗺️</span>
-          <span className="section-title">Analysis Layers</span>
-          <span className={`expand-icon ${expandedSections.layers ? 'expanded' : ''}`}>▼</span>
-        </div>
-        {expandedSections.layers && (
-          <div className="section-body">
-            <div className="layer-toggles">
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowFloodDetection}
-                    onChange={() => setAgentShowFloodDetection(!agentShowFloodDetection)}
-                  />
-                  <span className="layer-icon">🌊</span>
-                  <span>Flood Detection</span>
-                </label>
-                {agentLayerLoading['flood-detection'] ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="flood_detection"
-                    floodDetectionData={agentImagery?.flood_detection}
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
-              
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowPopulationLayer}
-                    onChange={() => setAgentShowPopulationLayer(!agentShowPopulationLayer)}
-                  />
-                  <span className="layer-icon">👥</span>
-                  <span>Population Impact</span>
-                </label>
-                {(agentLayerLoading['population'] || (agentShowPopulationLayer && agentImpactLoading)) ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="population"
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
-              
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowUrbanLayer}
-                    onChange={() => setAgentShowUrbanLayer(!agentShowUrbanLayer)}
-                  />
-                  <span className="layer-icon">🏙️</span>
-                  <span>Built-up Area</span>
-                </label>
-                {(agentLayerLoading['urban'] || (agentShowUrbanLayer && agentImpactLoading)) ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="urban"
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
-              
-              <div className="layer-toggle-row">
-                <label className="layer-toggle">
-                  <input
-                    type="checkbox"
-                    checked={agentShowLandcoverLayer}
-                    onChange={() => setAgentShowLandcoverLayer(!agentShowLandcoverLayer)}
-                  />
-                  <span className="layer-icon">🌳</span>
-                  <span>Land Cover</span>
-                </label>
-                {(agentLayerLoading['landcover'] || (agentShowLandcoverLayer && agentImpactLoading)) ? (
-                  <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                ) : (
-                  <LayerInfoIcon
-                    layerType="landcover"
-                    impactData={agentImpactData}
-                  />
-                )}
-              </div>
-            </div>
-
-            {confirmedRecommendedCatalogLayers.length > 0 && (
-              <CatalogLayerPanel
-                layers={confirmedRecommendedCatalogLayers}
-                runtimeData={agentRecommendedLayerData}
-                visibility={agentRecommendedLayerVisibility}
-                loading={agentLayerLoading}
-                onToggle={(layerId) => {
-                  setAgentRecommendedLayerVisibility((previous) => ({
-                    ...previous,
-                    [layerId]: !previous[layerId],
-                  }));
-                }}
-              />
-            )}
-
-            {/* Tile Error Warning */}
-            {agentTileError && (
-              <div className="tile-error-banner">
-                <span className="tile-error-icon">⚠️</span>
-                <span className="tile-error-msg">{agentTileError.message}</span>
-              </div>
-            )}
-            
-            {/* Layer Legend */}
-            <div className="layer-legend">
-              <h5>Legend</h5>
-              <div className="legend-items">
-                {agentShowFloodDetection && (
-                  <div className="legend-item">
-                    <span className="legend-color" style={{ background: '#ff4444' }}></span>
-                    <span>Flooded Area</span>
-                  </div>
-                )}
-                {agentShowPopulationLayer && (
-                  <div className="legend-item">
-                    <span className="legend-gradient population"></span>
-                    <span>Population Density</span>
-                  </div>
-                )}
-                {agentShowUrbanLayer && (
-                  <div className="legend-item">
-                    <span className="legend-color" style={{ background: '#ff6600' }}></span>
-                    <span>Built-up</span>
-                  </div>
-                )}
-                {agentShowLandcoverLayer && (
-                  <div className="legend-row">
-                    <div className="legend-item-small">
-                      <span className="legend-dot" style={{ background: '#006400' }}></span>
-                      <span>Forest</span>
-                    </div>
-                    <div className="legend-item-small">
-                      <span className="legend-dot" style={{ background: '#ffbb22' }}></span>
-                      <span>Crop</span>
-                    </div>
-                    <div className="legend-item-small">
-                      <span className="legend-dot" style={{ background: '#0064c8' }}></span>
-                      <span>Water</span>
-                    </div>
-                  </div>
-                )}
-                {recommendedLegendEntries.map((entry) => (
-                  entry.legendModel.type === 'palette' ? (
-                    <div className="legend-item recommended" key={entry.id}>
-                      <span
-                        className="legend-gradient recommended"
-                        style={{
-                          background: `linear-gradient(90deg, ${entry.legendModel.palette.join(', ')})`,
-                        }}
-                      ></span>
-                      <span>
-                        {entry.legendModel.label}
-                        {(entry.legendModel.min !== undefined && entry.legendModel.max !== undefined)
-                          ? ` (${entry.legendModel.min} - ${entry.legendModel.max})`
-                          : ''}
-                      </span>
-                    </div>
-                  ) : entry.legendModel.type === 'classes' ? (
-                    <div className="legend-item recommended classes" key={entry.id}>
-                      <div className="legend-class-list">
-                        {entry.legendModel.items.map((item) => (
-                          <div className="legend-class-item" key={`${entry.id}-${item.value}`}>
-                            <span
-                              className="legend-dot square"
-                              style={{ background: item.color }}
-                            ></span>
-                            <span>{item.value}: {item.label}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : entry.legendModel.type === 'text' ? (
-                    <div className="legend-item recommended text-only" key={entry.id}>
-                      <span>{entry.legendModel.label}</span>
-                    </div>
-                  ) : (
-                    <div className="legend-item recommended" key={entry.id}>
-                      <span
-                        className="legend-color"
-                        style={{ background: entry.legendModel.color }}
-                      ></span>
-                      <span>{entry.legendModel.label}</span>
-                    </div>
-                  )
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
       <div className={`control-section ${expandedSections.layerManager ? 'expanded' : ''}`}>
         <div className="section-header" onClick={() => toggleSection('layerManager')}>
-          <span className="section-icon"><i className="fa fa-layer-group" aria-hidden="true" /></span>
           <span className="section-title">Layer Manager</span>
-          <span className={`expand-icon ${expandedSections.layerManager ? 'expanded' : ''}`}>▼</span>
+          <span className={`expand-icon ${expandedSections.layerManager ? 'expanded' : ''}`}>v</span>
         </div>
         {expandedSections.layerManager && (
           <div className="section-body layer-manager-body">
+            <div className="layer-manager-toolbar">
+              <div className="layer-manager-toolbar-label">Search Place</div>
+            </div>
+            <LocationScopePicker embedded />
             <div className="layer-manager-groups">
               {layerManagerGroups.map((group) => (
                 <div className="layer-manager-group" key={group.key}>
@@ -1631,23 +1165,59 @@ function AgentPanel() {
                         className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${item.disabled ? 'is-disabled' : ''}`}
                         key={item.id}
                       >
-                        <label className="layer-manager-item-main">
+                        <div className="layer-manager-item-main">
                           <input
                             type="checkbox"
                             checked={item.checked}
                             onChange={item.onToggle}
                             disabled={item.disabled}
                           />
-                          <div className="layer-manager-item-copy">
-                            <span className="layer-manager-item-title">{item.title}</span>
-                          </div>
-                        </label>
+                          {item.onSelect ? (
+                            <button
+                              type="button"
+                              className="layer-manager-item-trigger"
+                              onClick={item.onSelect}
+                              disabled={item.disabled}
+                            >
+                              <div className="layer-manager-item-copy">
+                                <div className="layer-manager-item-head">
+                                  <span className="layer-manager-item-title">{item.title}</span>
+                                  {item.badge ? (
+                                    <span className="layer-manager-item-badge">{item.badge}</span>
+                                  ) : null}
+                                </div>
+                                {item.subtitle ? (
+                                  <span className="layer-manager-item-subtitle">{item.subtitle}</span>
+                                ) : null}
+                              </div>
+                            </button>
+                          ) : (
+                            <div className="layer-manager-item-copy">
+                              <div className="layer-manager-item-head">
+                                <span className="layer-manager-item-title">{item.title}</span>
+                                {item.badge ? (
+                                  <span className="layer-manager-item-badge">{item.badge}</span>
+                                ) : null}
+                              </div>
+                              {item.subtitle ? (
+                                <span className="layer-manager-item-subtitle">{item.subtitle}</span>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
                         <div className="layer-manager-item-side">
+                          {item.actionLabel && item.onAction ? (
+                            <button
+                              type="button"
+                              className="layer-manager-item-action"
+                              onClick={item.onAction}
+                            >
+                              {item.actionLabel}
+                            </button>
+                          ) : null}
                           {item.loading ? (
                             <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                          ) : (
-                            <span className={`layer-manager-status ${item.tone || 'idle'}`}>{item.status}</span>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                     ))}
@@ -1655,121 +1225,6 @@ function AgentPanel() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
-      </div>
-
-      <div className={`control-section ${expandedSections.spatialScope ? 'expanded' : ''}`}>
-        <div className="section-header" onClick={() => toggleSection('spatialScope')}>
-          <span className="section-icon"><i className="fa fa-crop" aria-hidden="true" /></span>
-          <span className="section-title">Spatial Scope</span>
-          <span className={`expand-icon ${expandedSections.spatialScope ? 'expanded' : ''}`}>▼</span>
-        </div>
-        {expandedSections.spatialScope && (
-          <div className="section-body spatial-scope-body">
-            <div className="spatial-scope-action-row">
-              <button
-                type="button"
-                className="action-btn primary"
-                onClick={() => setLocationScopePickerOpen(true)}
-              >
-                <i className="fa fa-search" aria-hidden="true" />
-                Search Place
-              </button>
-              <button
-                type="button"
-                className="action-btn secondary"
-                onClick={handleOpenSpatialUpload}
-              >
-                <i className="fa fa-upload" aria-hidden="true" />
-                Upload Scope
-              </button>
-            </div>
-
-            {businessLayers?.length ? (
-              <div className="spatial-scope-list">
-                {businessLayers.map((layer) => (
-                  <div
-                    key={layer.id}
-                    className={`spatial-scope-item ${layer.is_active ? 'active' : ''}`}
-                    title={layer.id}
-                  >
-                    <button
-                      type="button"
-                      className="spatial-scope-item-main"
-                      onClick={() => activateBusinessLayerRecord(layer.id)}
-                    >
-                      <span className="spatial-scope-item-label">@{layer.label}</span>
-                      <span className="spatial-scope-item-meta">
-                        {scopeSourceLabel(layer.source)}
-                        {layer.is_active ? ' - active' : ''}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="spatial-scope-item-delete"
-                      aria-label={`Delete ${layer.label}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteBusinessLayer(layer.id);
-                      }}
-                    >
-                      <i className="fa fa-trash" aria-hidden="true" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="no-data-hint">
-                No uploaded or drawn scope yet.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <LocationScopePicker
-        isOpen={locationScopePickerOpen}
-        onClose={() => setLocationScopePickerOpen(false)}
-      />
-      <AoiUploadPanel
-        ref={uploadPanelRef}
-        variant="agent"
-        presentation="hidden"
-        lightweight
-      />
-
-      {/* Chat History Section */}
-      <div className="control-section">
-        <div className="section-header" onClick={() => toggleSection('chatHistory')}>
-          <span className="section-icon">💬</span>
-          <span className="section-title">Chat History</span>
-          <span className={`expand-icon ${expandedSections.chatHistory ? 'expanded' : ''}`}>▼</span>
-        </div>
-        {expandedSections.chatHistory && (
-          <div className="section-body chat-history-section">
-            {messages && messages.length > 0 ? (
-              <div className="chat-history-list">
-                {messages.map((msg, index) => (
-                  <div 
-                    key={msg.id || index} 
-                    className={`chat-history-item ${msg.role === 'user' ? 'user-msg' : 'assistant-msg'}`}
-                  >
-                    <div className="msg-role">
-                      {msg.role === 'user' ? '👤 You' : '🤖 Agent'}
-                    </div>
-                    <div className="msg-content">
-                      {extractVisibleMessageText(msg.content) || ''}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="no-messages">
-                <span className="empty-icon">💭</span>
-                <p>No conversation yet. Start chatting with the agent!</p>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -1803,3 +1258,5 @@ function AgentPanel() {
 }
 
 export default AgentPanel;
+
+

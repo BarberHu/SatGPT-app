@@ -178,6 +178,7 @@ function MapContainer() {
   const programmaticDrawMutationRef = useRef(false);
   const isAoiEditingRef = useRef(false);
   const editableGeojsonRef = useRef(null);
+  const transientWarningTimeoutRef = useRef(null);
   const [isPolygonDrawMode, setIsPolygonDrawMode] = useState(false);
   const [pendingSpatialScopeSave, setPendingSpatialScopeSave] = useState(null);
   
@@ -227,9 +228,34 @@ function MapContainer() {
   // Track if map is initialized
   const mapInitialized = useRef(false);
 
+  const clearTransientWarningTimer = useCallback(() => {
+    if (transientWarningTimeoutRef.current) {
+      window.clearTimeout(transientWarningTimeoutRef.current);
+      transientWarningTimeoutRef.current = null;
+    }
+  }, []);
+
+  const showTransientWarning = useCallback((message, timeoutMs = 1800) => {
+    clearTransientWarningTimer();
+    setWarning(message);
+
+    if (!message) {
+      return;
+    }
+
+    transientWarningTimeoutRef.current = window.setTimeout(() => {
+      setWarning((currentWarning) => (currentWarning === message ? '' : currentWarning));
+      transientWarningTimeoutRef.current = null;
+    }, timeoutMs);
+  }, [clearTransientWarningTimer, setWarning]);
+
   useEffect(() => {
     gridClickEnabledRef.current = gridClickEnabled;
   }, [gridClickEnabled]);
+
+  useEffect(() => () => {
+    clearTransientWarningTimer();
+  }, [clearTransientWarningTimer]);
 
   useEffect(() => {
     const button = gridClickButtonRef.current;
@@ -490,7 +516,9 @@ function MapContainer() {
           const button = document.createElement('button');
           button.type = 'button';
           button.className = 'satgpt-map-toggle-btn';
-          button.textContent = 'Load';
+          button.innerHTML = '<i class="fa fa-crosshairs" aria-hidden="true"></i>';
+          button.setAttribute('aria-label', 'Toggle map click loading');
+          button.setAttribute('title', 'Toggle map click loading');
           button.onclick = (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -641,7 +669,7 @@ function MapContainer() {
 
     draw.delete(pendingSpatialScopeSave.featureIds);
     setPendingSpatialScopeSave(null);
-    setWarning('Spatial scope was discarded.');
+    showTransientWarning('Spatial scope was discarded.');
     window.requestAnimationFrame(() => {
       try {
         draw.changeMode('draw_polygon');
@@ -649,7 +677,7 @@ function MapContainer() {
         console.warn('Failed to resume polygon drawing after discard:', error);
       }
     });
-  }, [pendingSpatialScopeSave, setWarning]);
+  }, [pendingSpatialScopeSave, showTransientWarning]);
 
   const handleConfirmPendingSpatialScope = useCallback(() => {
     const draw = drawRef.current;
@@ -712,9 +740,6 @@ function MapContainer() {
       setIsPolygonDrawMode(drawingPolygon);
       if (drawingPolygon && gridClickEnabledRef.current) {
         setGridClickEnabled(false);
-      }
-      if (drawingPolygon && pendingSpatialScopeSave) {
-        setPendingSpatialScopeSave(null);
       }
     };
 
@@ -845,7 +870,6 @@ function MapContainer() {
     appMode,
     businessLayers,
     gridClickEnabled,
-    pendingSpatialScopeSave,
     promoteDrawLayers,
     removeBusinessLayerRecord,
     selectedAOI?.id,

@@ -1,0 +1,186 @@
+.agent-chat-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+.agent-chat-pane__messages {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-chat-pane__copilot {
+  height: 100%;
+  min-height: 260px;
+  background: transparent;
+}
+
+.agent-chat-pane .copilotKitChat,
+.agent-chat-pane .copilotKitMessages {
+  height: 100%;
+  background: transparent;
+  color: #0f172a;
+}
+
+.agent-chat-pane .copilotKitMessagesContainer {
+  padding: 12px 18px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-chat-pane .copilotKitMessagesFooter {
+  width: calc(100% - 36px);
+  margin: 0 auto;
+  padding: 4px 0 10px;
+  background: transparent;
+}
+
+.agent-chat-pane .copilotKitMessage {
+  max-width: 94%;
+  border-radius: 14px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.agent-chat-pane .copilotKitMessage.copilotKitAssistantMessage {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #1f2937;
+  padding: 4px 0;
+  margin-bottom: 4px;
+}
+
+.agent-chat-pane .copilotKitMessage.copilotKitAssistantMessage .copilotKitMessageControls,
+.agent-chat-pane .copilotKitMessageControls.currentMessage,
+.agent-chat-pane .copilotKitMessage.copilotKitAssistantMessage:hover .copilotKitMessageControls {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+.agent-chat-pane .copilotKitMessage.copilotKitUserMessage {
+  background: #4a90d9;
+  border: none;
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.agent-chat-pane .copilotKitMessages footer h6 {
+  margin: 0 0 6px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.agent-chat-pane .copilotKitMessages footer .suggestions {
+  gap: 8px;
+}
+
+.agent-chat-pane .copilotKitMessages footer .suggestions .suggestion {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #d6dbe4;
+  background: #ffffff;
+  color: #475569;
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.agent-chat-pane .copilotKitMessages footer .suggestions button:not(:disabled):hover .suggestion,
+.agent-chat-pane .copilotKitMessages footer .suggestions .suggestion:hover {
+  transform: none;
+  border-color: #bfd2eb;
+  background: #f7fbff;
+  color: #3b6ea5;
+}
+
+.agent-chat-pane__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.agent-chat-pane__toolbar-left,
+.agent-chat-pane__toolbar-right {
+  display: flex;
+  align-items: center;
+}
+
+.agent-chat-pane__toolbar-left {
+  gap: 8px;
+}
+
+.agent-chat-pane__icon-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.agent-chat-pane__icon-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.agent-chat-pane__text-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #d6dbe4;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.agent-chat-pane__text-btn:hover {
+  border-color: #bfd2eb;
+  background: #f7fbff;
+  color: #3b6ea5;
+}
+
+.agent-chat-pane__mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.agent-chat-pane__mode-btn {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.agent-chat-pane__mode-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}

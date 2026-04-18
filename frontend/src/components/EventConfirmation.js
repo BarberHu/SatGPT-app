@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Calendar, Check, Edit2, Info, Layers3, Loader2, MapPin, RefreshCcw, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Calendar, Check, Edit2, Info, Layers3, MapPin, X } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import AoiUploadPanel from './AoiUploadPanel';
-import { refreshFloodConfirmation } from '../services/agentApi';
 import './EventConfirmation.css';
 
 const buildEmptySelection = (layers = [], selectedLayerIds = []) =>
@@ -20,21 +19,14 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
   } = useAppContext();
   const initialAoiRef = useRef(selectedAOI);
   const shouldRestoreAoiRef = useRef(true);
-  const previousLocationRef = useRef(data?.location || '');
 
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState(() => ({ ...data }));
   const [layerSelection, setLayerSelection] = useState(() => buildEmptySelection(data?.recommended_layers, data?.selected_layer_ids));
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState('');
-  const [isAoiStale, setIsAoiStale] = useState(false);
 
   useEffect(() => {
     setFormData({ ...data });
     setLayerSelection(buildEmptySelection(data?.recommended_layers, data?.selected_layer_ids));
-    setIsAoiStale(false);
-    setRefreshError('');
-    previousLocationRef.current = data?.location || '';
     if (data?.confirmed_aoi || data?.resolved_aoi) {
       setSelectedAOI(data.confirmed_aoi || data.resolved_aoi);
     }
@@ -52,19 +44,13 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
   );
 
   const activeAoi = selectedAOI || formData.confirmed_aoi || formData.resolved_aoi || null;
-  const canConfirm = Boolean(activeAoi && selectedLayerIds.length && !isRefreshing && !isAoiStale);
+  const canConfirm = Boolean(activeAoi && selectedLayerIds.length);
 
   const handleFieldChange = (field, value) => {
     setFormData((previous) => ({
       ...previous,
       [field]: value,
     }));
-
-    if (field === 'location') {
-      const nextLocation = (value || '').trim();
-      const locationChanged = nextLocation !== (previousLocationRef.current || '').trim();
-      setIsAoiStale(locationChanged);
-    }
   };
 
   const handleLayerToggle = (layerId) => {
@@ -72,52 +58,6 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
       ...previous,
       [layerId]: !previous[layerId],
     }));
-  };
-
-  const handleAoiChange = (nextAoi) => {
-    setFormData((previous) => ({
-      ...previous,
-      confirmed_aoi: nextAoi,
-    }));
-    if (nextAoi) {
-      setSelectedAOI(nextAoi);
-      setIsAoiStale(false);
-      setRefreshError('');
-    }
-  };
-
-  const handleRefreshBoundary = async () => {
-    setIsRefreshing(true);
-    setRefreshError('');
-    try {
-      const result = await refreshFloodConfirmation({
-        event: formData.event,
-        event_description: formData.event_description,
-        location: formData.location,
-        pre_date: formData.pre_date,
-        peek_date: formData.peek_date,
-        after_date: formData.after_date,
-        confirmation_version: (formData.confirmation_version || 1) + 1,
-      });
-
-      if (!result?.success) {
-        throw new Error('Spatial scope refresh failed.');
-      }
-
-      const nextData = result.data;
-      setFormData((previous) => ({
-        ...previous,
-        ...nextData,
-      }));
-      setLayerSelection(buildEmptySelection(nextData.recommended_layers, nextData.selected_layer_ids));
-      setSelectedAOI(nextData.confirmed_aoi || nextData.resolved_aoi || null);
-      setIsAoiStale(false);
-      previousLocationRef.current = nextData.location || formData.location || '';
-    } catch (error) {
-      setRefreshError(error?.message || 'Failed to refresh spatial scope.');
-    } finally {
-      setIsRefreshing(false);
-    }
   };
 
   const handleConfirm = () => {
@@ -142,14 +82,14 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
     event.stopPropagation();
   };
 
-  return (
+  return createPortal(
     <div className="event-confirmation-overlay" onClick={handleCancel}>
       <div className="event-confirmation-modal unified-workbench" onClick={handleModalClick}>
         <div className="event-confirmation">
           <div className="confirmation-header">
             <div className="confirmation-header-main">
               <Info size={22} className="header-icon" />
-              <span>{message || 'Confirm the flood event, spatial scope, and recommended datasets'}</span>
+              <span>{message || 'Confirm the flood event and recommended datasets'}</span>
             </div>
             <button
               className="edit-toggle"
@@ -195,15 +135,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
                   <MapPin size={14} />
                   Location
                 </label>
-                {editMode ? (
-                  <input
-                    type="text"
-                    value={formData.location || ''}
-                    onChange={(event) => handleFieldChange('location', event.target.value)}
-                  />
-                ) : (
-                  <span className="field-value">{formData.location}</span>
-                )}
+                <span className="field-value">{formData.location}</span>
               </div>
 
               <div className="dates-group">
@@ -229,57 +161,6 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
                   </div>
                 ))}
               </div>
-            </section>
-
-            <section className="confirmation-panel">
-              <div className="panel-title">Spatial Scope</div>
-
-              <div className="aoi-status-card">
-                <div className="aoi-status-row">
-                  <span>Status</span>
-                  <strong>{formData.aoi_resolution_meta?.status || 'Scope pending'}</strong>
-                </div>
-                <div className="aoi-status-row">
-                  <span>Source</span>
-                  <strong>{formData.aoi_resolution_meta?.source || activeAoi?.source || 'manual'}</strong>
-                </div>
-                <div className="aoi-status-row">
-                  <span>Confidence</span>
-                  <strong>{typeof formData.aoi_resolution_meta?.confidence === 'number' ? `${Math.round(formData.aoi_resolution_meta.confidence * 100)}%` : 'N/A'}</strong>
-                </div>
-              </div>
-
-              {activeAoi?.bounds && (
-                <div className="aoi-bounds">
-                  <div>W {activeAoi.bounds.west?.toFixed?.(4)} / E {activeAoi.bounds.east?.toFixed?.(4)}</div>
-                  <div>S {activeAoi.bounds.south?.toFixed?.(4)} / N {activeAoi.bounds.north?.toFixed?.(4)}</div>
-                </div>
-              )}
-
-              {isAoiStale && (
-                <div className="confirmation-banner warning">
-                  The scope is stale because the location text changed. Re-resolve or update it before confirming.
-                </div>
-              )}
-              {refreshError && (
-                <div className="confirmation-banner error">
-                  {refreshError}
-                </div>
-              )}
-
-              <div className="boundary-actions">
-                <button
-                  type="button"
-                  className="aoi-upload-action-btn secondary"
-                  onClick={handleRefreshBoundary}
-                  disabled={isRefreshing}
-                >
-                  {isRefreshing ? <Loader2 size={14} className="spin" /> : <RefreshCcw size={14} />}
-                  Re-resolve scope
-                </button>
-              </div>
-
-              <AoiUploadPanel variant="agent" onAoiChange={handleAoiChange} />
             </section>
 
             <section className="confirmation-panel">
@@ -328,7 +209,8 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
