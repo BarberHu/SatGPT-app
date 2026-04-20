@@ -16,6 +16,7 @@ import { buildAoiFromAgentState } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 import {
   buildCatalogLegendModel,
+  getCatalogMapLayerId,
   sortCatalogLayers,
 } from '../utils/catalogLayers';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
@@ -815,6 +816,8 @@ function AgentPanel() {
     setAgentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     setAgentRecommendedLayerVisibility,
+    agentLayerOrder,
+    setAgentLayerOrder,
     agentLayerLoading,
     setAgentLayerLoading,
     setAgentTileError,
@@ -829,6 +832,8 @@ function AgentPanel() {
   const [expandedSections, setExpandedSections] = useState({
     layerManager: true,
   });
+  const [draggedLayerId, setDraggedLayerId] = useState(null);
+  const [dragOverState, setDragOverState] = useState({ groupKey: null, targetLayerId: null, position: 'before' });
 
   const { state } = useCoAgent({
     name: "flood_agent",
@@ -838,6 +843,7 @@ function AgentPanel() {
   const imageryRequestKeyRef = useRef(null);
   const impactRequestKeyRef = useRef(null);
   const pendingRecommendedLayerRequestsRef = useRef(new Set());
+  const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
   const hasCoAgentState = Boolean(state);
   const rawState = hasCoAgentState ? state : floodAgentState;
   const rawEvent = rawState?.event || null;
@@ -947,6 +953,10 @@ function AgentPanel() {
     }
   }, [hasCoAgentState, setFloodAgentState, sharedAgentState]);
 
+  useEffect(() => {
+    agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
+  }, [agentRecommendedLayerData]);
+
   const currentConfirmedAoi = currentState?.confirmed_aoi || null;
   const currentResolvedAoi = currentState?.resolved_aoi || null;
   const currentLocation = currentState?.location || null;
@@ -962,7 +972,6 @@ function AgentPanel() {
   const currentGeeCode = currentState?.gee_code || null;
   const currentEvent = currentState?.event || null;
   const currentRecommendedLayerSignature = buildLayerSignature(currentRecommendedLayers);
-  const currentSelectedLayerSignature = buildSelectedLayerSignature(currentSelectedLayerIds);
   const agentDerivedAoi = useMemo(() => buildAoiFromAgentState({
     confirmed_aoi: currentConfirmedAoi,
     resolved_aoi: currentResolvedAoi,
@@ -1095,6 +1104,89 @@ function AgentPanel() {
     recommendedLayerContextKey,
   ]);
 
+  const orderLayerManagerItems = useCallback((items) => {
+    const orderIndex = new Map((agentLayerOrder || []).map((layerId, index) => [layerId, index]));
+    return [...items].sort((left, right) => {
+      const leftIndex = orderIndex.has(left.orderId) ? orderIndex.get(left.orderId) : Number.MAX_SAFE_INTEGER;
+      const rightIndex = orderIndex.has(right.orderId) ? orderIndex.get(right.orderId) : Number.MAX_SAFE_INTEGER;
+
+      if (leftIndex !== rightIndex) {
+        return leftIndex - rightIndex;
+      }
+
+      return left.defaultOrder - right.defaultOrder;
+    });
+  }, [agentLayerOrder]);
+
+  const handleLayerDragStart = useCallback((event, layerId) => {
+    if (!layerId) {
+      return;
+    }
+
+    if (event.target instanceof Element && event.target.closest('input, button, a, select, textarea, label')) {
+      event.preventDefault();
+      return;
+    }
+
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', layerId);
+    setDraggedLayerId(layerId);
+  }, []);
+
+  const reorderVisibleOverlayLayers = useCallback((sourceLayerId, visibleOrderIds, targetLayerId, position = 'before') => {
+    if (!sourceLayerId || !Array.isArray(visibleOrderIds) || !visibleOrderIds.includes(sourceLayerId)) {
+      return;
+    }
+
+    setAgentLayerOrder((previous) => {
+      const visibleSet = new Set(visibleOrderIds);
+      const nextVisible = visibleOrderIds.filter((layerId) => layerId !== sourceLayerId);
+      const targetIndex = nextVisible.indexOf(targetLayerId);
+
+      if (targetIndex < 0) {
+        return previous;
+      }
+
+      const insertionIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+      nextVisible.splice(insertionIndex, 0, sourceLayerId);
+      const hidden = previous.filter((layerId) => !visibleSet.has(layerId));
+      return [...nextVisible, ...hidden];
+    });
+  }, [setAgentLayerOrder]);
+
+  const resolveDropPosition = useCallback((event) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return (event.clientY - bounds.top) >= (bounds.height / 2) ? 'after' : 'before';
+  }, []);
+
+  const handleLayerDragOver = useCallback((event, groupKey, targetLayerId) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverState({
+      groupKey,
+      targetLayerId,
+      position: resolveDropPosition(event),
+    });
+  }, [resolveDropPosition]);
+
+  const handleLayerDrop = useCallback((event, groupKey, visibleOrderIds, targetLayerId) => {
+    event.preventDefault();
+    const sourceLayerId = event.dataTransfer.getData('text/plain') || draggedLayerId;
+    const position = resolveDropPosition(event);
+
+    if (sourceLayerId && targetLayerId && sourceLayerId !== targetLayerId) {
+      reorderVisibleOverlayLayers(sourceLayerId, visibleOrderIds, targetLayerId, position);
+    }
+
+    setDraggedLayerId(null);
+    setDragOverState({ groupKey: null, targetLayerId: null, position: 'before' });
+  }, [draggedLayerId, reorderVisibleOverlayLayers, resolveDropPosition]);
+
+  const handleLayerDragEnd = useCallback(() => {
+    setDraggedLayerId(null);
+    setDragOverState({ groupKey: null, targetLayerId: null, position: 'before' });
+  }, []);
+
   const layerManagerGroups = useMemo(() => {
     const getAnalysisLayerStatus = (isVisible, hasTile = true) => {
       if (!analysisDisplayEnabled) {
@@ -1106,11 +1198,10 @@ function AgentPanel() {
       return hasTile ? 'Ready' : 'Pending';
     };
 
-    const groups = [
-      {
-        key: 'imagery',
-        label: 'Imagery',
-        items: ['sentinel2', 'sentinel1'].map((type) => {
+    const imageryGroup = {
+      key: 'imagery',
+      label: 'Imagery',
+      items: ['sentinel2', 'sentinel1'].map((type) => {
           const descriptor = agentImagery?.[agentSelectedPeriod]?.[type] || null;
           const isCurrent = agentSelectedType === type;
           const isAvailable = Boolean(descriptor?.tile_url);
@@ -1131,7 +1222,7 @@ function AgentPanel() {
             legend: CORE_LAYER_LEGENDS[type],
             checked: Boolean(isCurrent && agentShowBaseImagery && isAvailable),
             disabled: !isAvailable,
-            loading: Boolean((agentImageryLoading || agentLayerLoading['base-imagery']) && isCurrent),
+            loading: Boolean((agentImageryLoading || agentLayerLoading['base-imagery']) && isCurrent && agentShowBaseImagery),
             badge: isCurrent ? 'Current' : null,
             onToggle: () => {
               if (!isAvailable) {
@@ -1143,13 +1234,14 @@ function AgentPanel() {
             },
           };
         }),
-      },
-      {
-        key: 'analysis',
-        label: 'Analysis',
-        items: [
+    };
+
+    const analysisItems = [
           {
             id: 'analysis-flood-detection',
+            orderId: 'agent-flood-detection',
+            defaultOrder: 10,
+            draggable: true,
             title: 'Flood Detection',
             infoText: analysisDisplayEnabled ? LAYER_META.flood_detection.description : 'Available after event confirmation',
             infoDetails: [
@@ -1161,7 +1253,7 @@ function AgentPanel() {
             legend: CORE_LAYER_LEGENDS.flood_detection,
             checked: Boolean(agentShowFloodDetection && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentLayerLoading['flood-detection']),
+            loading: Boolean(agentShowFloodDetection && agentLayerLoading['flood-detection']),
             status: !analysisDisplayEnabled ? 'Unavailable' : (agentShowFloodDetection ? 'Visible' : 'Hidden'),
             tone: !analysisDisplayEnabled ? 'idle' : (agentShowFloodDetection ? 'ready' : 'off'),
             onToggle: () => {
@@ -1172,6 +1264,9 @@ function AgentPanel() {
           },
           {
             id: 'analysis-population',
+            orderId: 'agent-population',
+            defaultOrder: 20,
+            draggable: true,
             title: 'Population Impact',
             infoText: LAYER_META.population.description,
             infoDetails: [
@@ -1183,7 +1278,7 @@ function AgentPanel() {
             legend: CORE_LAYER_LEGENDS.population,
             checked: Boolean(agentShowPopulationLayer && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentLayerLoading.population || (agentShowPopulationLayer && agentImpactLoading)),
+            loading: Boolean(agentShowPopulationLayer && (agentLayerLoading.population || agentImpactLoading)),
             status: !analysisDisplayEnabled
               ? 'Unavailable'
               : (agentShowPopulationLayer ? 'Visible' : (agentImpactData?.layers?.population?.tile_url ? 'Hidden' : 'Pending')),
@@ -1198,6 +1293,9 @@ function AgentPanel() {
           },
           {
             id: 'analysis-urban',
+            orderId: 'agent-urban',
+            defaultOrder: 30,
+            draggable: true,
             title: 'Built-up Area',
             infoText: LAYER_META.urban.description,
             infoDetails: [
@@ -1209,7 +1307,7 @@ function AgentPanel() {
             legend: CORE_LAYER_LEGENDS.urban,
             checked: Boolean(agentShowUrbanLayer && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentLayerLoading.urban || (agentShowUrbanLayer && agentImpactLoading)),
+            loading: Boolean(agentShowUrbanLayer && (agentLayerLoading.urban || agentImpactLoading)),
             status: !analysisDisplayEnabled
               ? 'Unavailable'
               : (agentShowUrbanLayer ? 'Visible' : (agentImpactData?.layers?.urban?.tile_url ? 'Hidden' : 'Pending')),
@@ -1224,6 +1322,9 @@ function AgentPanel() {
           },
           {
             id: 'analysis-landcover',
+            orderId: 'agent-landcover',
+            defaultOrder: 40,
+            draggable: true,
             title: 'Land Cover',
             infoText: LAYER_META.landcover.description,
             infoDetails: [
@@ -1235,7 +1336,7 @@ function AgentPanel() {
             legend: CORE_LAYER_LEGENDS.landcover,
             checked: Boolean(agentShowLandcoverLayer && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentLayerLoading.landcover || (agentShowLandcoverLayer && agentImpactLoading)),
+            loading: Boolean(agentShowLandcoverLayer && (agentLayerLoading.landcover || agentImpactLoading)),
             status: !analysisDisplayEnabled
               ? 'Unavailable'
               : (agentShowLandcoverLayer ? 'Visible' : (agentImpactData?.layers?.landcover?.tile_url ? 'Hidden' : 'Pending')),
@@ -1248,50 +1349,63 @@ function AgentPanel() {
               }
             },
           },
-        ],
-      },
     ];
 
-    if (confirmedRecommendedCatalogLayers.length > 0) {
+    const recommendedItems = confirmedRecommendedCatalogLayers.map((layer, index) => {
+      const descriptor = agentRecommendedLayerData?.[layer.id] || null;
+      const visible = Boolean(agentRecommendedLayerVisibility?.[layer.id]);
+      const loading = Boolean(visible && agentLayerLoading?.[layer.id]);
+      const orderId = getCatalogMapLayerId(layer.id);
+      return {
+        id: `recommended-${layer.id}`,
+        orderId,
+        defaultOrder: 100 + index,
+        draggable: true,
+        title: layer.title,
+        infoText: layer.summary || layer.ui_profile?.group_label || 'Recommended catalog layer',
+        infoDetails: [
+          { label: 'Group', value: layer.ui_profile?.group_label || layer.product_group },
+          { label: 'Source', value: descriptor?.source_meta?.title || layer.source_meta?.title },
+          { label: 'Status', value: !analysisDisplayEnabled ? 'Unavailable' : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')) },
+        ],
+        legend: buildCatalogLegendModel(descriptor || layer, layer.title),
+        checked: visible,
+        disabled: !analysisDisplayEnabled,
+        loading,
+        status: !analysisDisplayEnabled
+          ? 'Unavailable'
+          : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')),
+        tone: !analysisDisplayEnabled
+          ? 'idle'
+          : (loading ? 'loading' : (visible ? (descriptor?.tile_url ? 'ready' : 'pending') : 'off')),
+        badge: layer.ui_profile?.badge_label || null,
+        onToggle: () => {
+          if (analysisDisplayEnabled) {
+            setAgentRecommendedLayerVisibility((previous) => ({
+              ...previous,
+              [layer.id]: !previous[layer.id],
+            }));
+          }
+        },
+      };
+    });
+
+    const overlayItems = orderLayerManagerItems([
+      ...analysisItems,
+      ...recommendedItems,
+    ]);
+
+    const groups = [];
+
+    if (overlayItems.length > 0) {
       groups.push({
-        key: 'recommended',
-        label: 'Recommended',
-        items: confirmedRecommendedCatalogLayers.map((layer) => {
-          const descriptor = agentRecommendedLayerData?.[layer.id] || null;
-          const visible = Boolean(agentRecommendedLayerVisibility?.[layer.id]);
-          const loading = Boolean(agentLayerLoading?.[layer.id]);
-          return {
-            id: `recommended-${layer.id}`,
-            title: layer.title,
-            infoText: layer.summary || layer.ui_profile?.group_label || 'Recommended catalog layer',
-            infoDetails: [
-              { label: 'Group', value: layer.ui_profile?.group_label || layer.product_group },
-              { label: 'Source', value: descriptor?.source_meta?.title || layer.source_meta?.title },
-              { label: 'Status', value: !analysisDisplayEnabled ? 'Unavailable' : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')) },
-            ],
-            legend: buildCatalogLegendModel(descriptor || layer, layer.title),
-            checked: visible,
-            disabled: !analysisDisplayEnabled,
-            loading,
-            status: !analysisDisplayEnabled
-              ? 'Unavailable'
-              : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')),
-            tone: !analysisDisplayEnabled
-              ? 'idle'
-              : (loading ? 'loading' : (visible ? (descriptor?.tile_url ? 'ready' : 'pending') : 'off')),
-            badge: layer.ui_profile?.badge_label || null,
-            onToggle: () => {
-              if (analysisDisplayEnabled) {
-                setAgentRecommendedLayerVisibility((previous) => ({
-                  ...previous,
-                  [layer.id]: !previous[layer.id],
-                }));
-              }
-            },
-          };
-        }),
+        key: 'overlays',
+        label: 'Analysis & Recommended',
+        items: overlayItems,
       });
     }
+
+    groups.push(imageryGroup);
 
     if (businessLayers?.length) {
       groups.push({
@@ -1336,6 +1450,7 @@ function AgentPanel() {
     analysisDisplayEnabled,
     businessLayers,
     confirmedRecommendedCatalogLayers,
+    orderLayerManagerItems,
     scopeSourceLabel,
     agentSelectedPeriod,
     selectedPeriodMeta.label,
@@ -1354,13 +1469,26 @@ function AgentPanel() {
     if (!analysisDisplayEnabled || !currentRecommendedLayers.length) {
       setAgentRecommendedLayerVisibility({});
       setAgentRecommendedLayerData({});
+      setAgentLayerOrder((previous) => previous.filter((layerId) => !String(layerId).startsWith('agent-rec-')));
       return;
     }
+
+    const catalogLayerOrderIds = currentRecommendedLayers
+      .filter((layer) => layer.layer_family === 'catalog')
+      .map((layer) => getCatalogMapLayerId(layer.id));
+
+    setAgentLayerOrder((previous) => {
+      const filtered = previous.filter((layerId) => (
+        !String(layerId).startsWith('agent-rec-') || catalogLayerOrderIds.includes(layerId)
+      ));
+      const missing = catalogLayerOrderIds.filter((layerId) => !filtered.includes(layerId));
+      return [...filtered, ...missing];
+    });
 
     setAgentRecommendedLayerVisibility(() => {
       const next = {};
       currentRecommendedLayers.forEach((layer) => {
-        next[layer.id] = currentSelectedLayerIds.includes(layer.id);
+        next[layer.id] = false;
       });
       return next;
     });
@@ -1368,9 +1496,8 @@ function AgentPanel() {
     analysisDisplayEnabled,
     currentConfirmationVersion,
     currentRecommendedLayers,
-    currentSelectedLayerIds,
     currentRecommendedLayerSignature,
-    currentSelectedLayerSignature,
+    setAgentLayerOrder,
     setAgentRecommendedLayerData,
     setAgentRecommendedLayerVisibility,
   ]);
@@ -1384,15 +1511,14 @@ function AgentPanel() {
       return;
     }
 
-    const selectedIds = currentSelectedLayerIds;
-    setAgentShowFloodDetection(selectedIds.includes('core:flood_detection'));
-    setAgentShowPopulationLayer(selectedIds.includes('core:population'));
-    setAgentShowUrbanLayer(selectedIds.includes('core:urban'));
-    setAgentShowLandcoverLayer(selectedIds.includes('core:landcover'));
+    setAgentShowFloodDetection(false);
+    setAgentShowPopulationLayer(false);
+    setAgentShowUrbanLayer(false);
+    setAgentShowLandcoverLayer(false);
   }, [
     analysisDisplayEnabled,
-    currentSelectedLayerIds,
-    currentSelectedLayerSignature,
+    currentConfirmationVersion,
+    currentRecommendedLayerSignature,
     setAgentShowFloodDetection,
     setAgentShowLandcoverLayer,
     setAgentShowPopulationLayer,
@@ -1629,18 +1755,19 @@ function AgentPanel() {
   }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, analysisDisplayEnabled, fetchImpactData]);
 
   useEffect(() => {
-    const visibleCatalogLayers = recommendedCatalogLayers.filter((layer) => agentRecommendedLayerVisibility[layer.id]);
+    const visibleCatalogLayers = confirmedRecommendedCatalogLayers.filter((layer) => agentRecommendedLayerVisibility[layer.id]);
     if (!analysisDisplayEnabled || !visibleCatalogLayers.length || !effectiveAoi) {
       return;
     }
 
     let cancelled = false;
+    const pendingRecommendedLayerRequests = pendingRecommendedLayerRequestsRef.current;
     const layersToRender = visibleCatalogLayers.filter((layer) => {
-      const cached = agentRecommendedLayerData?.[layer.id];
+      const cached = agentRecommendedLayerDataRef.current?.[layer.id];
       const requestToken = `${recommendedLayerContextKey}:${layer.id}`;
       return !(
         (cached?.tile_url && cached?.context_key === recommendedLayerContextKey)
-        || pendingRecommendedLayerRequestsRef.current.has(requestToken)
+        || pendingRecommendedLayerRequests.has(requestToken)
       );
     });
 
@@ -1656,7 +1783,7 @@ function AgentPanel() {
         layerTitle: layer.title || layer.id,
       });
 
-      pendingRecommendedLayerRequestsRef.current.add(requestToken);
+      pendingRecommendedLayerRequests.add(requestToken);
       setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: true }));
 
       try {
@@ -1694,7 +1821,7 @@ function AgentPanel() {
           error: error?.message || 'unknown',
         });
       } finally {
-        pendingRecommendedLayerRequestsRef.current.delete(requestToken);
+        pendingRecommendedLayerRequests.delete(requestToken);
         if (!cancelled) {
           setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: false }));
         }
@@ -1712,17 +1839,30 @@ function AgentPanel() {
     
     return () => {
       cancelled = true;
+      layersToRender.forEach((layer) => {
+        pendingRecommendedLayerRequests.delete(`${recommendedLayerContextKey}:${layer.id}`);
+      });
+      setAgentLayerLoading((previous) => {
+        let changed = false;
+        const next = { ...previous };
+        layersToRender.forEach((layer) => {
+          if (next[layer.id]) {
+            next[layer.id] = false;
+            changed = true;
+          }
+        });
+        return changed ? next : previous;
+      });
     };
   }, [
-    agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     analysisDisplayEnabled,
+    confirmedRecommendedCatalogLayers,
     currentAfterDate,
     currentPeekDate,
     currentPreDate,
     currentRecommendedLayers,
     effectiveAoi,
-    recommendedCatalogLayers,
     recommendedLayerContextKey,
     setAgentLayerLoading,
     setAgentRecommendedLayerData,
@@ -1783,50 +1923,74 @@ function AgentPanel() {
                       <span className="layer-manager-group-count">{group.items.length}</span>
                     </div>
                     <div className="layer-manager-items">
-                      {group.items.map((item) => (
-                        <div
-                          className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${item.disabled ? 'is-disabled' : ''}`}
-                          key={item.id}
-                        >
-                          <div className="layer-manager-item-main">
-                            <input
-                              type="checkbox"
-                              checked={item.checked}
-                              onChange={item.onToggle}
-                              disabled={item.disabled}
-                            />
-                            {item.onSelect ? (
-                              <button
-                                type="button"
-                                className="layer-manager-item-trigger"
-                                onClick={item.onSelect}
-                              disabled={item.disabled}
-                            >
-                                <LayerManagerItemCopy item={item} />
-                              </button>
-                            ) : (
-                              <LayerManagerItemCopy item={item} />
-                            )}
+                      {group.items.map((item) => {
+                        const visibleOrderIds = group.items.filter((entry) => entry.draggable).map((entry) => entry.orderId);
+                        const canReceiveDrop = (
+                          group.key === 'overlays'
+                          && Boolean(draggedLayerId)
+                          && visibleOrderIds.includes(draggedLayerId)
+                          && item.draggable
+                        );
+                        const isDragOverTarget = (
+                          canReceiveDrop
+                          && dragOverState.groupKey === group.key
+                          && dragOverState.targetLayerId === item.orderId
+                          && draggedLayerId !== item.orderId
+                        );
+                        return (
+                          <div
+                            key={item.id}
+                            className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${(item.disabled || item.loading) ? 'is-disabled' : ''} ${draggedLayerId === item.orderId ? 'is-dragging' : ''} ${isDragOverTarget && dragOverState.position === 'before' ? 'is-drag-over-before' : ''} ${isDragOverTarget && dragOverState.position === 'after' ? 'is-drag-over-after' : ''}`}
+                            draggable={Boolean(item.draggable)}
+                            onDragStart={item.draggable ? (event) => handleLayerDragStart(event, item.orderId) : undefined}
+                            onDragEnd={item.draggable ? handleLayerDragEnd : undefined}
+                            onDragOver={canReceiveDrop ? (event) => handleLayerDragOver(event, group.key, item.orderId) : undefined}
+                            onDrop={canReceiveDrop ? (event) => handleLayerDrop(event, group.key, visibleOrderIds, item.orderId) : undefined}
+                          >
+                            <div className="layer-manager-item-main">
+                              <div className="layer-manager-item-checkbox-wrap">
+                                <input
+                                  type="checkbox"
+                                  checked={item.checked}
+                                  onChange={item.onToggle}
+                                  disabled={item.disabled || item.loading}
+                                />
+                              </div>
+                              <div className="layer-manager-item-content">
+                                {item.onSelect ? (
+                                  <button
+                                    type="button"
+                                    className="layer-manager-item-trigger"
+                                    onClick={item.onSelect}
+                                    disabled={item.disabled || item.loading}
+                                  >
+                                    <LayerManagerItemCopy item={item} />
+                                  </button>
+                                ) : (
+                                  <LayerManagerItemCopy item={item} />
+                                )}
+                              </div>
+                            </div>
+                            <div className="layer-manager-item-side">
+                              {item.badge ? (
+                                <span className="layer-manager-item-badge">{item.badge}</span>
+                              ) : null}
+                              {item.actionLabel && item.onAction ? (
+                                <button
+                                  type="button"
+                                  className="layer-manager-item-action"
+                                  onClick={item.onAction}
+                                >
+                                  {item.actionLabel}
+                                </button>
+                              ) : null}
+                              {item.loading ? (
+                                <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
+                              ) : null}
+                            </div>
                           </div>
-                          <div className="layer-manager-item-side">
-                            {item.badge ? (
-                              <span className="layer-manager-item-badge">{item.badge}</span>
-                            ) : null}
-                            {item.actionLabel && item.onAction ? (
-                              <button
-                                type="button"
-                                className="layer-manager-item-action"
-                                onClick={item.onAction}
-                              >
-                                {item.actionLabel}
-                              </button>
-                            ) : null}
-                            {item.loading ? (
-                              <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
