@@ -55,6 +55,13 @@ const defaultAgentLayerVisibility = {
   agentShowLandcoverLayer: false,
 };
 
+const defaultAgentLayerOrder = [
+  'agent-flood-detection',
+  'agent-population',
+  'agent-urban',
+  'agent-landcover',
+];
+
 const activateBusinessLayer = (records = [], activeId = null) =>
   records.map((record) => ({
     ...record,
@@ -166,6 +173,7 @@ export const AppProvider = ({ children }) => {
   const [agentTileLoading, setAgentTileLoading] = useState(false);
   const [agentRecommendedLayerData, setAgentRecommendedLayerData] = useState({});
   const [agentRecommendedLayerVisibility, setAgentRecommendedLayerVisibility] = useState({});
+  const [agentLayerOrder, setAgentLayerOrder] = useState(defaultAgentLayerOrder);
   // Per-layer loading tracking: { 'base-imagery': bool, 'flood-detection': bool, 'population': bool, 'urban': bool, 'landcover': bool }
   const [agentLayerLoading, setAgentLayerLoading] = useState({});
   const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
@@ -184,6 +192,7 @@ export const AppProvider = ({ children }) => {
     setAgentImagery(null);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
+    setAgentLayerOrder(defaultAgentLayerOrder);
   }, []);
 
   const clearAgentVisualState = useCallback(() => {
@@ -194,6 +203,7 @@ export const AppProvider = ({ children }) => {
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
+    setAgentLayerOrder(defaultAgentLayerOrder);
     setAgentLayerLoading({});
     setAgentTileError(null);
     setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
@@ -414,6 +424,7 @@ export const AppProvider = ({ children }) => {
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
+    setAgentLayerOrder(defaultAgentLayerOrder);
     setAgentLayerLoading({});
     setAgentTileError(null);
     setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
@@ -840,6 +851,8 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     setAgentRecommendedLayerVisibility,
+    agentLayerOrder,
+    setAgentLayerOrder,
     agentLayerLoading,
     setAgentLayerLoading,
     agentTileError,

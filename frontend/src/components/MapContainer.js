@@ -11,6 +11,7 @@ import {
 import { buildAoiFromBusinessLayerRecord } from '../utils/businessLayerStore';
 import {
   buildCatalogMapLayerDefinition,
+  getCatalogMapLayerId,
   isCatalogMapLayerId,
 } from '../utils/catalogLayers';
 
@@ -232,6 +233,7 @@ function MapContainer() {
     agentImpactData,
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
+    agentLayerOrder,
     setAgentLayerLoading,
     setAgentTileError,
     businessLayers,
@@ -243,6 +245,8 @@ function MapContainer() {
 
   // Track if map is initialized
   const mapInitialized = useRef(false);
+  const agentLayerOrderRef = useRef(agentLayerOrder);
+  const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
 
   const clearTransientWarningTimer = useCallback(() => {
     if (transientWarningTimeoutRef.current) {
@@ -312,6 +316,14 @@ function MapContainer() {
   useEffect(() => {
     editableGeojsonRef.current = draftAOI?.geojson || selectedAOI?.geojson || null;
   }, [draftAOI, selectedAOI]);
+
+  useEffect(() => {
+    agentLayerOrderRef.current = agentLayerOrder;
+  }, [agentLayerOrder]);
+
+  useEffect(() => {
+    agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
+  }, [agentRecommendedLayerData]);
 
   const removeAskLayers = useCallback((map) => {
     ASK_LAYER_NAMES.forEach((id) => {
@@ -383,14 +395,23 @@ function MapContainer() {
     const styleLayers = map.getStyle()?.layers || [];
     const styleLayerIds = styleLayers.map((layer) => layer.id);
     const existingLayerIds = new Set(styleLayerIds);
+    const catalogLayers = styleLayerIds.filter((id) => isCatalogMapLayerId(id));
+    const agentOverlayCandidates = [
+      ...(agentLayerOrderRef.current || []),
+      ...AGENT_ANALYSIS_LAYER_IDS,
+      ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
+      ...catalogLayers,
+    ];
+    const agentOverlayLayers = Array.from(new Set(agentOverlayCandidates))
+      .filter((id) => existingLayerIds.has(id));
 
     return {
       gridLayers: ['grid_cell-layer'].filter((id) => existingLayerIds.has(id)),
       baseImageryLayers: AGENT_BASE_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
       analysisLayers: [
         ...ASK_LAYER_NAMES.map((layerName) => `${layerName}-layer`),
-        ...AGENT_ANALYSIS_LAYER_IDS,
       ].filter((id) => existingLayerIds.has(id)),
+      agentOverlayLayers,
       businessLayers: BUSINESS_LAYER_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
       aoiLayers: AOI_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
       drawLayers: styleLayerIds.filter((id) => id.startsWith('gl-draw-')),
@@ -418,27 +439,104 @@ function MapContainer() {
       gridLayers,
       baseImageryLayers,
       analysisLayers,
+      agentOverlayLayers,
       businessLayers,
       aoiLayers,
       drawLayers,
     } = getExistingLayerBands(map);
 
-    [
-      ...gridLayers,
-      ...baseImageryLayers,
-      ...analysisLayers,
-      ...businessLayers,
-      ...aoiLayers,
-      ...drawLayers,
-    ].forEach((id) => {
+    const orderedFromTopToBottom = [
+      ...drawLayers.slice().reverse(),
+      ...aoiLayers.slice().reverse(),
+      ...businessLayers.slice().reverse(),
+      ...agentOverlayLayers,
+      ...analysisLayers.slice().reverse(),
+      ...gridLayers.slice().reverse(),
+      ...baseImageryLayers.slice().reverse(),
+    ];
+
+    let beforeId;
+    orderedFromTopToBottom.forEach((id) => {
       if (!map.getLayer(id)) return;
       try {
-        map.moveLayer(id);
+        if (beforeId && map.getLayer(beforeId)) {
+          map.moveLayer(id, beforeId);
+        } else {
+          map.moveLayer(id);
+        }
+        beforeId = id;
       } catch (error) {
         console.warn(`Failed to reconcile layer order for ${id}:`, error);
       }
     });
   }, [getExistingLayerBands]);
+
+  const getInsertBeforeId = useCallback((map, layerId) => {
+    if (!map || !map.isStyleLoaded() || !layerId) {
+      return undefined;
+    }
+
+    const bands = getExistingLayerBands(map);
+    const withExtra = (items = []) => (items.includes(layerId) ? items : [...items, layerId]);
+
+    const overlayCandidates = [
+      ...(agentLayerOrderRef.current || []),
+      ...AGENT_ANALYSIS_LAYER_IDS,
+      ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
+    ];
+    const overlayOrdered = Array.from(new Set(
+      isCatalogMapLayerId(layerId) || AGENT_ANALYSIS_LAYER_IDS.includes(layerId)
+        ? [...overlayCandidates, layerId]
+        : overlayCandidates
+    ))
+      .filter((id) => id === layerId || map.getLayer(id));
+
+    const desiredTopToBottom = [
+      ...bands.drawLayers.slice().reverse(),
+      ...bands.aoiLayers.slice().reverse(),
+      ...bands.businessLayers.slice().reverse(),
+      ...overlayOrdered,
+      ...bands.analysisLayers.slice().reverse(),
+      ...bands.gridLayers.slice().reverse(),
+      ...(
+        AGENT_BASE_LAYER_IDS.includes(layerId)
+          ? withExtra(bands.baseImageryLayers).slice().reverse()
+          : bands.baseImageryLayers.slice().reverse()
+      ),
+    ];
+
+    const targetIndex = desiredTopToBottom.indexOf(layerId);
+    if (targetIndex <= 0) {
+      return undefined;
+    }
+
+    for (let index = targetIndex - 1; index >= 0; index -= 1) {
+      const candidateId = desiredTopToBottom[index];
+      if (candidateId !== layerId && map.getLayer(candidateId)) {
+        return candidateId;
+      }
+    }
+
+    return undefined;
+  }, [getExistingLayerBands]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => reconcileLayerOrder(map));
+  }, [
+    agentLayerOrder,
+    agentRecommendedLayerVisibility,
+    agentShowBaseImagery,
+    agentShowFloodDetection,
+    agentShowPopulationLayer,
+    agentShowUrbanLayer,
+    agentShowLandcoverLayer,
+    reconcileLayerOrder,
+  ]);
 
   const loadGridLayer = useCallback((map) => {
     map.addSource('grid_cell', {
@@ -1191,12 +1289,18 @@ function MapContainer() {
       tiles: [periodData[typeKey].tile_url],
       tileSize: 256,
     });
-    map.addLayer({
+    const imageryLayerDefinition = {
       id: sourceId,
       type: 'raster',
       source: sourceId,
       paint: { 'raster-opacity': 1 },
-    });
+    };
+    const imageryBeforeId = getInsertBeforeId(map, sourceId);
+    if (imageryBeforeId) {
+      map.addLayer(imageryLayerDefinition, imageryBeforeId);
+    } else {
+      map.addLayer(imageryLayerDefinition);
+    }
     reconcileLayerOrder(map);
 
     // Track tile errors (only on base imagery since it's the primary GEE layer)
@@ -1240,7 +1344,7 @@ function MapContainer() {
       map.off('idle', finish);
       clearTimeout(timeout);
     };
-  }, [agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, agentSelectedType, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
+  }, [agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, agentSelectedType, getInsertBeforeId, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
 
   // ========== Effect B: Flood Detection Overlay ==========
   useEffect(() => {
@@ -1257,17 +1361,23 @@ function MapContainer() {
       tiles: [agentImagery.flood_detection.tile_url],
       tileSize: 256,
     });
-    map.addLayer({
+    const floodLayerDefinition = {
       id: 'agent-flood-detection',
       type: 'raster',
       source: 'agent-flood-detection',
       paint: { 'raster-opacity': 0.7 },
-    });
+    };
+    const floodBeforeId = getInsertBeforeId(map, 'agent-flood-detection');
+    if (floodBeforeId) {
+      map.addLayer(floodLayerDefinition, floodBeforeId);
+    } else {
+      map.addLayer(floodLayerDefinition);
+    }
     reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'flood-detection');
     return lifecycle.cleanup;
-  }, [agentImagery, appMode, agentShowFloodDetection, createLayerTileLifecycle, reconcileLayerOrder]);
+  }, [agentImagery, appMode, agentShowFloodDetection, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
   // ========== Effect C: Population Impact Overlay ==========
   useEffect(() => {
@@ -1284,17 +1394,23 @@ function MapContainer() {
       tiles: [agentImpactData.layers.population.tile_url],
       tileSize: 256,
     });
-    map.addLayer({
+    const populationLayerDefinition = {
       id: 'agent-population',
       type: 'raster',
       source: 'agent-population',
       paint: { 'raster-opacity': 0.7 },
-    });
+    };
+    const populationBeforeId = getInsertBeforeId(map, 'agent-population');
+    if (populationBeforeId) {
+      map.addLayer(populationLayerDefinition, populationBeforeId);
+    } else {
+      map.addLayer(populationLayerDefinition);
+    }
     reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'population');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowPopulationLayer, createLayerTileLifecycle, reconcileLayerOrder]);
+  }, [agentImpactData, appMode, agentShowPopulationLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
   // ========== Effect D: Built-up Area Overlay ==========
   useEffect(() => {
@@ -1311,17 +1427,23 @@ function MapContainer() {
       tiles: [agentImpactData.layers.urban.tile_url],
       tileSize: 256,
     });
-    map.addLayer({
+    const urbanLayerDefinition = {
       id: 'agent-urban',
       type: 'raster',
       source: 'agent-urban',
       paint: { 'raster-opacity': 0.7 },
-    });
+    };
+    const urbanBeforeId = getInsertBeforeId(map, 'agent-urban');
+    if (urbanBeforeId) {
+      map.addLayer(urbanLayerDefinition, urbanBeforeId);
+    } else {
+      map.addLayer(urbanLayerDefinition);
+    }
     reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'urban');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowUrbanLayer, createLayerTileLifecycle, reconcileLayerOrder]);
+  }, [agentImpactData, appMode, agentShowUrbanLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
   // ========== Effect E: Land Cover Overlay ==========
   useEffect(() => {
@@ -1338,17 +1460,23 @@ function MapContainer() {
       tiles: [agentImpactData.layers.landcover.tile_url],
       tileSize: 256,
     });
-    map.addLayer({
+    const landcoverLayerDefinition = {
       id: 'agent-landcover',
       type: 'raster',
       source: 'agent-landcover',
       paint: { 'raster-opacity': 0.7 },
-    });
+    };
+    const landcoverBeforeId = getInsertBeforeId(map, 'agent-landcover');
+    if (landcoverBeforeId) {
+      map.addLayer(landcoverLayerDefinition, landcoverBeforeId);
+    } else {
+      map.addLayer(landcoverLayerDefinition);
+    }
     reconcileLayerOrder(map);
 
     const lifecycle = createLayerTileLifecycle(map, 'landcover');
     return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle, reconcileLayerOrder]);
+  }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1371,6 +1499,7 @@ function MapContainer() {
 
     const layerEntries = Object.entries(agentRecommendedLayerData || {});
     const activeLayerIds = new Set();
+    const tileLifecycleCleanups = [];
 
     layerEntries.forEach(([layerId, descriptor]) => {
       const mapDefinition = buildCatalogMapLayerDefinition(layerId, descriptor);
@@ -1394,10 +1523,17 @@ function MapContainer() {
       }
 
       map.addSource(mapLayerId, mapDefinition.source);
-      map.addLayer({
+      const catalogLayerDefinition = {
         ...mapDefinition.layer,
         source: mapLayerId,
-      });
+      };
+      const catalogBeforeId = getInsertBeforeId(map, mapLayerId);
+      if (catalogBeforeId) {
+        map.addLayer(catalogLayerDefinition, catalogBeforeId);
+      } else {
+        map.addLayer(catalogLayerDefinition);
+      }
+      tileLifecycleCleanups.push(createLayerTileLifecycle(map, layerId).cleanup);
     });
 
     (map.getStyle()?.layers || [])
@@ -1413,7 +1549,18 @@ function MapContainer() {
       });
 
     reconcileLayerOrder(map);
-  }, [agentRecommendedLayerData, agentRecommendedLayerVisibility, appMode, reconcileLayerOrder]);
+
+    return () => {
+      tileLifecycleCleanups.forEach((cleanup) => cleanup());
+    };
+  }, [
+    agentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
+    appMode,
+    createLayerTileLifecycle,
+    getInsertBeforeId,
+    reconcileLayerOrder,
+  ]);
 
   const displayedAoi = isAoiEditing
     ? null
@@ -1483,16 +1630,8 @@ function MapContainer() {
       type: 'fill',
       source: BUSINESS_LAYER_SOURCE_ID,
       paint: {
-        'fill-color': [
-          'case',
-          ['boolean', ['get', 'is_active'], false], '#2563eb',
-          '#38bdf8',
-        ],
-        'fill-opacity': [
-          'case',
-          ['boolean', ['get', 'is_active'], false], 0.12,
-          0.06,
-        ],
+        'fill-color': 'rgba(0, 0, 0, 0)',
+        'fill-opacity': 0,
       },
     });
 
