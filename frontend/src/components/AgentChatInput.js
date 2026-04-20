@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Profiler, useEffect, useMemo, useRef, useState } from 'react';
 import { useCopilotChatInternal } from '@copilotkit/react-core';
 import { useAppContext } from '../context/AppContext';
 import {
@@ -9,6 +9,11 @@ import {
   getMentionQuery,
   reconcileMentionRanges,
 } from '../utils/mentionUtils';
+import {
+  createReactProfilerHandler,
+  logAgentDiagnostic,
+  useRenderDiagnostics,
+} from '../utils/agentDiagnostics';
 import './AgentChatInput.css';
 
 function renderHighlightedText(text, mentions) {
@@ -87,6 +92,24 @@ function AgentChatInput({
     () => filterMentionCandidates(mentionCandidates, activeMentionQuery?.query || ''),
     [activeMentionQuery, mentionCandidates]
   );
+  const inputProfiler = useMemo(
+    () => createReactProfilerHandler('AgentChatInput', () => ({
+      textLength: text.length,
+      mentionCount: mentions.length,
+      candidateCount: filteredCandidates.length,
+      inProgress,
+      chatReady,
+    })),
+    [chatReady, filteredCandidates.length, inProgress, mentions.length, text.length]
+  );
+
+  useRenderDiagnostics('AgentChatInput', () => ({
+    textLength: text.length,
+    mentionCount: mentions.length,
+    candidateCount: filteredCandidates.length,
+    inProgress,
+    chatReady,
+  }));
 
   useEffect(() => {
     if (!textareaRef.current) {
@@ -214,6 +237,12 @@ function AgentChatInput({
     }
 
     const payload = appendMentionContext(text, validMentions);
+    logAgentDiagnostic('chat', 'send_message', {
+      textLength: text.length,
+      mentionCount: validMentions.length,
+      chatReady,
+      inProgress,
+    });
     await onSend(payload);
     setText('');
     setMentions([]);
@@ -270,75 +299,77 @@ function AgentChatInput({
   const buttonLabel = !chatReady ? '...' : canStop ? 'Stop' : 'Send';
 
   return (
-    <div className="agent-chat-input-shell" ref={rootRef}>
-      <div className="agent-chat-input-card" onClick={() => textareaRef.current?.focus()}>
-        <div className="agent-chat-editor">
-          <div
-            ref={mirrorRef}
-            className={`agent-chat-mirror ${text ? 'has-text' : ''} ${usePlainTextarea ? 'is-hidden' : ''}`}
-            aria-hidden="true"
-          >
-            {text ? renderHighlightedText(text, mentions) : (
-              <span className="agent-chat-placeholder">Describe the event, then use @ to select a spatial scope.</span>
-            )}
-          </div>
-          <textarea
-            ref={textareaRef}
-            className={`agent-chat-textarea ${usePlainTextarea ? 'is-composing' : ''}`}
-            value={text}
-            rows={1}
-            onChange={handleTextChange}
-            onClick={(event) => updateMentionQuery(text, event.target.selectionStart ?? text.length)}
-            onSelect={(event) => updateMentionQuery(text, event.target.selectionStart ?? text.length)}
-            onKeyDown={handleKeyDown}
-            onScroll={syncScroll}
-            onCompositionStart={() => {
-              setIsComposing(true);
-              setActiveMentionQuery(null);
-            }}
-            onCompositionEnd={(event) => {
-              setIsComposing(false);
-              updateMentionQuery(event.target.value, event.target.selectionStart ?? event.target.value.length);
-            }}
-            disabled={!chatReady && !inProgress}
-          />
-        </div>
-
-        <div className="agent-chat-controls">
-          <button
-            type="button"
-            className="agent-chat-send-btn"
-            onClick={canStop ? onStop : handleSend}
-            disabled={!canStop && !canSend}
-          >
-            {buttonLabel}
-          </button>
-        </div>
-      </div>
-
-      {activeMentionQuery && filteredCandidates.length > 0 && (
-        <div className="agent-mention-dropdown">
-          {filteredCandidates.map((candidate, index) => (
-            <button
-              key={candidate.id}
-              type="button"
-              className={`agent-mention-option ${index === activeIndex ? 'active' : ''}`}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                applyCandidate(candidate);
-              }}
+    <Profiler id="AgentChatInput" onRender={inputProfiler}>
+      <div className="agent-chat-input-shell" ref={rootRef}>
+        <div className="agent-chat-input-card" onClick={() => textareaRef.current?.focus()}>
+          <div className="agent-chat-editor">
+            <div
+              ref={mirrorRef}
+              className={`agent-chat-mirror ${text ? 'has-text' : ''} ${usePlainTextarea ? 'is-hidden' : ''}`}
+              aria-hidden="true"
             >
-              <span className="agent-mention-option-title">@{candidate.label}</span>
-              <span className="agent-mention-option-meta">{candidate.type} | {candidate.source}</span>
-            </button>
-          ))}
-        </div>
-      )}
+              {text ? renderHighlightedText(text, mentions) : (
+                <span className="agent-chat-placeholder">Describe the event, then use @ to select a spatial scope.</span>
+              )}
+            </div>
+            <textarea
+              ref={textareaRef}
+              className={`agent-chat-textarea ${usePlainTextarea ? 'is-composing' : ''}`}
+              value={text}
+              rows={1}
+              onChange={handleTextChange}
+              onClick={(event) => updateMentionQuery(text, event.target.selectionStart ?? text.length)}
+              onSelect={(event) => updateMentionQuery(text, event.target.selectionStart ?? text.length)}
+              onKeyDown={handleKeyDown}
+              onScroll={syncScroll}
+              onCompositionStart={() => {
+                setIsComposing(true);
+                setActiveMentionQuery(null);
+              }}
+              onCompositionEnd={(event) => {
+                setIsComposing(false);
+                updateMentionQuery(event.target.value, event.target.selectionStart ?? event.target.value.length);
+              }}
+              disabled={!chatReady && !inProgress}
+            />
+          </div>
 
-      {sendError ? (
-        <div className="agent-chat-input-error">{sendError}</div>
-      ) : null}
-    </div>
+          <div className="agent-chat-controls">
+            <button
+              type="button"
+              className="agent-chat-send-btn"
+              onClick={canStop ? onStop : handleSend}
+              disabled={!canStop && !canSend}
+            >
+              {buttonLabel}
+            </button>
+          </div>
+        </div>
+
+        {activeMentionQuery && filteredCandidates.length > 0 && (
+          <div className="agent-mention-dropdown">
+            {filteredCandidates.map((candidate, index) => (
+              <button
+                key={candidate.id}
+                type="button"
+                className={`agent-mention-option ${index === activeIndex ? 'active' : ''}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applyCandidate(candidate);
+                }}
+              >
+                <span className="agent-mention-option-title">@{candidate.label}</span>
+                <span className="agent-mention-option-meta">{candidate.type} | {candidate.source}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {sendError ? (
+          <div className="agent-chat-input-error">{sendError}</div>
+        ) : null}
+      </div>
+    </Profiler>
   );
 }
 

@@ -1,8 +1,13 @@
-import React, { useCallback, useRef } from 'react';
+import React, { Profiler, useCallback, useMemo, useRef } from 'react';
 import { CopilotChat } from "@copilotkit/react-ui";
 import { useCopilotContext } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import { trackUxEvent } from '../utils/analytics';
+import {
+  createReactProfilerHandler,
+  logAgentDiagnostic,
+  useRenderDiagnostics,
+} from '../utils/agentDiagnostics';
 import AgentChatInput from './AgentChatInput';
 import AgentUserMessage from './AgentUserMessage';
 import AoiUploadPanel from './AoiUploadPanel';
@@ -29,6 +34,18 @@ function AgentChatPane() {
     startNewAgentSession,
   } = useAppContext();
   const { setThreadId } = useCopilotContext();
+  const paneProfiler = useMemo(
+    () => createReactProfilerHandler('AgentChatPane', () => ({ chatMode })),
+    [chatMode]
+  );
+  const copilotChatProfiler = useMemo(
+    () => createReactProfilerHandler('CopilotChat', () => ({ chatMode })),
+    [chatMode]
+  );
+
+  useRenderDiagnostics('AgentChatPane', () => ({
+    chatMode,
+  }));
 
   const handleOpenSpatialUpload = useCallback(() => {
     uploadPanelRef.current?.openFilePicker?.();
@@ -59,92 +76,100 @@ function AgentChatPane() {
   };
 
   return (
-    <div className="agent-chat-pane">
-      <div className="agent-chat-pane__messages">
-        <CopilotChat
-          instructions={AGENT_MENTION_INSTRUCTIONS}
-          labels={{
-            title: "Flood Analysis Agent",
-            initial: "Describe a flood event, then type @ to attach an uploaded or drawn spatial scope.",
-            placeholder: "Enter flood event information...",
-          }}
-          suggestions={[
-            {
-              title: "2024 Chiang Mai Flood",
-              message: "Please analyze the 2024 Chiang Mai flood event in Thailand",
-            },
-            {
-              title: "2021 Zhengzhou Flood",
-              message: "Please analyze the July 2021 Zhengzhou extreme rainfall event",
-            },
-            {
-              title: "2020 Jakarta Flood",
-              message: "Please analyze the January 2020 Jakarta flood event",
-            },
-          ]}
-          className="agent-chat-pane__copilot"
-          Input={AgentChatInput}
-          UserMessage={AgentUserMessage}
-          onError={(copilotError) => {
-            if (
-              copilotError?.message?.includes('aborted')
-              || copilotError?.message?.includes('Aborted')
-            ) {
-              console.log('Operation cancelled');
-              return;
-            }
-            console.error('Chat error:', copilotError);
-          }}
-        />
-      </div>
-
-      <div className="agent-chat-pane__toolbar">
-        <div className="agent-chat-pane__toolbar-left">
-          <button
-            type="button"
-            className="agent-chat-pane__icon-btn"
-            title="New conversation"
-            onClick={handleNewChat}
-          >
-            <i className="fa fa-plus"></i>
-          </button>
-          <button
-            type="button"
-            className="agent-chat-pane__text-btn"
-            title="Upload Scope"
-            onClick={handleOpenSpatialUpload}
-          >
-            Upload
-          </button>
+    <Profiler id="AgentChatPane" onRender={paneProfiler}>
+      <div className="agent-chat-pane">
+        <div className="agent-chat-pane__messages">
+          <Profiler id="CopilotChat" onRender={copilotChatProfiler}>
+            <CopilotChat
+              instructions={AGENT_MENTION_INSTRUCTIONS}
+              labels={{
+                title: "Flood Analysis Agent",
+                initial: "Describe a flood event, then type @ to attach an uploaded or drawn spatial scope.",
+                placeholder: "Enter flood event information...",
+              }}
+              suggestions={[
+                {
+                  title: "2024 Chiang Mai Flood",
+                  message: "Please analyze the 2024 Chiang Mai flood event in Thailand",
+                },
+                {
+                  title: "2021 Zhengzhou Flood",
+                  message: "Please analyze the July 2021 Zhengzhou extreme rainfall event",
+                },
+                {
+                  title: "2020 Jakarta Flood",
+                  message: "Please analyze the January 2020 Jakarta flood event",
+                },
+              ]}
+              className="agent-chat-pane__copilot"
+              Input={AgentChatInput}
+              UserMessage={AgentUserMessage}
+              onError={(copilotError) => {
+                if (
+                  copilotError?.message?.includes('aborted')
+                  || copilotError?.message?.includes('Aborted')
+                ) {
+                  console.log('Operation cancelled');
+                  return;
+                }
+                console.error('Chat error:', copilotError);
+                logAgentDiagnostic('copilot', 'chat_error', {
+                  message: copilotError?.message || 'unknown',
+                  chatMode,
+                });
+              }}
+            />
+          </Profiler>
         </div>
 
-        <div className="agent-chat-pane__toolbar-right">
-          <div className="agent-chat-pane__mode-toggle">
+        <div className="agent-chat-pane__toolbar">
+          <div className="agent-chat-pane__toolbar-left">
             <button
               type="button"
-              className={`agent-chat-pane__mode-btn ${chatMode === 'ask' ? 'active' : ''}`}
-              onClick={() => handleModeToggle('ask')}
+              className="agent-chat-pane__icon-btn"
+              title="New conversation"
+              onClick={handleNewChat}
             >
-              Ask
+              <i className="fa fa-plus"></i>
             </button>
             <button
               type="button"
-              className={`agent-chat-pane__mode-btn ${chatMode === 'agent' ? 'active' : ''}`}
-              onClick={() => handleModeToggle('agent')}
+              className="agent-chat-pane__text-btn"
+              title="Upload Scope"
+              onClick={handleOpenSpatialUpload}
             >
-              Agent
+              Upload
             </button>
           </div>
-        </div>
-      </div>
 
-      <AoiUploadPanel
-        ref={uploadPanelRef}
-        variant="agent"
-        presentation="hidden"
-        lightweight
-      />
-    </div>
+          <div className="agent-chat-pane__toolbar-right">
+            <div className="agent-chat-pane__mode-toggle">
+              <button
+                type="button"
+                className={`agent-chat-pane__mode-btn ${chatMode === 'ask' ? 'active' : ''}`}
+                onClick={() => handleModeToggle('ask')}
+              >
+                Ask
+              </button>
+              <button
+                type="button"
+                className={`agent-chat-pane__mode-btn ${chatMode === 'agent' ? 'active' : ''}`}
+                onClick={() => handleModeToggle('agent')}
+              >
+                Agent
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <AoiUploadPanel
+          ref={uploadPanelRef}
+          variant="agent"
+          presentation="hidden"
+          lightweight
+        />
+      </div>
+    </Profiler>
   );
 }
 

@@ -5,7 +5,7 @@
  * Supports Human-in-the-Loop (HITL)
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { Profiler, startTransition, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
@@ -15,9 +15,16 @@ import { getFloodImages, getFloodImpact, renderRecommendedLayer } from '../servi
 import { buildAoiFromAgentState } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 import {
+  buildCatalogLegendModel,
   sortCatalogLayers,
 } from '../utils/catalogLayers';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
+import {
+  createReactProfilerHandler,
+  startAgentDiagnosticSpan,
+  updateAgentDiagnosticsContext,
+  useRenderDiagnostics,
+} from '../utils/agentDiagnostics';
 import './AgentPanel.css';
 
 // FloodAgent 榛樿鐘舵€?
@@ -44,28 +51,324 @@ const defaultAgentState = {
   is_valid_flood_query: false,
 };
 
-const buildRecommendedLayerContextKey = (state, aoi) => JSON.stringify({
-  confirmation_version: state?.confirmation_version || 0,
-  pre_date: state?.pre_date || null,
-  peek_date: state?.peek_date || null,
-  after_date: state?.after_date || null,
-  bounds: aoi?.bounds || null,
-  geojson: aoi?.geojson?.geometry || aoi?.geojson || null,
-});
+const formatCoordinatePart = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue.toFixed(6) : '';
+};
+
+const buildBoundsSignature = (bounds) => {
+  if (!bounds) {
+    return 'no-bounds';
+  }
+
+  return [
+    formatCoordinatePart(bounds.west),
+    formatCoordinatePart(bounds.south),
+    formatCoordinatePart(bounds.east),
+    formatCoordinatePart(bounds.north),
+  ].join(':');
+};
+
+const buildLayerSignature = (layers = []) => (layers || [])
+  .map((layer) => [
+    layer?.id || '',
+    layer?.layer_family || '',
+    layer?.title || '',
+    layer?.default_selected ? '1' : '0',
+  ].join('~'))
+  .join('|');
+
+const buildSelectedLayerSignature = (layerIds = []) => (layerIds || []).join('|');
+
+const buildAoiSignature = (aoi, fallbackBounds = null) => [
+  aoi?.id || aoi?.label || aoi?.source || 'aoi',
+  buildBoundsSignature(aoi?.bounds || fallbackBounds),
+].join('|');
+
+const buildRecommendedLayerContextKey = ({
+  confirmationVersion,
+  preDate,
+  peekDate,
+  afterDate,
+  aoiSignature,
+  layerSignature,
+}) => [
+  confirmationVersion || 0,
+  preDate || '',
+  peekDate || '',
+  afterDate || '',
+  aoiSignature || 'no-aoi',
+  layerSignature || 'no-layers',
+].join('|');
 
 const areAoiScopesEquivalent = (left, right) => {
-  if (!left?.geojson || !right?.geojson) {
+  if (!left || !right) {
     return false;
   }
 
-  return (
-    JSON.stringify(left.bounds || null) === JSON.stringify(right.bounds || null)
-    && JSON.stringify(left.geojson?.geometry || left.geojson || null)
-      === JSON.stringify(right.geojson?.geometry || right.geojson || null)
-  );
+  if (left.id && right.id) {
+    return left.id === right.id;
+  }
+
+  return buildBoundsSignature(left.bounds) === buildBoundsSignature(right.bounds);
 };
 
 const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
+const EMPTY_ARRAY = [];
+
+const CORE_LAYER_LEGENDS = {
+  sentinel2: {
+    type: 'text',
+    label: 'True color RGB composite',
+  },
+  sentinel1: {
+    type: 'palette',
+    label: 'VV backscatter',
+    min: '-25 dB',
+    max: '0 dB',
+    palette: ['#111827', '#64748b', '#f8fafc'],
+  },
+  flood_detection: {
+    type: 'solid',
+    label: 'Flood extent',
+    color: '#ff0000',
+  },
+  population: {
+    type: 'palette',
+    label: 'Population density',
+    min: 0,
+    max: 1000,
+    palette: ['#ffffcc', '#fd8d3c', '#bd0026'],
+  },
+  urban: {
+    type: 'palette',
+    label: 'Built-up surface',
+    min: 0,
+    max: 10000,
+    palette: ['#ffeda0', '#feb24c', '#f03b20'],
+  },
+  landcover: {
+    type: 'classes',
+    label: 'ESA WorldCover',
+    items: [
+      { value: 'Tree', color: '#006400' },
+      { value: 'Shrub', color: '#ffbb22' },
+      { value: 'Grass', color: '#ffff4c' },
+      { value: 'Crop', color: '#f096ff' },
+      { value: 'Built', color: '#fa0000' },
+      { value: 'Water', color: '#0064c8' },
+    ],
+  },
+  vector_scope: {
+    type: 'solid',
+    label: 'Vector AOI boundary',
+    color: '#2563eb',
+  },
+};
+
+const formatCoordinatePair = (pair) => [
+  formatCoordinatePart(pair?.[0]),
+  formatCoordinatePart(pair?.[1]),
+].join(':');
+
+const buildRingSampleSignature = (ring = []) => {
+  const pointCount = Array.isArray(ring) ? ring.length : 0;
+  const middleIndex = pointCount ? Math.floor(pointCount / 2) : -1;
+
+  return [
+    pointCount,
+    formatCoordinatePair(pointCount ? ring[0] : null),
+    formatCoordinatePair(pointCount ? ring[middleIndex] : null),
+    formatCoordinatePair(pointCount ? ring[pointCount - 1] : null),
+  ].join('~');
+};
+
+const buildGeometrySampleSignature = (geometry) => {
+  if (!geometry || typeof geometry !== 'object') {
+    return 'no-geometry';
+  }
+
+  switch (geometry.type) {
+    case 'Feature':
+      return ['Feature', buildGeometrySampleSignature(geometry.geometry)].join('|');
+    case 'FeatureCollection':
+      return [
+        'FeatureCollection',
+        Array.isArray(geometry.features) ? geometry.features.length : 0,
+        buildGeometrySampleSignature(geometry.features?.[0]),
+      ].join('|');
+    case 'GeometryCollection':
+      return [
+        'GeometryCollection',
+        Array.isArray(geometry.geometries) ? geometry.geometries.length : 0,
+        buildGeometrySampleSignature(geometry.geometries?.[0]),
+      ].join('|');
+    case 'Polygon':
+      return [
+        'Polygon',
+        Array.isArray(geometry.coordinates) ? geometry.coordinates.length : 0,
+        buildRingSampleSignature(geometry.coordinates?.[0]),
+      ].join('|');
+    case 'MultiPolygon':
+      return [
+        'MultiPolygon',
+        Array.isArray(geometry.coordinates) ? geometry.coordinates.length : 0,
+        Array.isArray(geometry.coordinates?.[0]) ? geometry.coordinates[0].length : 0,
+        buildRingSampleSignature(geometry.coordinates?.[0]?.[0]),
+      ].join('|');
+    default:
+      return geometry.type || 'unknown-geometry';
+  }
+};
+
+const buildGeojsonSignature = (geojson, fallbackBounds = null) => {
+  const geometry = geojson?.geometry || geojson;
+  return [
+    buildBoundsSignature(fallbackBounds),
+    buildGeometrySampleSignature(geometry),
+  ].join('|');
+};
+
+const buildAoiObjectSignature = (aoi, fallbackBounds = null) => {
+  if (!aoi) {
+    return 'no-aoi';
+  }
+
+  const bounds = aoi?.bounds || fallbackBounds || null;
+  return [
+    aoi?.id || '',
+    aoi?.label || '',
+    aoi?.source || '',
+    buildBoundsSignature(bounds),
+    buildGeojsonSignature(aoi?.geojson, bounds),
+  ].join('|');
+};
+
+const buildResolutionMetaSignature = (meta) => {
+  if (!meta) {
+    return 'no-aoi-resolution-meta';
+  }
+
+  return [
+    meta.location || '',
+    meta.source || '',
+    Number.isFinite(Number(meta.confidence)) ? Number(meta.confidence).toFixed(3) : '',
+    meta.status || '',
+    meta.resolution_rank ?? '',
+    buildBoundsSignature(meta.bounds),
+  ].join('|');
+};
+
+const useStableReference = (value, signature) => {
+  const reference = useRef({ signature, value });
+
+  if (reference.current.signature !== signature) {
+    reference.current = { signature, value };
+  }
+
+  return reference.current.value;
+};
+
+function LayerManagerLegend({ legendModel }) {
+  if (!legendModel) {
+    return null;
+  }
+
+  if (legendModel.type === 'classes' && Array.isArray(legendModel.items)) {
+    return (
+      <div className="layer-manager-legend classes">
+        <div className="layer-manager-legend-class-row">
+          {legendModel.items.map((item) => (
+            <span className="layer-manager-legend-class" key={`${legendModel.label}-${item.value}`}>
+              <span
+                className="layer-manager-legend-color"
+                style={{ backgroundColor: item.color }}
+              />
+              <span>{item.value}</span>
+            </span>
+          ))}
+        </div>
+        <span className="layer-manager-legend-label">{legendModel.label}</span>
+      </div>
+    );
+  }
+
+  if (legendModel.type === 'palette' && Array.isArray(legendModel.palette)) {
+    return (
+      <div className="layer-manager-legend">
+        <span
+          className="layer-manager-legend-swatch gradient"
+          style={{
+            backgroundImage: `linear-gradient(90deg, ${legendModel.palette.join(', ')})`,
+          }}
+        />
+        <span className="layer-manager-legend-label">{legendModel.label}</span>
+        {(legendModel.min !== undefined && legendModel.max !== undefined) ? (
+          <span className="layer-manager-legend-range">{legendModel.min} - {legendModel.max}</span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (legendModel.type === 'solid') {
+    return (
+      <div className="layer-manager-legend">
+        <span
+          className="layer-manager-legend-swatch solid"
+          style={{ backgroundColor: legendModel.color }}
+        />
+        <span className="layer-manager-legend-label">{legendModel.label}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="layer-manager-legend text">
+      <span className="layer-manager-legend-label">{legendModel.label}</span>
+    </div>
+  );
+}
+
+function LayerManagerItemCopy({ item }) {
+  const tooltipDetails = Array.isArray(item.infoDetails)
+    ? item.infoDetails.filter((detail) => detail?.label && detail?.value)
+    : [];
+
+  return (
+    <div className="layer-manager-item-copy">
+      <div className="layer-manager-item-head">
+        <span className="layer-manager-item-title">{item.title}</span>
+        {item.infoText ? (
+          <span className="layer-manager-item-info-wrap">
+            <span
+              className="layer-manager-item-info"
+              aria-label={item.infoText}
+            >
+              !
+            </span>
+            <span className="layer-manager-item-tooltip" role="tooltip">
+              <span className="layer-manager-tooltip-title">{item.infoText}</span>
+              {tooltipDetails.length > 0 ? (
+                <span className="layer-manager-tooltip-details">
+                  {tooltipDetails.map((detail) => (
+                    <span className="layer-manager-tooltip-row" key={`${detail.label}-${detail.value}`}>
+                      <span className="layer-manager-tooltip-key">{detail.label}</span>
+                      <span className="layer-manager-tooltip-value">{detail.value}</span>
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+            </span>
+          </span>
+        ) : null}
+      </div>
+      <LayerManagerLegend legendModel={item.legend} />
+      {item.detailText ? (
+        <div className="layer-manager-item-detail">{item.detailText}</div>
+      ) : null}
+    </div>
+  );
+}
 
 // Download GEE JavaScript code file
 function downloadGEECode(code, eventName) {
@@ -535,42 +838,186 @@ function AgentPanel() {
   const imageryRequestKeyRef = useRef(null);
   const impactRequestKeyRef = useRef(null);
   const pendingRecommendedLayerRequestsRef = useRef(new Set());
+  const hasCoAgentState = Boolean(state);
+  const rawState = hasCoAgentState ? state : floodAgentState;
+  const rawEvent = rawState?.event || null;
+  const rawPreDate = rawState?.pre_date || null;
+  const rawAfterDate = rawState?.after_date || null;
+  const rawPeekDate = rawState?.peek_date || null;
+  const rawLocation = rawState?.location || null;
+  const rawCoordinates = rawState?.coordinates || null;
+  const rawBounds = rawState?.bounds || null;
+  const rawGeojson = rawState?.geojson || null;
+  const rawResolvedAoi = rawState?.resolved_aoi || null;
+  const rawAoiResolutionMeta = rawState?.aoi_resolution_meta || null;
+  const rawConfirmedAoi = rawState?.confirmed_aoi || null;
+  const rawRecommendedLayers = Array.isArray(rawState?.recommended_layers)
+    ? rawState.recommended_layers
+    : EMPTY_ARRAY;
+  const rawSelectedLayerIds = Array.isArray(rawState?.selected_layer_ids)
+    ? rawState.selected_layer_ids
+    : EMPTY_ARRAY;
+  const rawConfirmationVersion = rawState?.confirmation_version || 0;
+  const rawGeeCode = rawState?.gee_code || null;
+  const rawPreferredAoi = rawState?.confirmed_aoi || rawState?.resolved_aoi || null;
+  const rawBoundsSignature = buildBoundsSignature(rawPreferredAoi?.bounds || rawState?.bounds);
+  const rawGeojsonSignature = buildGeojsonSignature(rawGeojson, rawBounds);
+  const rawResolvedAoiSignature = buildAoiObjectSignature(rawResolvedAoi, rawBounds);
+  const rawConfirmedAoiSignature = buildAoiObjectSignature(rawConfirmedAoi, rawBounds);
+  const rawAoiResolutionMetaSignature = buildResolutionMetaSignature(rawAoiResolutionMeta);
+  const rawRecommendedLayerSignature = buildLayerSignature(rawRecommendedLayers);
+  const rawSelectedLayerSignature = buildSelectedLayerSignature(rawSelectedLayerIds);
+  const rawCoordinatesSignature = [
+    formatCoordinatePart(rawCoordinates?.[0]),
+    formatCoordinatePart(rawCoordinates?.[1]),
+  ].join(':');
+  const stableCoordinates = useStableReference(rawCoordinates, rawCoordinatesSignature);
+  const stableBounds = useStableReference(rawBounds, rawBoundsSignature);
+  const stableGeojson = useStableReference(rawGeojson, rawGeojsonSignature);
+  const stableResolvedAoi = useStableReference(rawResolvedAoi, rawResolvedAoiSignature);
+  const stableAoiResolutionMeta = useStableReference(rawAoiResolutionMeta, rawAoiResolutionMetaSignature);
+  const stableConfirmedAoi = useStableReference(rawConfirmedAoi, rawConfirmedAoiSignature);
+  const stableRecommendedLayers = useStableReference(rawRecommendedLayers, rawRecommendedLayerSignature);
+  const stableSelectedLayerIds = useStableReference(rawSelectedLayerIds, rawSelectedLayerSignature);
+  const currentState = useMemo(
+    () => ({
+      ...defaultAgentState,
+      event: rawEvent,
+      pre_date: rawPreDate,
+      after_date: rawAfterDate,
+      peek_date: rawPeekDate,
+      location: rawLocation,
+      coordinates: stableCoordinates,
+      bounds: stableBounds,
+      geojson: stableGeojson,
+      resolved_aoi: stableResolvedAoi,
+      confirmed_aoi: stableConfirmedAoi,
+      recommended_layers: stableRecommendedLayers,
+      selected_layer_ids: stableSelectedLayerIds,
+      confirmation_version: rawConfirmationVersion,
+      gee_code: rawGeeCode,
+    }),
+    [
+      rawEvent,
+      rawPreDate,
+      rawAfterDate,
+      rawPeekDate,
+      rawLocation,
+      stableCoordinates,
+      stableBounds,
+      stableGeojson,
+      stableResolvedAoi,
+      stableConfirmedAoi,
+      stableRecommendedLayers,
+      stableSelectedLayerIds,
+      rawGeeCode,
+      rawConfirmationVersion,
+    ]
+  );
+
+  const sharedAgentState = useMemo(
+    () => ({
+      ...defaultAgentState,
+      location: rawLocation,
+      coordinates: stableCoordinates,
+      bounds: stableBounds,
+      geojson: stableGeojson,
+      resolved_aoi: stableResolvedAoi,
+      aoi_resolution_meta: stableAoiResolutionMeta,
+      confirmed_aoi: stableConfirmedAoi,
+      confirmation_version: rawConfirmationVersion,
+    }),
+    [
+      rawLocation,
+      stableCoordinates,
+      stableBounds,
+      stableGeojson,
+      stableResolvedAoi,
+      stableAoiResolutionMeta,
+      stableConfirmedAoi,
+      rawConfirmationVersion,
+    ]
+  );
 
   useEffect(() => {
-    if (state) {
-      setFloodAgentState(state);
+    if (hasCoAgentState) {
+      startTransition(() => {
+        setFloodAgentState(sharedAgentState);
+      });
     }
-  }, [state, setFloodAgentState]);
+  }, [hasCoAgentState, setFloodAgentState, sharedAgentState]);
 
-  const currentState = state || floodAgentState;
-  const agentDerivedAoi = buildAoiFromAgentState(currentState, {
+  const currentConfirmedAoi = currentState?.confirmed_aoi || null;
+  const currentResolvedAoi = currentState?.resolved_aoi || null;
+  const currentLocation = currentState?.location || null;
+  const currentBounds = currentState?.bounds || null;
+  const currentGeojson = currentState?.geojson || null;
+  const currentConfirmationVersion = currentState?.confirmation_version || 0;
+  const currentCoordinates = currentState?.coordinates || null;
+  const currentPreDate = currentState?.pre_date || null;
+  const currentPeekDate = currentState?.peek_date || null;
+  const currentAfterDate = currentState?.after_date || null;
+  const currentRecommendedLayers = currentState?.recommended_layers || EMPTY_ARRAY;
+  const currentSelectedLayerIds = currentState?.selected_layer_ids || EMPTY_ARRAY;
+  const currentGeeCode = currentState?.gee_code || null;
+  const currentEvent = currentState?.event || null;
+  const currentRecommendedLayerSignature = buildLayerSignature(currentRecommendedLayers);
+  const currentSelectedLayerSignature = buildSelectedLayerSignature(currentSelectedLayerIds);
+  const agentDerivedAoi = useMemo(() => buildAoiFromAgentState({
+    confirmed_aoi: currentConfirmedAoi,
+    resolved_aoi: currentResolvedAoi,
+    geojson: currentGeojson,
+    bounds: currentBounds,
+    location: currentLocation,
+  }, {
     source: 'agent_geocode',
-    label: currentState.location || 'Agent-derived scope',
-  });
+    label: currentLocation || 'Agent-derived scope',
+  }), [
+    currentConfirmedAoi,
+    currentResolvedAoi,
+    currentGeojson,
+    currentBounds,
+    currentLocation,
+  ]);
   const selectedBusinessScope = isBusinessLayerAoiSource(selectedAOI?.source) ? selectedAOI : null;
   const analysisScopeMatchesSelection = selectedBusinessScope
     ? areAoiScopesEquivalent(selectedBusinessScope, agentDerivedAoi)
     : true;
   const hasResolvedAnalysisContext = Boolean(
-    currentState?.event
-    && currentState?.pre_date
-    && currentState?.peek_date
-    && currentState?.after_date
-    && (agentDerivedAoi || currentState?.coordinates)
+    currentEvent
+    && currentPreDate
+    && currentPeekDate
+    && currentAfterDate
+    && (agentDerivedAoi || currentCoordinates)
   );
   const analysisDisplayEnabled = hasResolvedAnalysisContext && analysisScopeMatchesSelection;
   const effectiveAoi = analysisDisplayEnabled ? agentDerivedAoi : null;
   const recommendedCatalogLayers = useMemo(
     () => sortCatalogLayers(
-      (currentState.recommended_layers || []).filter((layer) => layer.layer_family === 'catalog')
+      currentRecommendedLayers.filter((layer) => layer.layer_family === 'catalog')
     ),
-    [currentState.recommended_layers]
+    [currentRecommendedLayers]
   );
   const confirmedRecommendedCatalogLayers = useMemo(() => {
-    const confirmedIds = new Set(currentState.selected_layer_ids || []);
+    const confirmedIds = new Set(currentSelectedLayerIds);
     return recommendedCatalogLayers.filter((layer) => confirmedIds.has(layer.id));
-  }, [currentState.selected_layer_ids, recommendedCatalogLayers]);
-  const recommendedLayerContextKey = buildRecommendedLayerContextKey(currentState, effectiveAoi);
+  }, [currentSelectedLayerIds, recommendedCatalogLayers]);
+  const effectiveAoiSignature = buildAoiSignature(effectiveAoi, currentBounds);
+  const recommendedLayerContextKey = useMemo(() => buildRecommendedLayerContextKey({
+    confirmationVersion: currentConfirmationVersion,
+    preDate: currentPreDate,
+    peekDate: currentPeekDate,
+    afterDate: currentAfterDate,
+    aoiSignature: effectiveAoiSignature,
+    layerSignature: currentRecommendedLayerSignature,
+  }), [
+    currentConfirmationVersion,
+    currentPreDate,
+    currentPeekDate,
+    currentAfterDate,
+    currentRecommendedLayerSignature,
+    effectiveAoiSignature,
+  ]);
   const scopeSourceLabel = useCallback((source) => {
     const normalizedSource = String(source || '').toLowerCase();
     if (normalizedSource === 'place_search') return 'place search';
@@ -587,7 +1034,78 @@ function AgentPanel() {
     }[agentSelectedPeriod] || { label: agentSelectedPeriod || 'Period' }),
     [agentSelectedPeriod]
   );
+  const panelProfiler = useMemo(
+    () => createReactProfilerHandler('AgentPanel', () => ({
+      analysisDisplayEnabled,
+      confirmationVersion: currentConfirmationVersion,
+      effectiveAoiSignature,
+      recommendedLayerCount: currentRecommendedLayers.length,
+      selectedLayerCount: currentSelectedLayerIds.length,
+      imageryLoading: agentImageryLoading,
+      impactLoading: agentImpactLoading,
+    })),
+    [
+      agentImpactLoading,
+      agentImageryLoading,
+      analysisDisplayEnabled,
+      currentConfirmationVersion,
+      currentRecommendedLayers.length,
+      currentSelectedLayerIds.length,
+      effectiveAoiSignature,
+    ]
+  );
+
+  useRenderDiagnostics('AgentPanel', () => ({
+    analysisDisplayEnabled,
+    confirmationVersion: currentConfirmationVersion,
+    effectiveAoiSignature,
+    recommendedLayerCount: currentRecommendedLayers.length,
+    selectedLayerCount: currentSelectedLayerIds.length,
+    imageryLoading: agentImageryLoading,
+    impactLoading: agentImpactLoading,
+  }), {
+    every: 15,
+  });
+
+  useEffect(() => {
+    updateAgentDiagnosticsContext({
+      analysisDisplayEnabled,
+      confirmationVersion: currentConfirmationVersion,
+      effectiveAoiSignature,
+      recommendedLayerContextKey,
+      recommendedLayerCount: currentRecommendedLayers.length,
+      selectedLayerCount: currentSelectedLayerIds.length,
+      imageryLoading: agentImageryLoading,
+      impactLoading: agentImpactLoading,
+      currentPreDate,
+      currentPeekDate,
+      currentAfterDate,
+    });
+  }, [
+    agentImpactLoading,
+    agentImageryLoading,
+    analysisDisplayEnabled,
+    currentAfterDate,
+    currentConfirmationVersion,
+    currentPeekDate,
+    currentPreDate,
+    currentRecommendedLayers.length,
+    currentSelectedLayerIds.length,
+    effectiveAoiSignature,
+    recommendedLayerContextKey,
+  ]);
+
   const layerManagerGroups = useMemo(() => {
+    const getAnalysisLayerStatus = (isVisible, hasTile = true) => {
+      if (!analysisDisplayEnabled) {
+        return 'Unavailable';
+      }
+      if (isVisible) {
+        return 'Visible';
+      }
+      return hasTile ? 'Ready' : 'Pending';
+    };
+
     const groups = [
       {
         key: 'imagery',
@@ -595,25 +1113,28 @@ function AgentPanel() {
         items: ['sentinel2', 'sentinel1'].map((type) => {
           const descriptor = agentImagery?.[agentSelectedPeriod]?.[type] || null;
           const isCurrent = agentSelectedType === type;
-          const subtitleParts = [selectedPeriodMeta.label];
-
-          if (descriptor?.date) {
-            subtitleParts.push(descriptor.date);
-          }
-          if (descriptor?.resolution) {
-            subtitleParts.push(`${descriptor.resolution}m`);
-          }
+          const isAvailable = Boolean(descriptor?.tile_url);
 
           return {
             id: `base-imagery-${type}`,
             title: type === 'sentinel2' ? 'Optical Imagery' : 'SAR Imagery',
-            subtitle: subtitleParts.join(' / '),
-            checked: Boolean(isCurrent && agentShowBaseImagery && descriptor?.tile_url),
-            disabled: !descriptor?.tile_url,
+            infoText: type === 'sentinel2'
+              ? 'Optical base imagery for visual flood context'
+              : 'SAR base imagery for cloud-resistant flood context',
+            infoDetails: [
+              { label: 'Source', value: type === 'sentinel2' ? 'Sentinel-2 RGB' : 'Sentinel-1 GRD' },
+              { label: 'Period', value: selectedPeriodMeta.label },
+              { label: 'Date', value: descriptor?.date },
+              { label: 'Resolution', value: descriptor?.resolution ? `${descriptor.resolution}m` : null },
+              { label: 'Status', value: isAvailable ? (isCurrent ? 'Current' : 'Available') : 'Unavailable' },
+            ],
+            legend: CORE_LAYER_LEGENDS[type],
+            checked: Boolean(isCurrent && agentShowBaseImagery && isAvailable),
+            disabled: !isAvailable,
             loading: Boolean((agentImageryLoading || agentLayerLoading['base-imagery']) && isCurrent),
             badge: isCurrent ? 'Current' : null,
             onToggle: () => {
-              if (!descriptor?.tile_url) {
+              if (!isAvailable) {
                 return;
               }
 
@@ -630,7 +1151,14 @@ function AgentPanel() {
           {
             id: 'analysis-flood-detection',
             title: 'Flood Detection',
-            subtitle: analysisDisplayEnabled ? 'Core flood mask generated from Sentinel imagery' : 'Available after event confirmation',
+            infoText: analysisDisplayEnabled ? LAYER_META.flood_detection.description : 'Available after event confirmation',
+            infoDetails: [
+              { label: 'Source', value: LAYER_META.flood_detection.source },
+              { label: 'Method', value: LAYER_META.flood_detection.method },
+              { label: 'Resolution', value: LAYER_META.flood_detection.resolution },
+              { label: 'Status', value: getAnalysisLayerStatus(agentShowFloodDetection) },
+            ],
+            legend: CORE_LAYER_LEGENDS.flood_detection,
             checked: Boolean(agentShowFloodDetection && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
             loading: Boolean(agentLayerLoading['flood-detection']),
@@ -645,9 +1173,14 @@ function AgentPanel() {
           {
             id: 'analysis-population',
             title: 'Population Impact',
-            subtitle: agentImpactData?.layers?.population?.tile_url
-              ? 'WorldPop exposure overlay'
-              : 'Impact tiles will load on demand',
+            infoText: LAYER_META.population.description,
+            infoDetails: [
+              { label: 'Source', value: LAYER_META.population.source },
+              { label: 'Method', value: LAYER_META.population.method },
+              { label: 'Resolution', value: LAYER_META.population.resolution },
+              { label: 'Status', value: getAnalysisLayerStatus(agentShowPopulationLayer, agentImpactData?.layers?.population?.tile_url) },
+            ],
+            legend: CORE_LAYER_LEGENDS.population,
             checked: Boolean(agentShowPopulationLayer && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
             loading: Boolean(agentLayerLoading.population || (agentShowPopulationLayer && agentImpactLoading)),
@@ -666,9 +1199,14 @@ function AgentPanel() {
           {
             id: 'analysis-urban',
             title: 'Built-up Area',
-            subtitle: agentImpactData?.layers?.urban?.tile_url
-              ? 'Built-up footprint impact overlay'
-              : 'Impact tiles will load on demand',
+            infoText: LAYER_META.urban.description,
+            infoDetails: [
+              { label: 'Source', value: LAYER_META.urban.source },
+              { label: 'Method', value: LAYER_META.urban.method },
+              { label: 'Resolution', value: LAYER_META.urban.resolution },
+              { label: 'Status', value: getAnalysisLayerStatus(agentShowUrbanLayer, agentImpactData?.layers?.urban?.tile_url) },
+            ],
+            legend: CORE_LAYER_LEGENDS.urban,
             checked: Boolean(agentShowUrbanLayer && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
             loading: Boolean(agentLayerLoading.urban || (agentShowUrbanLayer && agentImpactLoading)),
@@ -687,9 +1225,14 @@ function AgentPanel() {
           {
             id: 'analysis-landcover',
             title: 'Land Cover',
-            subtitle: agentImpactData?.layers?.landcover?.tile_url
-              ? 'ESA WorldCover class overlay'
-              : 'Impact tiles will load on demand',
+            infoText: LAYER_META.landcover.description,
+            infoDetails: [
+              { label: 'Source', value: LAYER_META.landcover.source },
+              { label: 'Method', value: LAYER_META.landcover.method },
+              { label: 'Resolution', value: LAYER_META.landcover.resolution },
+              { label: 'Status', value: getAnalysisLayerStatus(agentShowLandcoverLayer, agentImpactData?.layers?.landcover?.tile_url) },
+            ],
+            legend: CORE_LAYER_LEGENDS.landcover,
             checked: Boolean(agentShowLandcoverLayer && analysisDisplayEnabled),
             disabled: !analysisDisplayEnabled,
             loading: Boolean(agentLayerLoading.landcover || (agentShowLandcoverLayer && agentImpactLoading)),
@@ -720,7 +1263,13 @@ function AgentPanel() {
           return {
             id: `recommended-${layer.id}`,
             title: layer.title,
-            subtitle: layer.summary || layer.ui_profile?.group_label || 'Recommended catalog layer',
+            infoText: layer.summary || layer.ui_profile?.group_label || 'Recommended catalog layer',
+            infoDetails: [
+              { label: 'Group', value: layer.ui_profile?.group_label || layer.product_group },
+              { label: 'Source', value: descriptor?.source_meta?.title || layer.source_meta?.title },
+              { label: 'Status', value: !analysisDisplayEnabled ? 'Unavailable' : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')) },
+            ],
+            legend: buildCatalogLegendModel(descriptor || layer, layer.title),
             checked: visible,
             disabled: !analysisDisplayEnabled,
             loading,
@@ -753,7 +1302,7 @@ function AgentPanel() {
           return {
             id: `scope-${layer.id}`,
             title: layer.label,
-            subtitle: scopeSourceLabel(layer.source),
+            detailText: scopeSourceLabel(layer.source),
             checked: isVisible,
             disabled: false,
             loading: false,
@@ -802,7 +1351,7 @@ function AgentPanel() {
     toggleBusinessLayerVisibility,
   ]);
   useEffect(() => {
-    if (!analysisDisplayEnabled || !(currentState.recommended_layers || []).length) {
+    if (!analysisDisplayEnabled || !currentRecommendedLayers.length) {
       setAgentRecommendedLayerVisibility({});
       setAgentRecommendedLayerData({});
       return;
@@ -810,16 +1359,18 @@ function AgentPanel() {
 
     setAgentRecommendedLayerVisibility(() => {
       const next = {};
-      (currentState.recommended_layers || []).forEach((layer) => {
-        next[layer.id] = (currentState.selected_layer_ids || []).includes(layer.id);
+      currentRecommendedLayers.forEach((layer) => {
+        next[layer.id] = currentSelectedLayerIds.includes(layer.id);
       });
       return next;
     });
   }, [
     analysisDisplayEnabled,
-    currentState.confirmation_version,
-    currentState.recommended_layers,
-    currentState.selected_layer_ids,
+    currentConfirmationVersion,
+    currentRecommendedLayers,
+    currentSelectedLayerIds,
+    currentRecommendedLayerSignature,
+    currentSelectedLayerSignature,
     setAgentRecommendedLayerData,
     setAgentRecommendedLayerVisibility,
   ]);
@@ -833,14 +1384,15 @@ function AgentPanel() {
       return;
     }
 
-    const selectedIds = currentState.selected_layer_ids || [];
+    const selectedIds = currentSelectedLayerIds;
     setAgentShowFloodDetection(selectedIds.includes('core:flood_detection'));
     setAgentShowPopulationLayer(selectedIds.includes('core:population'));
     setAgentShowUrbanLayer(selectedIds.includes('core:urban'));
     setAgentShowLandcoverLayer(selectedIds.includes('core:landcover'));
   }, [
     analysisDisplayEnabled,
-    currentState.selected_layer_ids,
+    currentSelectedLayerIds,
+    currentSelectedLayerSignature,
     setAgentShowFloodDetection,
     setAgentShowLandcoverLayer,
     setAgentShowPopulationLayer,
@@ -853,14 +1405,14 @@ function AgentPanel() {
   }, [recommendedLayerContextKey, setAgentRecommendedLayerData]);
 
   const fetchAgentImagery = useCallback(async (agentState, aoi) => {
-    const requestKey = JSON.stringify({
-      pre_date: agentState.pre_date,
-      peek_date: agentState.peek_date,
-      after_date: agentState.after_date,
-      bounds: aoi?.bounds || agentState.bounds || null,
-      geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
-      coordinates: agentState.coordinates || null,
-    });
+    const requestKey = [
+      agentState.pre_date || '',
+      agentState.peek_date || '',
+      agentState.after_date || '',
+      buildAoiSignature(aoi, agentState.bounds),
+      formatCoordinatePart(agentState.coordinates?.[0]),
+      formatCoordinatePart(agentState.coordinates?.[1]),
+    ].join('|');
 
     if (imageryRequestKeyRef.current === requestKey) {
       return;
@@ -874,6 +1426,16 @@ function AgentPanel() {
     setAgentImageryLoading(true);
     setWarning('');
 
+    const finishImagerySpan = startAgentDiagnosticSpan('network', 'flood_images', {
+      requestKey,
+      aoiSource: aoi?.source || 'agent',
+      hasBounds: Boolean(aoi?.bounds || agentState.bounds),
+      hasGeojson: Boolean(aoi?.geojson?.geometry || agentState.geojson?.geometry),
+      preDate: agentState.pre_date || null,
+      peekDate: agentState.peek_date || null,
+      afterDate: agentState.after_date || null,
+    });
+
     try {
       const result = await getFloodImages({
         pre_date: agentState.pre_date,
@@ -886,12 +1448,18 @@ function AgentPanel() {
       });
 
       if (imageryRequestKeyRef.current !== requestKey) {
+        finishImagerySpan({ status: 'stale' });
         return;
       }
 
       if (result?.success) {
         setAgentImagery(result.data);
         setWarning('');
+        finishImagerySpan({
+          status: 'success',
+          hasFloodDetection: Boolean(result?.data?.flood_detection),
+          periods: Object.keys(result?.data || {}).filter((key) => key.endsWith('_date')),
+        });
         trackUxEvent('imagery_request_success', {
           source: aoi?.source || 'agent',
           mode: 'agent',
@@ -907,6 +1475,10 @@ function AgentPanel() {
       if (imageryRequestKeyRef.current === requestKey) {
         imageryRequestKeyRef.current = null;
       }
+      finishImagerySpan({
+        status: 'error',
+        error: error?.message || 'unknown',
+      });
       setWarning(error?.message || 'Flood imagery request failed.');
       trackUxEvent('imagery_request_fail', {
         mode: 'agent',
@@ -920,35 +1492,42 @@ function AgentPanel() {
   }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentTileError, setWarning]);
 
   useEffect(() => {
-    if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date || !currentState.after_date) {
+    if (!analysisDisplayEnabled || !currentPreDate || !currentPeekDate || !currentAfterDate) {
       imageryRequestKeyRef.current = null;
       return;
     }
 
-    if (effectiveAoi || currentState.coordinates) {
-      fetchAgentImagery(currentState, effectiveAoi);
+    if (effectiveAoi || currentCoordinates) {
+      fetchAgentImagery({
+        pre_date: currentPreDate,
+        peek_date: currentPeekDate,
+        after_date: currentAfterDate,
+        coordinates: currentCoordinates,
+        bounds: currentBounds,
+        geojson: currentGeojson,
+      }, effectiveAoi);
     }
   }, [
     analysisDisplayEnabled,
-    currentState,
-    currentState.pre_date,
-    currentState.peek_date,
-    currentState.after_date,
-    currentState.coordinates,
+    currentAfterDate,
+    currentBounds,
+    currentCoordinates,
+    currentGeojson,
+    currentPeekDate,
+    currentPreDate,
     effectiveAoi,
     fetchAgentImagery,
   ]);
 
   // Fetch flood impact assessment data
   const fetchImpactData = useCallback(async () => {
-    if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date) return;
+    if (!analysisDisplayEnabled || !currentPreDate || !currentPeekDate) return;
 
-    const requestKey = JSON.stringify({
-      pre_date: currentState.pre_date,
-      peek_date: currentState.peek_date,
-      bounds: effectiveAoi?.bounds || currentState.bounds || null,
-      geojson: effectiveAoi?.geojson?.geometry || currentState.geojson?.geometry || currentState.geojson || null,
-    });
+    const requestKey = [
+      currentPreDate || '',
+      currentPeekDate || '',
+      effectiveAoiSignature,
+    ].join('|');
 
     if (impactRequestKeyRef.current === requestKey && agentImpactData) {
       return;
@@ -957,21 +1536,34 @@ function AgentPanel() {
     impactRequestKeyRef.current = requestKey;
     setAgentImpactLoading(true);
     setWarning('');
+    const finishImpactSpan = startAgentDiagnosticSpan('network', 'flood_impact', {
+      requestKey,
+      aoiSource: effectiveAoi?.source || 'agent',
+      hasBounds: Boolean(effectiveAoi?.bounds || currentBounds),
+      hasGeojson: Boolean(effectiveAoi?.geojson?.geometry || currentGeojson),
+      preDate: currentPreDate || null,
+      peekDate: currentPeekDate || null,
+    });
     try {
       const result = await getFloodImpact({
-        pre_date: currentState.pre_date,
-        peek_date: currentState.peek_date,
-        bounds: effectiveAoi?.bounds || currentState.bounds || null,
-        geojson: effectiveAoi?.geojson?.geometry || currentState.geojson || null,
+        pre_date: currentPreDate,
+        peek_date: currentPeekDate,
+        bounds: effectiveAoi?.bounds || currentBounds || null,
+        geojson: effectiveAoi?.geojson?.geometry || currentGeojson || null,
       });
 
       if (impactRequestKeyRef.current !== requestKey) {
+        finishImpactSpan({ status: 'stale' });
         return;
       }
 
       if (result.success) {
         setAgentImpactData(result.data);
         setWarning('');
+        finishImpactSpan({
+          status: 'success',
+          keys: Object.keys(result?.data || {}),
+        });
         trackUxEvent('impact_request_success', {
           mode: 'agent',
           source: effectiveAoi?.source || 'agent',
@@ -985,6 +1577,10 @@ function AgentPanel() {
       if (impactRequestKeyRef.current === requestKey) {
         impactRequestKeyRef.current = null;
       }
+      finishImpactSpan({
+        status: 'error',
+        error: error?.message || 'unknown',
+      });
       setWarning(error?.message || 'Flood impact request failed.');
       trackUxEvent('impact_request_fail', {
         mode: 'agent',
@@ -995,11 +1591,23 @@ function AgentPanel() {
         setAgentImpactLoading(false);
       }
     }
-  }, [agentImpactData, analysisDisplayEnabled, currentState, effectiveAoi, setAgentImpactData, setAgentImpactLoading, setWarning]);
+  }, [
+    agentImpactData,
+    analysisDisplayEnabled,
+    currentBounds,
+    currentGeojson,
+    currentPeekDate,
+    currentPreDate,
+    effectiveAoi,
+    effectiveAoiSignature,
+    setAgentImpactData,
+    setAgentImpactLoading,
+    setWarning,
+  ]);
 
   // Auto-fetch impact data in background as soon as imagery arrives
   useEffect(() => {
-    if (!analysisDisplayEnabled || !currentState.pre_date || !currentState.peek_date) {
+    if (!analysisDisplayEnabled || !currentPreDate || !currentPeekDate) {
       impactRequestKeyRef.current = null;
       return;
     }
@@ -1007,7 +1615,7 @@ function AgentPanel() {
     if (agentImagery && !agentImpactData && !agentImpactLoading) {
       fetchImpactData();
     }
-  }, [agentImagery, agentImpactData, agentImpactLoading, analysisDisplayEnabled, currentState.pre_date, currentState.peek_date, fetchImpactData]);
+  }, [agentImagery, agentImpactData, agentImpactLoading, analysisDisplayEnabled, currentPeekDate, currentPreDate, fetchImpactData]);
 
   // Also fetch if user enables an impact layer before data arrived
   useEffect(() => {
@@ -1042,6 +1650,11 @@ function AgentPanel() {
 
     const processLayer = async (layer) => {
       const requestToken = `${recommendedLayerContextKey}:${layer.id}`;
+      const finishLayerSpan = startAgentDiagnosticSpan('layer', 'render_recommended_layer', {
+        requestToken,
+        layerId: layer.id,
+        layerTitle: layer.title || layer.id,
+      });
 
       pendingRecommendedLayerRequestsRef.current.add(requestToken);
       setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: true }));
@@ -1049,14 +1662,15 @@ function AgentPanel() {
       try {
         const result = await renderRecommendedLayer({
           layer_id: layer.id,
-          recommended_layers: currentState.recommended_layers || [],
+          recommended_layers: currentRecommendedLayers,
           confirmed_aoi: effectiveAoi,
-          pre_date: currentState.pre_date,
-          peek_date: currentState.peek_date,
-          after_date: currentState.after_date,
+          pre_date: currentPreDate,
+          peek_date: currentPeekDate,
+          after_date: currentAfterDate,
         });
 
         if (cancelled || !result?.success) {
+          finishLayerSpan({ status: cancelled ? 'cancelled' : 'unsuccessful' });
           return;
         }
 
@@ -1067,10 +1681,18 @@ function AgentPanel() {
             context_key: recommendedLayerContextKey,
           },
         }));
+        finishLayerSpan({
+          status: 'success',
+          hasTileUrl: Boolean(result?.data?.tile_url),
+        });
       } catch (error) {
         if (!cancelled) {
           setWarning(error?.message || 'Failed to render recommended layer.');
         }
+        finishLayerSpan({
+          status: cancelled ? 'cancelled' : 'error',
+          error: error?.message || 'unknown',
+        });
       } finally {
         pendingRecommendedLayerRequestsRef.current.delete(requestToken);
         if (!cancelled) {
@@ -1095,10 +1717,10 @@ function AgentPanel() {
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     analysisDisplayEnabled,
-    currentState.after_date,
-    currentState.peek_date,
-    currentState.pre_date,
-    currentState.recommended_layers,
+    currentAfterDate,
+    currentPeekDate,
+    currentPreDate,
+    currentRecommendedLayers,
     effectiveAoi,
     recommendedCatalogLayers,
     recommendedLayerContextKey,
@@ -1140,120 +1762,105 @@ function AgentPanel() {
   };
 
   return (
-    <div className="agent-panel-controls">
-      <div className={`control-section ${expandedSections.layerManager ? 'expanded' : ''}`}>
-        <div className="section-header" onClick={() => toggleSection('layerManager')}>
-          <span className="section-title">Layer Manager</span>
-          <span className={`expand-icon ${expandedSections.layerManager ? 'expanded' : ''}`}>v</span>
-        </div>
-        {expandedSections.layerManager && (
-          <div className="section-body layer-manager-body">
-            <div className="layer-manager-toolbar">
-              <div className="layer-manager-toolbar-label">Search Place</div>
-            </div>
-            <LocationScopePicker embedded />
-            <div className="layer-manager-groups">
-              {layerManagerGroups.map((group) => (
-                <div className="layer-manager-group" key={group.key}>
-                  <div className="layer-manager-group-header">
-                    <span className="layer-manager-group-title">{group.label}</span>
-                    <span className="layer-manager-group-count">{group.items.length}</span>
-                  </div>
-                  <div className="layer-manager-items">
-                    {group.items.map((item) => (
-                      <div
-                        className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${item.disabled ? 'is-disabled' : ''}`}
-                        key={item.id}
-                      >
-                        <div className="layer-manager-item-main">
-                          <input
-                            type="checkbox"
-                            checked={item.checked}
-                            onChange={item.onToggle}
-                            disabled={item.disabled}
-                          />
-                          {item.onSelect ? (
-                            <button
-                              type="button"
-                              className="layer-manager-item-trigger"
-                              onClick={item.onSelect}
+    <Profiler id="AgentPanel" onRender={panelProfiler}>
+      <div className="agent-panel-controls">
+        <div className={`control-section ${expandedSections.layerManager ? 'expanded' : ''}`}>
+          <div className="section-header" onClick={() => toggleSection('layerManager')}>
+            <span className="section-title">Layer Manager</span>
+            <span className={`expand-icon ${expandedSections.layerManager ? 'expanded' : ''}`}>v</span>
+          </div>
+          {expandedSections.layerManager && (
+            <div className="section-body layer-manager-body">
+              <div className="layer-manager-toolbar">
+                <div className="layer-manager-toolbar-label">Search Place</div>
+              </div>
+              <LocationScopePicker embedded />
+              <div className="layer-manager-groups">
+                {layerManagerGroups.map((group) => (
+                  <div className="layer-manager-group" key={group.key}>
+                    <div className="layer-manager-group-header">
+                      <span className="layer-manager-group-title">{group.label}</span>
+                      <span className="layer-manager-group-count">{group.items.length}</span>
+                    </div>
+                    <div className="layer-manager-items">
+                      {group.items.map((item) => (
+                        <div
+                          className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${item.disabled ? 'is-disabled' : ''}`}
+                          key={item.id}
+                        >
+                          <div className="layer-manager-item-main">
+                            <input
+                              type="checkbox"
+                              checked={item.checked}
+                              onChange={item.onToggle}
+                              disabled={item.disabled}
+                            />
+                            {item.onSelect ? (
+                              <button
+                                type="button"
+                                className="layer-manager-item-trigger"
+                                onClick={item.onSelect}
                               disabled={item.disabled}
                             >
-                              <div className="layer-manager-item-copy">
-                                <div className="layer-manager-item-head">
-                                  <span className="layer-manager-item-title">{item.title}</span>
-                                  {item.badge ? (
-                                    <span className="layer-manager-item-badge">{item.badge}</span>
-                                  ) : null}
-                                </div>
-                                {item.subtitle ? (
-                                  <span className="layer-manager-item-subtitle">{item.subtitle}</span>
-                                ) : null}
-                              </div>
-                            </button>
-                          ) : (
-                            <div className="layer-manager-item-copy">
-                              <div className="layer-manager-item-head">
-                                <span className="layer-manager-item-title">{item.title}</span>
-                                {item.badge ? (
-                                  <span className="layer-manager-item-badge">{item.badge}</span>
-                                ) : null}
-                              </div>
-                              {item.subtitle ? (
-                                <span className="layer-manager-item-subtitle">{item.subtitle}</span>
-                              ) : null}
-                            </div>
-                          )}
+                                <LayerManagerItemCopy item={item} />
+                              </button>
+                            ) : (
+                              <LayerManagerItemCopy item={item} />
+                            )}
+                          </div>
+                          <div className="layer-manager-item-side">
+                            {item.badge ? (
+                              <span className="layer-manager-item-badge">{item.badge}</span>
+                            ) : null}
+                            {item.actionLabel && item.onAction ? (
+                              <button
+                                type="button"
+                                className="layer-manager-item-action"
+                                onClick={item.onAction}
+                              >
+                                {item.actionLabel}
+                              </button>
+                            ) : null}
+                            {item.loading ? (
+                              <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
+                            ) : null}
+                          </div>
                         </div>
-                        <div className="layer-manager-item-side">
-                          {item.actionLabel && item.onAction ? (
-                            <button
-                              type="button"
-                              className="layer-manager-item-action"
-                              onClick={item.onAction}
-                            >
-                              {item.actionLabel}
-                            </button>
-                          ) : null}
-                          {item.loading ? (
-                            <span className="imagery-spinner layer-spinner" title="Loading tiles..." />
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
-      {/* GEE Code Download - bottom of panel, same style as Ask mode */}
-      <div className="download-btn-div">
-        <button
-          type="button"
-          className={`submit btn download ${!currentState.gee_code ? 'disabled' : ''}`}
-          onClick={() => {
-            if (!currentState.gee_code) {
-              return;
-            }
-            trackUxEvent('export_gee_code', {
-              event: currentState.event || null,
-              mode: 'agent',
-            });
-            downloadGEECode(currentState.gee_code, currentState.event);
-          }}
-          style={{ 
-            cursor: currentState.gee_code ? 'pointer' : 'not-allowed',
-            opacity: currentState.gee_code ? 1 : 0.5,
-            pointerEvents: currentState.gee_code ? 'auto' : 'none',
-          }}
-        >
-          DOWNLOAD GEE CODE
-        </button>
+        {/* GEE Code Download - bottom of panel, same style as Ask mode */}
+        <div className="download-btn-div">
+          <button
+            type="button"
+            className={`submit btn download ${!currentGeeCode ? 'disabled' : ''}`}
+            onClick={() => {
+              if (!currentGeeCode) {
+                return;
+              }
+              trackUxEvent('export_gee_code', {
+                event: currentEvent || null,
+                mode: 'agent',
+              });
+              downloadGEECode(currentGeeCode, currentEvent);
+            }}
+            style={{
+              cursor: currentGeeCode ? 'pointer' : 'not-allowed',
+              opacity: currentGeeCode ? 1 : 0.5,
+              pointerEvents: currentGeeCode ? 'auto' : 'none',
+            }}
+          >
+            DOWNLOAD GEE CODE
+          </button>
+        </div>
       </div>
-    </div>
+    </Profiler>
   );
 }
 

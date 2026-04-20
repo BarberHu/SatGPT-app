@@ -3,6 +3,8 @@ FastAPI 后端服务 - 集成 CopilotKit 和 LangGraph
 使用 LangGraphAGUIAgent 作为智能体与 CopilotKit 的连接方式
 """
 import os
+import logging
+import time
 import warnings
 from typing import Any, Optional
 from contextlib import asynccontextmanager
@@ -39,6 +41,61 @@ from legacy_flask_compat import (
     remember_latest_script,
 )
 from project_env import load_project_env
+
+logger = logging.getLogger(__name__)
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 1)
+
+
+def _rounded(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    return round(float(value), 6)
+
+
+def _summarize_geojson(geojson: Optional[dict]) -> Optional[dict]:
+    if not isinstance(geojson, dict):
+        return None
+
+    geometry = geojson.get("geometry") if geojson.get("type") == "Feature" else geojson
+    if not isinstance(geometry, dict):
+        return {"type": geojson.get("type") or "unknown"}
+
+    summary = {
+        "type": geometry.get("type") or "unknown",
+    }
+
+    if geometry.get("type") == "FeatureCollection":
+        summary["feature_count"] = len(geometry.get("features") or [])
+    elif geometry.get("type") == "GeometryCollection":
+        summary["geometry_count"] = len(geometry.get("geometries") or [])
+    elif geometry.get("type") == "Polygon":
+        summary["ring_count"] = len(geometry.get("coordinates") or [])
+    elif geometry.get("type") == "MultiPolygon":
+        summary["polygon_count"] = len(geometry.get("coordinates") or [])
+
+    return summary
+
+
+def _summarize_flood_image_request(request: "FloodImageRequest") -> dict:
+    return {
+        "pre_date": request.pre_date,
+        "peek_date": request.peek_date,
+        "after_date": request.after_date,
+        "longitude": _rounded(request.longitude),
+        "latitude": _rounded(request.latitude),
+        "has_bounds": bool(request.bounds),
+        "bounds": {
+            "west": _rounded(request.bounds.west),
+            "south": _rounded(request.bounds.south),
+            "east": _rounded(request.bounds.east),
+            "north": _rounded(request.bounds.north),
+        } if request.bounds else None,
+        "has_geojson": bool(request.geojson),
+        "geojson": _summarize_geojson(request.geojson),
+    }
 
 
 # 继承 LangGraphAGUIAgent，只覆写 prepare_stream 一个方法来修 bug
@@ -336,6 +393,10 @@ async def legacy_get_pdf():
 
 @app.post("/api/flood-images")
 async def get_flood_imagery(request: FloodImageRequest):
+    request_started_at = time.perf_counter()
+    request_summary = _summarize_flood_image_request(request)
+    logger.info("[flood-images] request:start summary=%s", request_summary)
+
     """
     获取洪水事件的卫星影像
     支持三种区域定义方式：
@@ -381,11 +442,22 @@ async def get_flood_imagery(request: FloodImageRequest):
                 longitude=request.longitude,
                 latitude=request.latitude
             )
+        logger.info(
+            "[flood-images] request:success duration_ms=%s summary=%s",
+            _duration_ms(request_started_at),
+            request_summary,
+        )
         return {
             "success": True,
             "data": result
         }
     except Exception as e:
+        logger.exception(
+            "[flood-images] request:error duration_ms=%s summary=%s error=%s",
+            _duration_ms(request_started_at),
+            request_summary,
+            str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
