@@ -41,6 +41,22 @@ const BUSINESS_LAYER_LAYER_IDS = ['business-layer-scopes-fill', 'business-layer-
 const DRAW_BLUE = '#2563eb';
 const DRAW_ORANGE = '#f97316';
 const DRAW_WHITE = '#ffffff';
+const formatCoordinatePart = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue.toFixed(6) : '';
+};
+const buildBoundsSignature = (bounds) => {
+  if (!bounds) {
+    return 'no-bounds';
+  }
+
+  return [
+    formatCoordinatePart(bounds.west),
+    formatCoordinatePart(bounds.south),
+    formatCoordinatePart(bounds.east),
+    formatCoordinatePart(bounds.north),
+  ].join(':');
+};
 const DRAW_STYLES = [
   {
     id: 'gl-draw-polygon-fill',
@@ -870,6 +886,7 @@ function MapContainer() {
     appMode,
     businessLayers,
     gridClickEnabled,
+    pendingSpatialScopeSave?.featureIds,
     promoteDrawLayers,
     removeBusinessLayerRecord,
     selectedAOI?.id,
@@ -1573,7 +1590,7 @@ function MapContainer() {
       return;
     }
 
-    const focusKey = `${confirmationVersion}:${JSON.stringify(confirmedAoi.bounds)}`;
+    const focusKey = `${confirmationVersion}:${buildBoundsSignature(confirmedAoi.bounds)}`;
     if (focusKey === lastConfirmationFocusRef.current) {
       return;
     }
@@ -1582,7 +1599,13 @@ function MapContainer() {
     window.requestAnimationFrame(() => {
       fitAoiBounds(confirmedAoi, { force: true, padding: 64, duration: 800 });
     });
-  }, [appMode, fitAoiBounds, floodAgentState, isAoiEditing, selectedAOI]);
+  }, [
+    appMode,
+    fitAoiBounds,
+    floodAgentState,
+    isAoiEditing,
+    selectedAOI,
+  ]);
 
   return (
     <div className="satgpt-map-shell">

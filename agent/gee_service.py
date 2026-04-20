@@ -8,12 +8,27 @@ Google Earth Engine 服务模块
 - 瓦片URL格式: https://earthengine.googleapis.com/v1/projects/flood-agent/maps/.../tiles/{z}/{x}/{y}
 """
 import os
+import logging
+import time
 import ee
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from project_env import load_project_env
 
 load_project_env()
+
+logger = logging.getLogger(__name__)
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 1)
+
+
+def _round_coord(value: Any) -> Any:
+    try:
+        return round(float(value), 6)
+    except (TypeError, ValueError):
+        return value
 
 # 设置代理（如果配置了的话）
 http_proxy = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
@@ -348,11 +363,18 @@ class GEEService:
             return {"error": "GEE service not initialized"}
         
         try:
+            request_started_at = time.perf_counter()
+            phase_timings = {}
+
             # 将 GeoJSON 转换为 EE Geometry
+            region_started_at = time.perf_counter()
             region = ee.Geometry(geojson)
+            phase_timings["region_geometry_ms"] = _duration_ms(region_started_at)
             
             # 获取边界框
+            bounds_started_at = time.perf_counter()
             bounds_list = region.bounds().getInfo()["coordinates"][0]
+            phase_timings["bounds_query_ms"] = _duration_ms(bounds_started_at)
             bounds = {
                 "west": min(p[0] for p in bounds_list),
                 "south": min(p[1] for p in bounds_list),
@@ -382,22 +404,41 @@ class GEEService:
             ]:
                 if date_value:
                     # 使用 GeoJSON region 获取影像
+                    s2_started_at = time.perf_counter()
                     s2_result = self._get_sentinel2_by_region(date_value, region)
+                    phase_timings[f"{date_key}_sentinel2_ms"] = _duration_ms(s2_started_at)
                     result[date_key]["sentinel2"] = s2_result
                     
+                    s1_started_at = time.perf_counter()
                     s1_result = self._get_sentinel1_by_region(date_value, region)
+                    phase_timings[f"{date_key}_sentinel1_ms"] = _duration_ms(s1_started_at)
                     result[date_key]["sentinel1"] = s1_result
             
             # 添加 Otsu 洪水变化检测图层
             if pre_date and peek_date:
+                flood_detection_started_at = time.perf_counter()
                 flood_detection = self.get_flood_change_detection_by_geojson(
                     pre_date, peek_date, geojson
                 )
+                phase_timings["flood_detection_ms"] = _duration_ms(flood_detection_started_at)
                 result["flood_detection"] = flood_detection
             
+            logger.info(
+                "[gee-geojson] success duration_ms=%s bounds=%s timings=%s",
+                _duration_ms(request_started_at),
+                {
+                    "west": _round_coord(bounds["west"]),
+                    "south": _round_coord(bounds["south"]),
+                    "east": _round_coord(bounds["east"]),
+                    "north": _round_coord(bounds["north"]),
+                },
+                phase_timings,
+            )
+
             return result
             
         except Exception as e:
+            logger.exception("[gee-geojson] error error=%s", str(e))
             return {"error": f"GeoJSON processing failed: {str(e)}"}
     
     def _get_imagery_for_bounds(
@@ -525,6 +566,7 @@ class GEEService:
             return {"error": "GEE service not initialized"}
         
         try:
+            request_started_at = time.perf_counter()
             target_date = datetime.strptime(date, "%Y-%m-%d")
             start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
             end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
@@ -536,8 +578,16 @@ class GEEService:
                 .sort("CLOUDY_PIXEL_PERCENTAGE")
             
             # 检查是否有影像
+            count_started_at = time.perf_counter()
             count = s2_collection.size().getInfo()
+            count_query_ms = _duration_ms(count_started_at)
             if count == 0:
+                logger.info(
+                    "[gee-s2-region] no_imagery date=%s duration_ms=%s count_query_ms=%s",
+                    date,
+                    _duration_ms(request_started_at),
+                    count_query_ms,
+                )
                 return {
                     "error": f"No Sentinel-2 imagery found near {date}",
                     "type": "Sentinel-2",
@@ -547,7 +597,9 @@ class GEEService:
                 }
             
             # 获取所有影像的日期范围
+            date_range_started_at = time.perf_counter()
             dates_info = self._get_collection_date_range(s2_collection)
+            date_range_query_ms = _duration_ms(date_range_started_at)
             
             # 使用镶嵌合成解决跨幅问题
             mosaic_image = s2_collection.mosaic().clip(region)
@@ -559,12 +611,16 @@ class GEEService:
             }
             
             # 获取瓦片URL
+            tile_started_at = time.perf_counter()
             map_id = rgb_image.getMapId(vis_params)
+            tile_query_ms = _duration_ms(tile_started_at)
             tile_url = map_id["tile_fetcher"].url_format
             
             # 使用第一幅影像的元数据作为参考
             first_image = s2_collection.first()
+            metadata_started_at = time.perf_counter()
             info = first_image.getInfo()
+            metadata_query_ms = _duration_ms(metadata_started_at)
             properties = info.get("properties", {})
             
             # 安全获取日期
@@ -578,6 +634,17 @@ class GEEService:
                 else:
                     image_date = date
             
+            logger.info(
+                "[gee-s2-region] success date=%s duration_ms=%s count_query_ms=%s date_range_query_ms=%s tile_query_ms=%s metadata_query_ms=%s image_count=%s",
+                date,
+                _duration_ms(request_started_at),
+                count_query_ms,
+                date_range_query_ms,
+                tile_query_ms,
+                metadata_query_ms,
+                count,
+            )
+
             return {
                 "type": "Sentinel-2",
                 "tile_url": tile_url,
@@ -594,6 +661,7 @@ class GEEService:
             }
             
         except Exception as e:
+            logger.exception("[gee-s2-region] error date=%s error=%s", date, str(e))
             return {"error": f"Failed to retrieve Sentinel-2 imagery: {str(e)}"}
     
     def _get_sentinel1_by_region(
@@ -608,6 +676,7 @@ class GEEService:
             return {"error": "GEE service not initialized"}
         
         try:
+            request_started_at = time.perf_counter()
             target_date = datetime.strptime(date, "%Y-%m-%d")
             start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
             end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
@@ -620,8 +689,16 @@ class GEEService:
                 .select(polarization)
             
             # 检查是否有影像
+            count_started_at = time.perf_counter()
             count = s1_collection.size().getInfo()
+            count_query_ms = _duration_ms(count_started_at)
             if count == 0:
+                logger.info(
+                    "[gee-s1-region] no_imagery date=%s duration_ms=%s count_query_ms=%s",
+                    date,
+                    _duration_ms(request_started_at),
+                    count_query_ms,
+                )
                 return {
                     "error": f"No Sentinel-1 imagery found near {date}",
                     "type": "Sentinel-1",
@@ -631,7 +708,9 @@ class GEEService:
                 }
             
             # 获取所有影像的日期范围
+            date_range_started_at = time.perf_counter()
             dates_info = self._get_collection_date_range(s1_collection)
+            date_range_query_ms = _duration_ms(date_range_started_at)
             
             # 使用镶嵌合成解决跨幅问题
             mosaic_image = s1_collection.mosaic().clip(region)
@@ -642,16 +721,31 @@ class GEEService:
             }
             
             # 获取瓦片URL
+            tile_started_at = time.perf_counter()
             map_id = mosaic_image.getMapId(vis_params)
+            tile_query_ms = _duration_ms(tile_started_at)
             tile_url = map_id["tile_fetcher"].url_format
             
             # 使用第一幅影像的元数据作为参考
             first_image = s1_collection.sort("system:time_start").first()
+            metadata_started_at = time.perf_counter()
             info = first_image.getInfo()
+            metadata_query_ms = _duration_ms(metadata_started_at)
             properties = info.get("properties", {})
             timestamp = properties.get("system:time_start", 0)
             image_date = datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d") if timestamp else date
             
+            logger.info(
+                "[gee-s1-region] success date=%s duration_ms=%s count_query_ms=%s date_range_query_ms=%s tile_query_ms=%s metadata_query_ms=%s image_count=%s",
+                date,
+                _duration_ms(request_started_at),
+                count_query_ms,
+                date_range_query_ms,
+                tile_query_ms,
+                metadata_query_ms,
+                count,
+            )
+
             return {
                 "type": "Sentinel-1",
                 "polarization": polarization,
@@ -669,6 +763,7 @@ class GEEService:
             }
             
         except Exception as e:
+            logger.exception("[gee-s1-region] error date=%s error=%s", date, str(e))
             return {"error": f"Failed to retrieve Sentinel-1 imagery: {str(e)}"}
     
     def get_flood_change_detection(

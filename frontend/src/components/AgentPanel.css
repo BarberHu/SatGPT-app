@@ -111,7 +111,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #f8fafc;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .layer-manager-group-header {
@@ -120,6 +120,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 10px;
+  border-radius: 11px 11px 0 0;
   background: #eff6ff;
   border-bottom: 1px solid #dbeafe;
 }
@@ -153,7 +154,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   padding: 8px 10px;
   border-top: 1px solid rgba(226, 232, 240, 0.9);
   background: white;
@@ -161,6 +162,10 @@
 
 .layer-manager-item:first-child {
   border-top: none;
+}
+
+.layer-manager-item:last-child {
+  border-radius: 0 0 11px 11px;
 }
 
 .layer-manager-item.is-hidden {
@@ -223,6 +228,105 @@
   line-height: 1.4;
 }
 
+.layer-manager-item-info-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.layer-manager-item-info {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: help;
+}
+
+.layer-manager-item-tooltip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 7px);
+  z-index: 20;
+  width: max-content;
+  max-width: 260px;
+  padding: 9px 10px;
+  border: 1px solid rgba(147, 197, 253, 0.78);
+  border-radius: 6px;
+  background: #f8fbff;
+  box-shadow: 0 10px 24px rgba(30, 64, 175, 0.14);
+  color: #334155;
+  font-size: 10px;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translateX(-50%) translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  white-space: normal;
+}
+
+.layer-manager-item-tooltip::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  background: #f8fbff;
+  border-left: 1px solid rgba(147, 197, 253, 0.78);
+  border-top: 1px solid rgba(147, 197, 253, 0.78);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.layer-manager-item-info-wrap:hover .layer-manager-item-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.layer-manager-tooltip-title {
+  display: block;
+  color: #1e3a8a;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.layer-manager-tooltip-details {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(191, 219, 254, 0.72);
+}
+
+.layer-manager-tooltip-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.layer-manager-tooltip-key {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.layer-manager-tooltip-value {
+  min-width: 0;
+  color: #0f172a;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .layer-manager-item-badge {
   flex-shrink: 0;
   padding: 2px 6px;
@@ -241,12 +345,20 @@
   line-height: 1.45;
 }
 
+.layer-manager-item-detail {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .layer-manager-item-side {
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 112px;
+  padding-top: 1px;
 }
 
 .layer-manager-item-action {
@@ -266,6 +378,72 @@
   border-color: rgba(239, 68, 68, 0.28);
   background: rgba(239, 68, 68, 0.08);
   color: #dc2626;
+}
+
+.layer-manager-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 18px;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.layer-manager-legend.text {
+  color: #64748b;
+}
+
+.layer-manager-legend.classes {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.layer-manager-legend-swatch {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 10px;
+  border: 1px solid rgba(100, 116, 139, 0.22);
+  border-radius: 2px;
+}
+
+.layer-manager-legend-swatch.solid {
+  width: 18px;
+}
+
+.layer-manager-legend-label {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.layer-manager-legend-range {
+  color: #94a3b8;
+}
+
+.layer-manager-legend-class-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.layer-manager-legend-class {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #64748b;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.layer-manager-legend-color {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
 }
 
 .layer-manager-status {
