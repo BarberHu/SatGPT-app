@@ -86,6 +86,8 @@ Your local `.env` is the actual runtime configuration file.
 When you use the Windows scripts, public frontend variables are synced from
 the root `.env` into `frontend/.env.local` automatically.
 Agent / Runtime / Frontend ports are also configured from the root `.env`.
+For LAN access, prefer leaving `REACT_APP_AGENT_API_URL` blank and using the
+same-origin React proxy instead of hard-coding `localhost`.
 
 ### Start Services
 
