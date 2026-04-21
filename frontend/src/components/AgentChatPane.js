@@ -26,9 +26,6 @@ function AgentChatPane() {
   const uploadPanelRef = useRef(null);
   const {
     chatMode,
-    setChatMode,
-    setAppMode,
-    setChatInput,
     setWarning,
     resetAgentSession,
     startNewAgentSession,
@@ -59,20 +56,6 @@ function AgentChatPane() {
     resetAgentSession({ preserveSelectedAoi: true });
     setWarning('');
     trackUxEvent('agent_new_chat', { mode: chatMode });
-  };
-
-  const handleModeToggle = (mode) => {
-    if (mode !== chatMode) {
-      trackUxEvent('mode_switch', { from: chatMode, to: mode });
-      if (chatMode === 'agent' || mode === 'agent') {
-        resetAgentSession({ preserveSelectedAoi: true });
-      }
-    }
-
-    setChatMode(mode);
-    setAppMode(mode);
-    setChatInput('');
-    setWarning('');
   };
 
   return (
@@ -140,25 +123,6 @@ function AgentChatPane() {
             >
               Upload
             </button>
-          </div>
-
-          <div className="agent-chat-pane__toolbar-right">
-            <div className="agent-chat-pane__mode-toggle">
-              <button
-                type="button"
-                className={`agent-chat-pane__mode-btn ${chatMode === 'ask' ? 'active' : ''}`}
-                onClick={() => handleModeToggle('ask')}
-              >
-                Ask
-              </button>
-              <button
-                type="button"
-                className={`agent-chat-pane__mode-btn ${chatMode === 'agent' ? 'active' : ''}`}
-                onClick={() => handleModeToggle('agent')}
-              >
-                Agent
-              </button>
-            </div>
           </div>
         </div>
 

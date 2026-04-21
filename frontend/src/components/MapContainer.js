@@ -14,6 +14,7 @@ import {
   getCatalogMapLayerId,
   isCatalogMapLayerId,
 } from '../utils/catalogLayers';
+import { trackUxEvent } from '../utils/analytics';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -187,7 +188,8 @@ function MapContainer() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const drawRef = useRef(null);
-  const gridClickControlRef = useRef(null);
+  const utilityControlRef = useRef(null);
+  const modeToggleButtonRef = useRef(null);
   const gridClickButtonRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
   const lastConfirmationFocusRef = useRef(null);
@@ -212,6 +214,10 @@ function MapContainer() {
     isAoiEditing,
     aoiEditorMode,
     setWarning,
+    chatMode,
+    setChatMode,
+    setAppMode,
+    setChatInput,
     resetAgentSession,
     resetAskSession,
     layerData,
@@ -247,6 +253,8 @@ function MapContainer() {
   const mapInitialized = useRef(false);
   const agentLayerOrderRef = useRef(agentLayerOrder);
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
+  const chatModeRef = useRef(chatMode);
+  const handleMapModeToggleRef = useRef(null);
 
   const clearTransientWarningTimer = useCallback(() => {
     if (transientWarningTimeoutRef.current) {
@@ -293,6 +301,22 @@ function MapContainer() {
   }, [gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
 
   useEffect(() => {
+    const button = modeToggleButtonRef.current;
+    if (!button) {
+      return;
+    }
+
+    const nextMode = chatMode === 'ask' ? 'agent' : 'ask';
+    const currentLabel = chatMode === 'ask' ? 'Ask' : 'Agent';
+    const nextLabel = nextMode === 'ask' ? 'Ask' : 'Agent';
+    const tooltip = `当前模式：${currentLabel}，点击切换到 ${nextLabel}`;
+
+    button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('aria-label', tooltip);
+    button.setAttribute('title', tooltip);
+  }, [chatMode]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded() || !map.getLayer('grid_cell-layer')) {
       return;
@@ -324,6 +348,28 @@ function MapContainer() {
   useEffect(() => {
     agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
   }, [agentRecommendedLayerData]);
+
+  useEffect(() => {
+    chatModeRef.current = chatMode;
+  }, [chatMode]);
+
+  const handleMapModeToggle = useCallback((mode) => {
+    if (mode !== chatMode) {
+      trackUxEvent('mode_switch', { from: chatMode, to: mode });
+      if (chatMode === 'agent' || mode === 'agent') {
+        resetAgentSession({ preserveSelectedAoi: true });
+      }
+    }
+
+    setChatMode(mode);
+    setAppMode(mode);
+    setChatInput('');
+    setWarning('');
+  }, [chatMode, resetAgentSession, setAppMode, setChatInput, setChatMode, setWarning]);
+
+  useEffect(() => {
+    handleMapModeToggleRef.current = handleMapModeToggle;
+  }, [handleMapModeToggle]);
 
   const removeAskLayers = useCallback((map) => {
     ASK_LAYER_NAMES.forEach((id) => {
@@ -622,18 +668,37 @@ function MapContainer() {
       });
       map.addControl(drawRef.current, 'top-right');
 
-      const gridClickControl = {
+      const utilityControl = {
         onAdd() {
           const container = document.createElement('div');
-          container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group satgpt-map-toggle-group';
+          container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group satgpt-map-utility-group';
 
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.className = 'satgpt-map-toggle-btn';
-          button.innerHTML = '<i class="fa fa-crosshairs" aria-hidden="true"></i>';
-          button.setAttribute('aria-label', 'Toggle map click loading');
-          button.setAttribute('title', 'Toggle map click loading');
-          button.onclick = (event) => {
+          const modeButton = document.createElement('button');
+          modeButton.type = 'button';
+          modeButton.className = 'satgpt-map-toggle-btn satgpt-map-mode-toggle-btn';
+          modeButton.innerHTML = '<i class="fa fa-exchange" aria-hidden="true"></i>';
+          modeButton.setAttribute('aria-label', '切换 Ask / Agent 模式');
+          modeButton.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const nextMode = chatModeRef.current === 'ask' ? 'agent' : 'ask';
+            handleMapModeToggleRef.current?.(nextMode);
+          };
+
+          const nextMode = chatModeRef.current === 'ask' ? 'agent' : 'ask';
+          const currentLabel = chatModeRef.current === 'ask' ? 'Ask' : 'Agent';
+          const nextLabel = nextMode === 'ask' ? 'Ask' : 'Agent';
+          const tooltip = `当前模式：${currentLabel}，点击切换到 ${nextLabel}`;
+          modeButton.setAttribute('title', tooltip);
+          modeButton.setAttribute('aria-label', tooltip);
+
+          const gridButton = document.createElement('button');
+          gridButton.type = 'button';
+          gridButton.className = 'satgpt-map-toggle-btn';
+          gridButton.innerHTML = '<i class="fa fa-crosshairs" aria-hidden="true"></i>';
+          gridButton.setAttribute('aria-label', 'Toggle map click loading');
+          gridButton.setAttribute('title', 'Toggle map click loading');
+          gridButton.onclick = (event) => {
             event.preventDefault();
             event.stopPropagation();
 
@@ -645,24 +710,30 @@ function MapContainer() {
           };
 
           const disabled = isAoiEditingRef.current || drawRef.current?.getMode?.() === 'draw_polygon';
-          button.classList.toggle('active', gridClickEnabledRef.current && !disabled);
-          button.classList.toggle('disabled', disabled);
-          button.setAttribute('aria-pressed', gridClickEnabledRef.current ? 'true' : 'false');
+          gridButton.classList.toggle('active', gridClickEnabledRef.current && !disabled);
+          gridButton.classList.toggle('disabled', disabled);
+          gridButton.setAttribute('aria-pressed', gridClickEnabledRef.current ? 'true' : 'false');
 
-          container.appendChild(button);
-          gridClickButtonRef.current = button;
+          container.appendChild(modeButton);
+          container.appendChild(gridButton);
+          modeToggleButtonRef.current = modeButton;
+          gridClickButtonRef.current = gridButton;
           return container;
         },
         onRemove() {
+          if (modeToggleButtonRef.current) {
+            modeToggleButtonRef.current.onclick = null;
+          }
           if (gridClickButtonRef.current) {
             gridClickButtonRef.current.onclick = null;
           }
+          modeToggleButtonRef.current = null;
           gridClickButtonRef.current = null;
         },
       };
 
-      map.addControl(gridClickControl, 'top-right');
-      gridClickControlRef.current = gridClickControl;
+      map.addControl(utilityControl, 'top-right');
+      utilityControlRef.current = utilityControl;
       loadGridLayer(map);
       window.requestAnimationFrame(() => reconcileLayerOrder(map));
     });
@@ -675,9 +746,9 @@ function MapContainer() {
     return () => {
       map.off('styledata', handleStyleData);
       if (mapRef.current) {
-        if (gridClickControlRef.current) {
-          map.removeControl(gridClickControlRef.current);
-          gridClickControlRef.current = null;
+        if (utilityControlRef.current) {
+          map.removeControl(utilityControlRef.current);
+          utilityControlRef.current = null;
         }
         drawRef.current = null;
         mapRef.current.remove();
