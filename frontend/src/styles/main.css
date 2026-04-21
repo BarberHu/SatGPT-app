@@ -894,25 +894,29 @@ p.error {
   height: 100%;
 }
 
-.satgpt-map-toggle-group {
+.satgpt-map-utility-group {
   clear: both;
 }
 
 .satgpt-map-toggle-btn {
-  width: 34px;
-  min-width: 34px;
-  height: 34px;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
   padding: 0;
   border: 0;
   background: #ffffff;
   color: #475569;
-  font-size: 14px;
-  border-radius: 10px;
+  font-size: 13px;
+  border-radius: 0;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.satgpt-map-utility-group .satgpt-map-toggle-btn + .satgpt-map-toggle-btn {
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
 }
 
 .satgpt-map-toggle-btn i {
@@ -927,6 +931,15 @@ p.error {
   background: #2563eb;
   color: #ffffff;
   box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.12);
+}
+
+.satgpt-map-toggle-btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: -2px;
+}
+
+.satgpt-map-mode-toggle-btn {
+  color: #475569;
 }
 
 .satgpt-map-toggle-btn.disabled {
