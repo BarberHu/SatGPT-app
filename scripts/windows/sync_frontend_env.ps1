@@ -41,9 +41,9 @@ $frontendHost = Get-EnvValue -Names @("FRONTEND_HOST") -Default "0.0.0.0"
 $frontendPort = Get-EnvValue -Names @("FRONTEND_PORT") -Default "3000"
 
 $defaultFlaskProxyTarget = "http://${publicHost}:${flaskPort}"
-$defaultAgentApiUrl = "http://${publicHost}:${agentPort}"
+$defaultAgentApiUrl = ""
 $defaultRuntimeProxyTarget = "http://${publicHost}:${runtimePort}"
-$defaultCopilotkitUrl = "${defaultRuntimeProxyTarget}/copilotkit"
+$defaultCopilotkitUrl = "/copilotkit"
 
 $content = @(
     "# Auto-generated from the repository root .env",

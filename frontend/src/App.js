@@ -16,9 +16,13 @@ import {
   logAgentDiagnostic,
   updateAgentDiagnosticsContext,
 } from './utils/agentDiagnostics';
+import { resolveBrowserEndpoint } from './utils/runtimeUrls';
 
 // CopilotKit 运行时地址 - 动态获取当前主机，支持内网访问
-const COPILOTKIT_URL = process.env.REACT_APP_COPILOTKIT_URL || '/copilotkit';
+const COPILOTKIT_URL = resolveBrowserEndpoint(
+  process.env.REACT_APP_COPILOTKIT_URL,
+  '/copilotkit'
+);
 
 function App() {
   const { appMode, agentSidebarCollapsed } = useAppContext();

@@ -1,9 +1,10 @@
 import axios from 'axios';
 import layerCatalog from '../config/layerCatalog.json';
 import { buildEarthEngineGeometryExpression, buildAoiFromLegacyCoords, parseSerializedAoi } from '../utils/aoi';
+import { resolveBrowserEndpoint } from '../utils/runtimeUrls';
 
 // API Base URL - in development, the proxy in package.json handles routing
-const API_BASE = process.env.REACT_APP_API_URL || '';
+const API_BASE = resolveBrowserEndpoint(process.env.REACT_APP_API_URL, '');
 
 // Health check
 export const healthCheck = async () => {
