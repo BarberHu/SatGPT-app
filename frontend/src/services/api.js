@@ -24,6 +24,11 @@ export const getHistoricalMap = async (params) => {
   return response.data;
 };
 
+export const getAgentRasterLayers = async (params) => {
+  const response = await axios.post(`${API_BASE}/api/agent-raster-layers`, params);
+  return response.data;
+};
+
 // Get unsupervised classification map
 export const getUnsupervisedMap = async (params) => {
   const response = await axios.post(`${API_BASE}/get_unsupervised_map`, params);
@@ -228,6 +233,7 @@ const apiService = {
   healthCheck,
   getDefaultMap,
   getHistoricalMap,
+  getAgentRasterLayers,
   getUnsupervisedMap,
   getFloodHotspotMap,
   getWaterRegimeChangeMap,

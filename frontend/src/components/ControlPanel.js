@@ -114,9 +114,7 @@ function ControlPanel() {
       <hr style={{ margin: '10px 0px 20px 0px' }} />
 
       {appMode === 'agent' ? (
-        <div className="agent-mode-content">
-          <AgentPanel />
-        </div>
+        <AgentPanel />
       ) : (
       <>
         {/* Layer Control Section */}

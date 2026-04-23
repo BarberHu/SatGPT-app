@@ -25,6 +25,8 @@ const DEFAULT_ZOOM = 5;
 // Custom Mapbox style (same as original project)
 const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
 const ASK_LAYER_NAMES = ['seasonality', 'water', 'flood', 'regimeChange', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+const AGENT_RASTER_LAYER_NAMES = ['populationDensity', 'lclu', 'soilTexture', 'healthCareAccess'];
+const AGENT_RASTER_LAYER_IDS = AGENT_RASTER_LAYER_NAMES.map((layerName) => `agent-raster-${layerName}`);
 const AGENT_BASE_LAYER_IDS = [
   'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
   'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
@@ -32,9 +34,10 @@ const AGENT_BASE_LAYER_IDS = [
 const AGENT_ANALYSIS_LAYER_IDS = [
   'agent-flood-detection', 'agent-population', 'agent-urban', 'agent-landcover',
 ];
+const AGENT_OVERLAY_LAYER_IDS = [...AGENT_ANALYSIS_LAYER_IDS, ...AGENT_RASTER_LAYER_IDS];
 const AGENT_SOURCE_IDS = [
   ...AGENT_BASE_LAYER_IDS,
-  ...AGENT_ANALYSIS_LAYER_IDS,
+  ...AGENT_OVERLAY_LAYER_IDS,
 ];
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
@@ -236,6 +239,7 @@ function MapContainer() {
     agentShowPopulationLayer,
     agentShowUrbanLayer,
     agentShowLandcoverLayer,
+    agentRasterLayerVisibility,
     agentImpactData,
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
@@ -253,6 +257,7 @@ function MapContainer() {
   const mapInitialized = useRef(false);
   const agentLayerOrderRef = useRef(agentLayerOrder);
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
+  const agentRasterTileUrlRef = useRef({});
   const chatModeRef = useRef(chatMode);
   const handleMapModeToggleRef = useRef(null);
 
@@ -385,6 +390,18 @@ function MapContainer() {
     });
   }, []);
 
+  const removeAskRasterSiblings = useCallback((map, layerNames = []) => {
+    (layerNames || []).forEach((layerName) => {
+      const askLayerId = `${layerName}-layer`;
+      if (map.getLayer(askLayerId)) {
+        map.removeLayer(askLayerId);
+      }
+      if (map.getSource(layerName)) {
+        map.removeSource(layerName);
+      }
+    });
+  }, []);
+
   const removeAgentLayers = useCallback((map) => {
     AGENT_SOURCE_IDS.forEach((id) => {
       if (map.getLayer(id)) {
@@ -444,7 +461,7 @@ function MapContainer() {
     const catalogLayers = styleLayerIds.filter((id) => isCatalogMapLayerId(id));
     const agentOverlayCandidates = [
       ...(agentLayerOrderRef.current || []),
-      ...AGENT_ANALYSIS_LAYER_IDS,
+      ...AGENT_OVERLAY_LAYER_IDS,
       ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
       ...catalogLayers,
     ];
@@ -527,11 +544,11 @@ function MapContainer() {
 
     const overlayCandidates = [
       ...(agentLayerOrderRef.current || []),
-      ...AGENT_ANALYSIS_LAYER_IDS,
+      ...AGENT_OVERLAY_LAYER_IDS,
       ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
     ];
     const overlayOrdered = Array.from(new Set(
-      isCatalogMapLayerId(layerId) || AGENT_ANALYSIS_LAYER_IDS.includes(layerId)
+      isCatalogMapLayerId(layerId) || AGENT_OVERLAY_LAYER_IDS.includes(layerId)
         ? [...overlayCandidates, layerId]
         : overlayCandidates
     ))
@@ -581,6 +598,7 @@ function MapContainer() {
     agentShowPopulationLayer,
     agentShowUrbanLayer,
     agentShowLandcoverLayer,
+    agentRasterLayerVisibility,
     reconcileLayerOrder,
   ]);
 
@@ -1548,6 +1566,86 @@ function MapContainer() {
     const lifecycle = createLayerTileLifecycle(map, 'landcover');
     return lifecycle.cleanup;
   }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    if (appMode === 'agent') {
+      removeAskRasterSiblings(map, AGENT_RASTER_LAYER_NAMES);
+    }
+
+    const rasterOrderIndex = new Map(
+      (agentLayerOrder || []).map((layerId, index) => [layerId, index])
+    );
+    const orderedRasterNames = [...AGENT_RASTER_LAYER_NAMES].sort((left, right) => {
+      const leftId = `agent-raster-${left}`;
+      const rightId = `agent-raster-${right}`;
+      const leftIndex = rasterOrderIndex.has(leftId) ? rasterOrderIndex.get(leftId) : Number.MAX_SAFE_INTEGER;
+      const rightIndex = rasterOrderIndex.has(rightId) ? rasterOrderIndex.get(rightId) : Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    });
+
+    orderedRasterNames.forEach((layerName) => {
+      const mapLayerId = `agent-raster-${layerName}`;
+      const descriptor = appMode === 'agent' ? layerData?.[layerName] : null;
+      const nextTileUrl = agentRasterLayerVisibility?.[layerName] && descriptor?.tileUrl
+        ? descriptor.tileUrl
+        : null;
+      const previousTileUrl = agentRasterTileUrlRef.current?.[layerName] || null;
+
+      if (!nextTileUrl) {
+        if (map.getLayer(mapLayerId)) {
+          map.removeLayer(mapLayerId);
+        }
+        if (map.getSource(mapLayerId)) {
+          map.removeSource(mapLayerId);
+        }
+        agentRasterTileUrlRef.current[layerName] = null;
+        return;
+      }
+
+      if (previousTileUrl === nextTileUrl && map.getLayer(mapLayerId) && map.getSource(mapLayerId)) {
+        return;
+      }
+
+      if (map.getLayer(mapLayerId)) {
+        map.removeLayer(mapLayerId);
+      }
+      if (map.getSource(mapLayerId)) {
+        map.removeSource(mapLayerId);
+      }
+
+      map.addSource(mapLayerId, {
+        type: 'raster',
+        tiles: [nextTileUrl],
+        tileSize: 256,
+      });
+
+      const rasterLayerDefinition = {
+        id: mapLayerId,
+        type: 'raster',
+        source: mapLayerId,
+        paint: {
+          'raster-opacity': 1,
+        },
+      };
+      const rasterBeforeId = getInsertBeforeId(map, mapLayerId);
+      if (rasterBeforeId) {
+        map.addLayer(rasterLayerDefinition, rasterBeforeId);
+      } else {
+        map.addLayer(rasterLayerDefinition);
+      }
+      agentRasterTileUrlRef.current[layerName] = nextTileUrl;
+    });
+
+    reconcileLayerOrder(map);
+    window.requestAnimationFrame(() => {
+      if (mapRef.current === map && map.isStyleLoaded()) {
+        reconcileLayerOrder(map);
+      }
+    });
+  }, [agentLayerOrder, agentRasterLayerVisibility, appMode, getInsertBeforeId, layerData, reconcileLayerOrder, removeAskRasterSiblings]);
 
   useEffect(() => {
     const map = mapRef.current;

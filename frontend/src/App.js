@@ -18,7 +18,7 @@ import {
 } from './utils/agentDiagnostics';
 import { resolveBrowserEndpoint } from './utils/runtimeUrls';
 
-// CopilotKit 运行时地址 - 动态获取当前主机，支持内网访问
+// CopilotKit 运行时地址，支持本机与局域网访问时自动纠正。
 const COPILOTKIT_URL = resolveBrowserEndpoint(
   process.env.REACT_APP_COPILOTKIT_URL,
   '/copilotkit'
@@ -56,7 +56,7 @@ function App() {
     if (error?.message?.includes('aborted') || 
         error?.message?.includes('Aborted') ||
         error?.code === 'ABORT_ERR') {
-      console.log('ℹ️ Operation cancelled by user');
+      console.log('Operation cancelled by user');
       return;
     }
     // Log other errors

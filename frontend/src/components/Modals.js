@@ -12,10 +12,6 @@ function Modals() {
 
   return (
     <>
-      <WelcomeModal 
-        isOpen={activeModal === 'welcome'} 
-        onClose={() => setActiveModal(null)} 
-      />
       <PromptModal 
         isOpen={activeModal === 'prompt'} 
         onClose={() => setActiveModal(null)} 
@@ -37,32 +33,6 @@ function Modals() {
         onClose={() => setActiveModal(null)} 
       />
     </>
-  );
-}
-
-function WelcomeModal({ isOpen, onClose }) {
-  if (!isOpen) return null;
-
-  return (
-    <div className="modal" style={{ display: 'block', background: '#000000ad' }}>
-      <div className="modal-dialog">
-        <div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title">Welcome to SATGPT</h5>
-          </div>
-          <div className="modal-body">
-            <p>
-              This current version of SatGPT is a proof of concept on the integration 
-              of Earth observation data, large language models, and generative AI. 
-              We are actively developing the next version based on user feedback and 
-              use cases from partner countries and is expected to be tested and 
-              released in Q1 2026.
-            </p>
-            <button onClick={onClose} className="info-modal-btn">OK</button>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 

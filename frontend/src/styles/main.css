@@ -1098,16 +1098,6 @@ a.mapboxgl-ctrl-logo {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.agent-mode-content {
-  margin: -15px;
-  margin-top: 0;
-  min-height: calc(93vh - 80px);
-}
-
-.agent-mode-content .agent-panel {
-  height: 100%;
-}
-
 .aoi-upload-inline-shell.ask {
   padding-left: 10px;
   margin: 12px 0 6px;

@@ -28,7 +28,7 @@ import {
 } from '../utils/agentDiagnostics';
 import './AgentPanel.css';
 
-// FloodAgent 榛樿鐘舵€?
+// Flood Agent 共享状态的本地默认值。
 const defaultAgentState = {
   event: null,
   event_description: null,
@@ -165,7 +165,68 @@ const CORE_LAYER_LEGENDS = {
     label: 'Vector AOI boundary',
     color: '#2563eb',
   },
+  lclu_raster: {
+    type: 'classes',
+    label: 'ESA WorldCover',
+    items: [
+      { value: 'Tree', color: '#006400' },
+      { value: 'Shrub', color: '#ffbb22' },
+      { value: 'Grass', color: '#ffff4c' },
+      { value: 'Crop', color: '#f096ff' },
+      { value: 'Built', color: '#fa0000' },
+      { value: 'Water', color: '#0064c8' },
+    ],
+  },
+  population_density: {
+    type: 'palette',
+    label: 'Population density',
+    min: 0,
+    max: 1000,
+    palette: ['#ffffe7', '#ffac1d', '#f2552c', '#9f0c21'],
+  },
+  soil_texture: {
+    type: 'text',
+    label: 'Soil texture classes',
+  },
+  healthcare_access: {
+    type: 'palette',
+    label: 'Access time',
+    min: 0,
+    max: '>1000 min',
+    palette: ['#fff8dc', '#deb887', '#cd853f', '#8b4513'],
+  },
 };
+
+const AGENT_RASTER_LAYER_CONFIG = [
+  {
+    key: 'populationDensity',
+    orderId: 'agent-raster-populationDensity',
+    title: 'Population Density',
+    infoText: 'WorldPop gridded population density for rapid exposure context.',
+    legend: CORE_LAYER_LEGENDS.population_density,
+  },
+  {
+    key: 'lclu',
+    orderId: 'agent-raster-lclu',
+    title: 'LCLU',
+    infoText: 'ESA WorldCover land cover classification clipped to the selected AOI.',
+    legend: CORE_LAYER_LEGENDS.lclu_raster,
+  },
+  {
+    key: 'soilTexture',
+    orderId: 'agent-raster-soilTexture',
+    title: 'Soil Texture',
+    infoText: 'Soil texture class layer for infiltration and runoff context.',
+    legend: CORE_LAYER_LEGENDS.soil_texture,
+  },
+  {
+    key: 'healthCareAccess',
+    orderId: 'agent-raster-healthCareAccess',
+    title: 'Healthcare Access',
+    infoText: 'Travel-time accessibility surface to nearby healthcare services.',
+    legend: CORE_LAYER_LEGENDS.healthcare_access,
+  },
+];
 
 const formatCoordinatePair = (pair) => [
   formatCoordinatePart(pair?.[0]),
@@ -297,12 +358,14 @@ function LayerManagerLegend({ legendModel }) {
   if (legendModel.type === 'palette' && Array.isArray(legendModel.palette)) {
     return (
       <div className="layer-manager-legend">
-        <span
-          className="layer-manager-legend-swatch gradient"
-          style={{
-            backgroundImage: `linear-gradient(90deg, ${legendModel.palette.join(', ')})`,
-          }}
-        />
+        <span className="layer-manager-legend-swatch gradient">
+          <span
+            className="layer-manager-legend-swatch-fill"
+            style={{
+              backgroundImage: `linear-gradient(90deg, ${legendModel.palette.join(', ')})`,
+            }}
+          />
+        </span>
         <span className="layer-manager-legend-label">{legendModel.label}</span>
         {(legendModel.min !== undefined && legendModel.max !== undefined) ? (
           <span className="layer-manager-legend-range">{legendModel.min} - {legendModel.max}</span>
@@ -330,6 +393,108 @@ function LayerManagerLegend({ legendModel }) {
   );
 }
 
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+function InlineInfoTooltip({ text, details }) {
+  const [visible, setVisible] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState({
+    top: 0,
+    left: 0,
+    width: 280,
+    '--tooltip-arrow-left': '24px',
+  });
+  const triggerRef = useRef(null);
+  const tooltipDetails = useMemo(
+    () => (Array.isArray(details)
+      ? details.filter((detail) => detail?.label && detail?.value)
+      : []),
+    [details]
+  );
+
+  const updatePopoverPosition = useCallback(() => {
+    if (!triggerRef.current) {
+      return;
+    }
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    const viewportPadding = 10;
+    const width = Math.min(280, Math.max(220, window.innerWidth - (viewportPadding * 2)));
+    const estimatedHeight = tooltipDetails.length > 2 || String(text || '').length > 72 ? 180 : 138;
+    const left = clamp(
+      rect.left - 18,
+      viewportPadding,
+      Math.max(viewportPadding, window.innerWidth - width - viewportPadding)
+    );
+    let top = rect.bottom + 10;
+
+    if (top + estimatedHeight > window.innerHeight - viewportPadding) {
+      top = Math.max(viewportPadding, rect.top - estimatedHeight - 10);
+    }
+
+    const arrowLeft = clamp(rect.left + (rect.width / 2) - left, 16, width - 16);
+    setPopoverStyle({
+      top,
+      left,
+      width,
+      '--tooltip-arrow-left': `${arrowLeft}px`,
+    });
+  }, [text, tooltipDetails]);
+
+  useEffect(() => {
+    if (!visible) {
+      return undefined;
+    }
+
+    updatePopoverPosition();
+    const handleReposition = () => updatePopoverPosition();
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [visible, updatePopoverPosition]);
+
+  const popoverContent = visible ? createPortal(
+    <span
+      className="layer-manager-item-tooltip-popover"
+      role="tooltip"
+      style={popoverStyle}
+    >
+      <span className="layer-manager-tooltip-title">{text}</span>
+      {tooltipDetails.length > 0 ? (
+        <span className="layer-manager-tooltip-details">
+          {tooltipDetails.map((detail) => (
+            <span className="layer-manager-tooltip-row" key={`${detail.label}-${detail.value}`}>
+              <span className="layer-manager-tooltip-key">{detail.label}</span>
+              <span className="layer-manager-tooltip-value">{detail.value}</span>
+            </span>
+          ))}
+        </span>
+      ) : null}
+    </span>,
+    document.body
+  ) : null;
+
+  return (
+    <span className="layer-manager-item-info-wrap">
+      <span
+        ref={triggerRef}
+        className="layer-manager-item-info"
+        aria-label={text}
+        tabIndex={0}
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+        onFocus={() => setVisible(true)}
+        onBlur={() => setVisible(false)}
+      >
+        !
+      </span>
+      {popoverContent}
+    </span>
+  );
+}
+
 function LayerManagerItemCopy({ item }) {
   const tooltipDetails = Array.isArray(item.infoDetails)
     ? item.infoDetails.filter((detail) => detail?.label && detail?.value)
@@ -340,27 +505,7 @@ function LayerManagerItemCopy({ item }) {
       <div className="layer-manager-item-head">
         <span className="layer-manager-item-title">{item.title}</span>
         {item.infoText ? (
-          <span className="layer-manager-item-info-wrap">
-            <span
-              className="layer-manager-item-info"
-              aria-label={item.infoText}
-            >
-              !
-            </span>
-            <span className="layer-manager-item-tooltip" role="tooltip">
-              <span className="layer-manager-tooltip-title">{item.infoText}</span>
-              {tooltipDetails.length > 0 ? (
-                <span className="layer-manager-tooltip-details">
-                  {tooltipDetails.map((detail) => (
-                    <span className="layer-manager-tooltip-row" key={`${detail.label}-${detail.value}`}>
-                      <span className="layer-manager-tooltip-key">{detail.label}</span>
-                      <span className="layer-manager-tooltip-value">{detail.value}</span>
-                    </span>
-                  ))}
-                </span>
-              ) : null}
-            </span>
-          </span>
+          <InlineInfoTooltip text={item.infoText} details={tooltipDetails} />
         ) : null}
       </div>
       <LayerManagerLegend legendModel={item.legend} />
@@ -385,8 +530,8 @@ function downloadGEECode(code, eventName) {
 }
 
 /**
- * 褰卞儚淇℃伅鍥炬爣缁勪欢
- * 鏄剧ず姣忕褰卞儚绫诲瀷鍦ㄥ悇涓椂鏈熺殑鍏冩暟鎹紙鏉ユ簮銆佹嫾鎺ャ€佸彲鐢ㄦ€х瓑锛?
+ * 影像信息图标弹层。
+ * 展示三个时段的影像来源、日期、轨道与拼接统计，方便判断分析底图是否可靠。
  */
 // eslint-disable-next-line no-unused-vars
 function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
@@ -396,7 +541,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
   const popoverRef = useRef(null);
   const iconRef = useRef(null);
 
-  // 鐐瑰嚮澶栭儴鍏抽棴 popover
+  // 点击弹层外部区域时关闭 popover。
   useEffect(() => {
     if (!showPopover) return;
     const handleClickOutside = (e) => {
@@ -411,7 +556,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showPopover]);
 
-  // 澶嶅埗鍒板壀璐存澘
+  // 复制影像 ID，优先使用 Clipboard API。
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(text);
@@ -428,25 +573,25 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     });
   };
 
-  // 璁＄畻 popover 浣嶇疆
+  // 计算 popover 位置。
   const handleTogglePopover = (e) => {
     e.stopPropagation();
     if (!showPopover && iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect();
       const popoverWidth = 290;
       const popoverHeight = 380;
-      // 榛樿鍦ㄥ浘鏍囧彸渚ф樉绀?
+      // 默认优先显示在图标右侧。
       let left = rect.right + 8;
       let top = rect.top - 10;
-      // 濡傛灉鍙宠竟鏀句笉涓嬶紝鏀惧埌宸︿晶
+      // 右侧空间不足时切换到左侧。
       if (left + popoverWidth > window.innerWidth - 10) {
         left = rect.left - popoverWidth - 8;
       }
-      // 濡傛灉宸﹁竟涔熸斁涓嶄笅锛屽眳涓樉绀?
+      // 如果左侧也放不下，就退化为视口内居中。
       if (left < 10) {
         left = Math.max(10, (window.innerWidth - popoverWidth) / 2);
       }
-      // 濡傛灉搴曢儴瓒呭嚭锛屽線涓婅皟
+      // 垂直方向超出视口时向上收缩。
       if (top + popoverHeight > window.innerHeight - 10) {
         top = window.innerHeight - popoverHeight - 10;
       }
@@ -456,11 +601,11 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     setShowPopover(!showPopover);
   };
 
-  // 褰撳墠閫変腑鏃舵湡鐨勫奖鍍忔暟鎹?
+  // 当前时段对应的影像信息。
   const currentPeriodData = imageryData?.[selectedPeriod]?.[type];
   const hasError = currentPeriodData?.error;
 
-  // 姹囨€讳笁涓椂鏈熺殑淇℃伅
+  // 汇总三个时期的影像状态，用于弹层展示。
   const allPeriodsInfo = [
     { key: 'pre_date', label: 'Pre-Flood' },
     { key: 'peek_date', label: 'Peak' },
@@ -471,7 +616,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
     data: imageryData?.[key]?.[type],
   }));
 
-  // 缁熻鏃犲奖鍍忕殑鏃舵湡鏁伴噺
+  // 统计缺影像的时期数量，用于图标状态提示。
   const missingCount = allPeriodsInfo.filter(p => p.data?.error || p.data?.image_count === 0).length;
 
   const popoverContent = showPopover ? createPortal(
@@ -573,7 +718,7 @@ function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
                       title={`${data.id}\nClick to copy`}
                       onClick={() => copyToClipboard(data.id)}
                     >
-                      {copiedId === data.id ? '鉁?Copied!' : data.id}
+                      {copiedId === data.id ? 'Copied!' : data.id}
                     </span>
                   </div>
                 )}
@@ -644,7 +789,7 @@ const LAYER_META = {
 };
 
 /**
- * Analysis Layer info icon 鈥?shows data source & stats for each layer
+ * Analysis Layer 信息图标，展示每个分析图层的数据来源与统计摘要。
  */
 // eslint-disable-next-line no-unused-vars
 function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
@@ -694,7 +839,7 @@ function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
   const statsRows = [];
   if (layerType === 'flood_detection' && floodDetectionData) {
     if (floodDetectionData.stats?.flood_area_km2 != null) {
-      statsRows.push({ label: 'Flooded Area', value: `${floodDetectionData.stats.flood_area_km2} km虏` });
+      statsRows.push({ label: 'Flooded Area', value: `${floodDetectionData.stats.flood_area_km2} km²` });
     }
     if (floodDetectionData.pre_date) statsRows.push({ label: 'Pre-flood Date', value: floodDetectionData.pre_date });
     if (floodDetectionData.peek_date) statsRows.push({ label: 'Peak Date', value: floodDetectionData.peek_date });
@@ -708,15 +853,15 @@ function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
   }
   if (layerType === 'urban' && impactData?.urban && !impactData.urban.error) {
     const u = impactData.urban;
-    statsRows.push({ label: 'Affected Built-up', value: `${u.affected_area_km2} km虏` });
-    statsRows.push({ label: 'Total Built-up', value: `${u.total_area_km2} km虏` });
+    statsRows.push({ label: 'Affected Built-up', value: `${u.affected_area_km2} km²` });
+    statsRows.push({ label: 'Total Built-up', value: `${u.total_area_km2} km²` });
     if (u.percentage != null) statsRows.push({ label: 'Percentage', value: `${u.percentage}%` });
   }
   if (layerType === 'landcover' && impactData?.landcover && !impactData.landcover.error) {
     const lc = impactData.landcover;
     if (lc.breakdown) {
       Object.entries(lc.breakdown).forEach(([key, val]) => {
-        statsRows.push({ label: key.charAt(0).toUpperCase() + key.slice(1), value: `${val.area_km2} km虏` });
+        statsRows.push({ label: key.charAt(0).toUpperCase() + key.slice(1), value: `${val.area_km2} km²` });
       });
     }
   }
@@ -800,7 +945,6 @@ function AgentPanel() {
     setAgentSelectedType,
     agentShowBaseImagery,
     setAgentShowBaseImagery,
-    agentShowFloodDetection,
     setAgentShowFloodDetection,
     agentShowPopulationLayer,
     setAgentShowPopulationLayer,
@@ -812,10 +956,14 @@ function AgentPanel() {
     setAgentImpactData,
     agentImpactLoading,
     setAgentImpactLoading,
+    layerData,
     agentRecommendedLayerData,
     setAgentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     setAgentRecommendedLayerVisibility,
+    agentRasterLayerVisibility,
+    setAgentRasterLayerVisibility,
+    agentRasterLoading,
     agentLayerOrder,
     setAgentLayerOrder,
     agentLayerLoading,
@@ -828,10 +976,6 @@ function AgentPanel() {
     deleteBusinessLayer,
   } = useAppContext();
 
-  // Local UI state (for section expansion only)
-  const [expandedSections, setExpandedSections] = useState({
-    layerManager: true,
-  });
   const [draggedLayerId, setDraggedLayerId] = useState(null);
   const [dragOverState, setDragOverState] = useState({ groupKey: null, targetLayerId: null, position: 'before' });
 
@@ -1188,16 +1332,6 @@ function AgentPanel() {
   }, []);
 
   const layerManagerGroups = useMemo(() => {
-    const getAnalysisLayerStatus = (isVisible, hasTile = true) => {
-      if (!analysisDisplayEnabled) {
-        return 'Unavailable';
-      }
-      if (isVisible) {
-        return 'Visible';
-      }
-      return hasTile ? 'Ready' : 'Pending';
-    };
-
     const imageryGroup = {
       key: 'imagery',
       label: 'Imagery',
@@ -1236,120 +1370,43 @@ function AgentPanel() {
         }),
     };
 
-    const analysisItems = [
-          {
-            id: 'analysis-flood-detection',
-            orderId: 'agent-flood-detection',
-            defaultOrder: 10,
-            draggable: true,
-            title: 'Flood Detection',
-            infoText: analysisDisplayEnabled ? LAYER_META.flood_detection.description : 'Available after event confirmation',
-            infoDetails: [
-              { label: 'Source', value: LAYER_META.flood_detection.source },
-              { label: 'Method', value: LAYER_META.flood_detection.method },
-              { label: 'Resolution', value: LAYER_META.flood_detection.resolution },
-              { label: 'Status', value: getAnalysisLayerStatus(agentShowFloodDetection) },
-            ],
-            legend: CORE_LAYER_LEGENDS.flood_detection,
-            checked: Boolean(agentShowFloodDetection && analysisDisplayEnabled),
-            disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentShowFloodDetection && agentLayerLoading['flood-detection']),
-            status: !analysisDisplayEnabled ? 'Unavailable' : (agentShowFloodDetection ? 'Visible' : 'Hidden'),
-            tone: !analysisDisplayEnabled ? 'idle' : (agentShowFloodDetection ? 'ready' : 'off'),
-            onToggle: () => {
-              if (analysisDisplayEnabled) {
-                setAgentShowFloodDetection((previous) => !previous);
-              }
-            },
-          },
-          {
-            id: 'analysis-population',
-            orderId: 'agent-population',
-            defaultOrder: 20,
-            draggable: true,
-            title: 'Population Impact',
-            infoText: LAYER_META.population.description,
-            infoDetails: [
-              { label: 'Source', value: LAYER_META.population.source },
-              { label: 'Method', value: LAYER_META.population.method },
-              { label: 'Resolution', value: LAYER_META.population.resolution },
-              { label: 'Status', value: getAnalysisLayerStatus(agentShowPopulationLayer, agentImpactData?.layers?.population?.tile_url) },
-            ],
-            legend: CORE_LAYER_LEGENDS.population,
-            checked: Boolean(agentShowPopulationLayer && analysisDisplayEnabled),
-            disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentShowPopulationLayer && (agentLayerLoading.population || agentImpactLoading)),
-            status: !analysisDisplayEnabled
-              ? 'Unavailable'
-              : (agentShowPopulationLayer ? 'Visible' : (agentImpactData?.layers?.population?.tile_url ? 'Hidden' : 'Pending')),
-            tone: !analysisDisplayEnabled
-              ? 'idle'
-              : (agentShowPopulationLayer ? 'ready' : (agentImpactData?.layers?.population?.tile_url ? 'off' : 'pending')),
-            onToggle: () => {
-              if (analysisDisplayEnabled) {
-                setAgentShowPopulationLayer((previous) => !previous);
-              }
-            },
-          },
-          {
-            id: 'analysis-urban',
-            orderId: 'agent-urban',
-            defaultOrder: 30,
-            draggable: true,
-            title: 'Built-up Area',
-            infoText: LAYER_META.urban.description,
-            infoDetails: [
-              { label: 'Source', value: LAYER_META.urban.source },
-              { label: 'Method', value: LAYER_META.urban.method },
-              { label: 'Resolution', value: LAYER_META.urban.resolution },
-              { label: 'Status', value: getAnalysisLayerStatus(agentShowUrbanLayer, agentImpactData?.layers?.urban?.tile_url) },
-            ],
-            legend: CORE_LAYER_LEGENDS.urban,
-            checked: Boolean(agentShowUrbanLayer && analysisDisplayEnabled),
-            disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentShowUrbanLayer && (agentLayerLoading.urban || agentImpactLoading)),
-            status: !analysisDisplayEnabled
-              ? 'Unavailable'
-              : (agentShowUrbanLayer ? 'Visible' : (agentImpactData?.layers?.urban?.tile_url ? 'Hidden' : 'Pending')),
-            tone: !analysisDisplayEnabled
-              ? 'idle'
-              : (agentShowUrbanLayer ? 'ready' : (agentImpactData?.layers?.urban?.tile_url ? 'off' : 'pending')),
-            onToggle: () => {
-              if (analysisDisplayEnabled) {
-                setAgentShowUrbanLayer((previous) => !previous);
-              }
-            },
-          },
-          {
-            id: 'analysis-landcover',
-            orderId: 'agent-landcover',
-            defaultOrder: 40,
-            draggable: true,
-            title: 'Land Cover',
-            infoText: LAYER_META.landcover.description,
-            infoDetails: [
-              { label: 'Source', value: LAYER_META.landcover.source },
-              { label: 'Method', value: LAYER_META.landcover.method },
-              { label: 'Resolution', value: LAYER_META.landcover.resolution },
-              { label: 'Status', value: getAnalysisLayerStatus(agentShowLandcoverLayer, agentImpactData?.layers?.landcover?.tile_url) },
-            ],
-            legend: CORE_LAYER_LEGENDS.landcover,
-            checked: Boolean(agentShowLandcoverLayer && analysisDisplayEnabled),
-            disabled: !analysisDisplayEnabled,
-            loading: Boolean(agentShowLandcoverLayer && (agentLayerLoading.landcover || agentImpactLoading)),
-            status: !analysisDisplayEnabled
-              ? 'Unavailable'
-              : (agentShowLandcoverLayer ? 'Visible' : (agentImpactData?.layers?.landcover?.tile_url ? 'Hidden' : 'Pending')),
-            tone: !analysisDisplayEnabled
-              ? 'idle'
-              : (agentShowLandcoverLayer ? 'ready' : (agentImpactData?.layers?.landcover?.tile_url ? 'off' : 'pending')),
-            onToggle: () => {
-              if (analysisDisplayEnabled) {
-                setAgentShowLandcoverLayer((previous) => !previous);
-              }
-            },
-          },
-    ];
+    const rasterItems = AGENT_RASTER_LAYER_CONFIG.map((layer, index) => {
+      const descriptor = layerData?.[layer.key] || null;
+      const visible = Boolean(agentRasterLayerVisibility?.[layer.key]);
+      const hasScope = Boolean(selectedAOI);
+      const hasTile = Boolean(descriptor?.tileUrl);
+      const loading = Boolean(hasScope && agentRasterLoading && !hasTile);
+
+      return {
+        id: `raster-${layer.key}`,
+        orderId: layer.orderId,
+        defaultOrder: 10 + index,
+        draggable: true,
+        title: layer.title,
+        infoText: layer.infoText,
+        infoDetails: [
+          { label: 'Source', value: hasScope ? 'Ask raster service' : 'Select a vector scope first' },
+          { label: 'Scope', value: selectedAOI?.label || 'No active scope' },
+          { label: 'Status', value: !hasScope ? 'Unavailable' : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : (hasTile ? 'Ready' : 'Pending'))) },
+        ],
+        legend: layer.legend,
+        checked: visible,
+        disabled: !hasScope,
+        loading,
+        checkboxState: !hasScope ? 'idle' : (loading ? 'loading' : (hasTile ? 'ready' : 'idle')),
+        status: !hasScope ? 'Unavailable' : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : (hasTile ? 'Ready' : 'Pending'))),
+        tone: !hasScope ? 'idle' : (loading ? 'loading' : (visible ? (hasTile ? 'ready' : 'pending') : (hasTile ? 'off' : 'pending'))),
+        onToggle: () => {
+          if (!hasScope) {
+            return;
+          }
+          setAgentRasterLayerVisibility((previous) => ({
+            ...previous,
+            [layer.key]: !previous?.[layer.key],
+          }));
+        },
+      };
+    });
 
     const recommendedItems = confirmedRecommendedCatalogLayers.map((layer, index) => {
       const descriptor = agentRecommendedLayerData?.[layer.id] || null;
@@ -1391,7 +1448,7 @@ function AgentPanel() {
     });
 
     const overlayItems = orderLayerManagerItems([
-      ...analysisItems,
+      ...rasterItems,
       ...recommendedItems,
     ]);
 
@@ -1400,7 +1457,7 @@ function AgentPanel() {
     if (overlayItems.length > 0) {
       groups.push({
         key: 'overlays',
-        label: 'Analysis & Recommended',
+        label: 'Raster Layers',
         items: overlayItems,
       });
     }
@@ -1436,33 +1493,28 @@ function AgentPanel() {
   }, [
     agentImageryLoading,
     agentImagery,
-    agentImpactData,
-    agentImpactLoading,
     agentLayerLoading,
+    agentRasterLayerVisibility,
+    agentRasterLoading,
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     agentSelectedType,
     agentShowBaseImagery,
-    agentShowFloodDetection,
-    agentShowLandcoverLayer,
-    agentShowPopulationLayer,
-    agentShowUrbanLayer,
     analysisDisplayEnabled,
     businessLayers,
     confirmedRecommendedCatalogLayers,
+    layerData,
     orderLayerManagerItems,
     scopeSourceLabel,
     agentSelectedPeriod,
     selectedPeriodMeta.label,
+    selectedAOI,
     activateBusinessLayerRecord,
     deleteBusinessLayer,
+    setAgentRasterLayerVisibility,
     setAgentRecommendedLayerVisibility,
     setAgentSelectedType,
     setAgentShowBaseImagery,
-    setAgentShowFloodDetection,
-    setAgentShowLandcoverLayer,
-    setAgentShowPopulationLayer,
-    setAgentShowUrbanLayer,
     toggleBusinessLayerVisibility,
   ]);
   useEffect(() => {
@@ -1731,18 +1783,6 @@ function AgentPanel() {
     setWarning,
   ]);
 
-  // Auto-fetch impact data in background as soon as imagery arrives
-  useEffect(() => {
-    if (!analysisDisplayEnabled || !currentPreDate || !currentPeekDate) {
-      impactRequestKeyRef.current = null;
-      return;
-    }
-
-    if (agentImagery && !agentImpactData && !agentImpactLoading) {
-      fetchImpactData();
-    }
-  }, [agentImagery, agentImpactData, agentImpactLoading, analysisDisplayEnabled, currentPeekDate, currentPreDate, fetchImpactData]);
-
   // Also fetch if user enables an impact layer before data arrived
   useEffect(() => {
     if (!analysisDisplayEnabled) {
@@ -1896,34 +1936,23 @@ function AgentPanel() {
     },
   });
 
-  // Toggle section expansion
-  const toggleSection = (section) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-  };
-
   return (
     <Profiler id="AgentPanel" onRender={panelProfiler}>
       <div className="agent-panel-controls">
-        <div className={`control-section ${expandedSections.layerManager ? 'expanded' : ''}`}>
-          <div className="section-header" onClick={() => toggleSection('layerManager')}>
+        <section className="agent-panel-section">
+          <div className="section-header agent-panel-section-header">
             <span className="section-title">Layer Manager</span>
-            <span className={`expand-icon ${expandedSections.layerManager ? 'expanded' : ''}`}>v</span>
           </div>
-          {expandedSections.layerManager && (
-            <div className="section-body layer-manager-body">
-              <div className="layer-manager-toolbar">
-                <div className="layer-manager-toolbar-label">Search Place</div>
-              </div>
-              <LocationScopePicker embedded />
-              <div className="layer-manager-groups">
-                {layerManagerGroups.map((group) => (
-                  <div className="layer-manager-group" key={group.key}>
-                    <div className="layer-manager-group-header">
-                      <span className="layer-manager-group-title">{group.label}</span>
-                      <span className="layer-manager-group-count">{group.items.length}</span>
-                    </div>
-                    <div className="layer-manager-items">
-                      {group.items.map((item) => {
+          <div className="agent-panel-section-body layer-manager-body">
+            <div className="layer-manager-groups">
+              {layerManagerGroups.map((group) => (
+                <section className="layer-manager-group" key={group.key}>
+                  <div className="layer-manager-group-header">
+                    <span className="layer-manager-group-title">{group.label}</span>
+                    <span className="layer-manager-group-count">{group.items.length}</span>
+                  </div>
+                  <div className="layer-manager-items">
+                    {group.items.map((item) => {
                         const visibleOrderIds = group.items.filter((entry) => entry.draggable).map((entry) => entry.orderId);
                         const canReceiveDrop = (
                           group.key === 'overlays'
@@ -1951,6 +1980,7 @@ function AgentPanel() {
                               <div className="layer-manager-item-checkbox-wrap">
                                 <input
                                   type="checkbox"
+                                  className={`layer-manager-checkbox ${item.checkboxState ? `is-${item.checkboxState}` : ''}`}
                                   checked={item.checked}
                                   onChange={item.onToggle}
                                   disabled={item.disabled || item.loading}
@@ -1991,13 +2021,13 @@ function AgentPanel() {
                           </div>
                         );
                       })}
-                    </div>
                   </div>
-                ))}
-              </div>
+                </section>
+              ))}
             </div>
-          )}
-        </div>
+            <LocationScopePicker embedded />
+          </div>
+        </section>
 
         {/* GEE Code Download - bottom of panel, same style as Ask mode */}
         <div className="download-btn-div">
