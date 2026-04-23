@@ -276,6 +276,39 @@ def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return content
 
 
+def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    aoi = parse_aoi_from_payload(payload)
+    region = aoi_to_ee_geometry(aoi)
+    supplementary_catalog = get_basic_layer_catalog()["supplementary"]
+
+    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
+    population_density = ee.Image(
+        supplementary_catalog["populationDensity"]["dataset"]
+    ).clip(region)
+    population_density = visualize_image(
+        population_density, supplementary_catalog["populationDensity"]["visualization"]
+    )
+    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
+        supplementary_catalog["soilTexture"]["band"]
+    )
+    soil_texture = visualize_image(
+        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
+    )
+    healthcare_access = ee.Image(
+        supplementary_catalog["healthCareAccess"]["dataset"]
+    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
+    healthcare_access = visualize_image(
+        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
+    )
+
+    content: Dict[str, Any] = {}
+    attach_map_id(content, "LCLU", lclu.getMapId())
+    attach_map_id(content, "PopulationDensity", population_density.getMapId())
+    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
+    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+    return content
+
+
 def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)

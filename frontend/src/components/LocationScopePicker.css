@@ -27,20 +27,20 @@
   position: static;
   width: 100%;
   max-height: none;
-  padding: 12px;
-  gap: 12px;
-  border: 1px solid #dbe4ee;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #f8fbff 0%, #f8fafc 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  padding: 0;
+  gap: 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   backdrop-filter: none;
 }
 
 .location-scope-picker-inline-note {
-  color: #64748b;
-  font-size: 11px;
+  color: #27272a;
+  font-size: 13px;
   line-height: 1.5;
-  padding-bottom: 2px;
+  padding-bottom: 0;
 }
 
 .location-scope-picker-header {
@@ -58,7 +58,7 @@
 
 .location-scope-picker-subtitle {
   margin-top: 4px;
-  color: #475569;
+  color: #27272a;
   font-size: 11px;
   line-height: 1.5;
 }
@@ -91,21 +91,25 @@
   border-radius: 12px;
   border: 1px solid #cbd5e1;
   background: #fff;
-  color: #0f172a;
-  font-size: 14px;
+  color: #09090b;
+  font-size: 15px;
+}
+
+.location-scope-picker-input::placeholder {
+  color: #52525b;
 }
 
 .location-scope-picker.embedded .location-scope-picker-input {
-  height: 38px;
+  height: 40px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: 15px;
   border-radius: 10px;
 }
 
 .location-scope-picker-input:focus {
   outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: #a1a1aa;
+  box-shadow: 0 0 0 3px rgba(161, 161, 170, 0.14);
 }
 
 .location-scope-picker-search-btn,
@@ -114,16 +118,16 @@
   padding: 0 16px;
   border: none;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .location-scope-picker.embedded .location-scope-picker-search-btn,
 .location-scope-picker.embedded .location-scope-picker-action {
-  height: 38px;
+  height: 40px;
   border-radius: 10px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .location-scope-picker-search-btn {
@@ -160,7 +164,7 @@
 
 .location-scope-picker.embedded .location-scope-picker-results {
   max-height: 220px;
-  padding: 2px 2px 2px 0;
+  padding: 0;
 }
 
 .location-scope-candidate {
@@ -170,14 +174,14 @@
   align-items: center;
   padding: 10px 12px;
   border-radius: 14px;
-  border: 1px solid #dbe4ee;
-  background: #f8fafc;
+  border: 1px solid #e4e4e7;
+  background: #fafafa;
 }
 
 .location-scope-candidate.previewing {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
-  background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+  border-color: #a1a1aa;
+  box-shadow: 0 0 0 2px rgba(161, 161, 170, 0.14);
+  background: linear-gradient(180deg, #fafafa 0%, #f4f4f5 100%);
 }
 
 .location-scope-candidate-main {
@@ -193,15 +197,15 @@
 }
 
 .location-scope-candidate-title {
-  color: #0f172a;
-  font-size: 12px;
+  color: #09090b;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.5;
 }
 
 .location-scope-candidate-meta {
-  color: #64748b;
-  font-size: 10px;
+  color: #3f3f46;
+  font-size: 12px;
   text-transform: lowercase;
 }
 
@@ -212,8 +216,8 @@
   min-width: 54px;
   justify-content: flex-end;
   flex-shrink: 0;
-  color: #334155;
-  font-size: 10px;
+  color: #27272a;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -240,12 +244,12 @@
 }
 
 .location-scope-picker-action.secondary {
-  background: #e2e8f0;
-  color: #334155;
+  background: #f4f4f5;
+  color: #18181b;
 }
 
 .location-scope-picker-action.primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  background: #27272a;
   color: #fff;
 }
 

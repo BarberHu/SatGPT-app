@@ -1,6 +1,6 @@
 /**
- * CopilotKit 运行时服务器 (v1.10.6)
- * 使用 Express 作为代理，连接 React 前端和 Python LangGraph 后端
+ * CopilotKit Runtime 服务。
+ * 使用 Express 暴露运行时接口，并把请求转发给 Python LangGraph Agent。
  */
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
@@ -21,25 +21,25 @@ dotenv.config({ path: resolve(__dirname, "..", ".env") });
 
 const app = express();
 
-// CORS 配置 - 允许所有来源访问（支持内网/局域网访问）
+// CORS 配置：允许前端从不同来源访问运行时服务。
 app.use(cors({
   origin: true,
   credentials: true,
 }));
 
-// 解析 JSON - 增加请求体大小限制
+// 允许较大的 JSON 请求体，兼容地图与分析结果载荷。
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Python LangGraph 后端地址 (FastAPI)
+// Python LangGraph 后端地址（FastAPI）。
 const PUBLIC_HOST = process.env.SATGPT_PUBLIC_HOST || "localhost";
 const AGENT_PORT = process.env.AGENT_PORT || "8000";
 const AGENT_URL = process.env.AGENT_URL || `http://${PUBLIC_HOST}:${AGENT_PORT}`;
 
-// 使用空适配器（因为我们只用一个 agent）
+// CopilotKit 需要的空服务适配器。
 const serviceAdapter = new EmptyAdapter();
 
-// 创建 CopilotRuntime 实例并配置 LangGraph 代理
+// 初始化 CopilotRuntime，并注册 flood_agent。
 const runtime = new CopilotRuntime({
   agents: {
     flood_agent: new LangGraphHttpAgent({
@@ -48,38 +48,38 @@ const runtime = new CopilotRuntime({
   },
 });
 
-// 创建 CopilotKit 端点
+// 构建 CopilotKit HTTP 处理器。
 const handler = copilotRuntimeNodeHttpEndpoint({
   runtime,
   serviceAdapter,
   endpoint: "/copilotkit",
 });
 
-// 包装处理器以捕获 abort 错误
+// 包一层错误处理，统一处理客户端取消请求的场景。
 const wrappedHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await handler(req, res);
   } catch (error: any) {
-    // 检查是否是 abort 错误
+    // 客户端主动取消请求时，返回 499。
     if (error?.message?.includes('aborted') || 
         error?.message?.includes('Aborted') ||
         error?.name === 'AbortError') {
       console.log('[INFO] Request aborted by client');
-      // 如果响应还没发送，返回一个友好的响应
+      // headers 尚未发送时，显式返回取消状态。
       if (!res.headersSent) {
         res.status(499).json({ message: 'Request cancelled by client' });
       }
       return;
     }
-    // 其他错误传递给错误处理中间件
+    // 其他错误交给全局错误处理中间件。
     next(error);
   }
 };
 
-// 挂载到 Express
+// 暴露 CopilotKit 入口。
 app.post("/copilotkit", wrappedHandler);
 
-// 健康检查端点
+// 健康检查接口。
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ 
     status: "ok", 
@@ -88,9 +88,9 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
-// 全局错误处理中间件
+// 全局错误处理中间件。
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  // 忽略 abort 错误
+  // 再次兜底处理 abort 错误。
   if (err?.message?.includes('aborted') || err?.message?.includes('Aborted')) {
     console.log('[INFO] Operation cancelled');
     if (!res.headersSent) {
@@ -105,7 +105,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   }
 });
 
-// 启动服务器
+// 启动 Runtime 服务。
 const PORT = parseInt(process.env.RUNTIME_PORT || "5000");
 const HOST = process.env.RUNTIME_HOST || "0.0.0.0";
 

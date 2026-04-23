@@ -30,6 +30,7 @@ from flood_aoi import search_location_candidates
 from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
 from legacy_flask_compat import (
     build_script_pdf,
+    get_agent_raster_layers_payload,
     get_chatgpt_response,
     get_code_response,
     get_default_map_payload,
@@ -355,6 +356,15 @@ async def legacy_get_water_regime_change_map(request: Request):
     _ensure_gee_ready()
     try:
         return get_water_regime_change_map_payload(await _get_legacy_payload(request))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/agent-raster-layers")
+async def get_agent_raster_layers(request: Request):
+    _ensure_gee_ready()
+    try:
+        return get_agent_raster_layers_payload(await _get_legacy_payload(request))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

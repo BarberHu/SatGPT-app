@@ -22,7 +22,7 @@ export const useAppContext = () => {
   return context;
 };
 
-// FloodAgent 濮掓稒顭堥濠氭偐閼哥鍋?
+// Flood Agent 共享状态的默认结构，覆盖事件、AOI、推荐图层等上下文。
 const defaultFloodAgentState = {
   event: null,
   event_description: null,
@@ -49,18 +49,41 @@ const defaultAgentLayerVisibility = {
   agentSelectedPeriod: 'peek_date',
   agentSelectedType: 'sentinel2',
   agentShowBaseImagery: true,
-  agentShowFloodDetection: true,
+  agentShowFloodDetection: false,
   agentShowPopulationLayer: false,
   agentShowUrbanLayer: false,
   agentShowLandcoverLayer: false,
 };
 
+const defaultAgentRasterLayerVisibility = {
+  lclu: false,
+  populationDensity: false,
+  soilTexture: false,
+  healthCareAccess: false,
+};
+
 const defaultAgentLayerOrder = [
-  'agent-flood-detection',
-  'agent-population',
-  'agent-urban',
-  'agent-landcover',
+  'agent-raster-populationDensity',
+  'agent-raster-lclu',
+  'agent-raster-soilTexture',
+  'agent-raster-healthCareAccess',
 ];
+
+const resolveCurrentBusinessScopeAoi = (records = [], selectedAoi = null) => {
+  const activeRecord = (records || []).find((record) => record?.is_active) || null;
+  if (activeRecord) {
+    return buildAoiFromBusinessLayerRecord({
+      ...activeRecord,
+      is_active: true,
+    });
+  }
+
+  if (selectedAoi?.id && isBusinessLayerAoiSource(selectedAoi?.source)) {
+    return selectedAoi;
+  }
+
+  return null;
+};
 
 const activateBusinessLayer = (records = [], activeId = null) =>
   records.map((record) => ({
@@ -75,15 +98,15 @@ export const AppProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [warning, setWarning] = useState('');
   
-  // 婵☆垪鈧磭纭€闁告帒娲﹀畷? 'ask' 闁?'agent'
+  // 应用主模式：`ask` 表示传统问答流，`agent` 表示 Flood Agent 工作流。
   const [appMode, setAppMode] = useState('ask');
   const [agentSidebarCollapsed, setAgentSidebarCollapsed] = useState(false);
   
-  // ChatBox 婵☆垪鈧磭纭€闁告帒娲﹀畷?(濞?appMode 闁告艾鏈?
+  // ChatBox 独立维护的聊天模式，用于兼容 `appMode` 切换中的过渡状态。
   const [chatMode, setChatMode] = useState('ask');
   
   // Modal State
-  const [activeModal, setActiveModal] = useState('welcome'); // 'welcome', 'prompt', '3d', 'error', 'contact', 'help', null
+  const [activeModal, setActiveModal] = useState(null); // 'prompt', '3d', 'error', 'contact', 'help', null
   
   // Map State
   const [mapInstance, setMapInstance] = useState(null);
@@ -152,11 +175,12 @@ export const AppProvider = ({ children }) => {
   const [businessLayersReady, setBusinessLayersReady] = useState(false);
   const [agentVisualResetVersion, setAgentVisualResetVersion] = useState(0);
   const selectedAOIRef = useRef(null);
+  const previousAppModeRef = useRef('ask');
   
-  // ========== FloodAgent 闁绘鍩栭埀?(闁哄懘缂氶崗妯绘媴閹捐尐浣割嚕? ==========
+  // ========== Flood Agent 分析上下文（事件、时间、AOI、推荐图层） ==========
   const [floodAgentState, setFloodAgentState] = useState(defaultFloodAgentState);
   
-  // FloodAgent 鐟滄澘宕崕姘跺炊閹呮勾闁轰胶澧楀畵?
+  // Flood Agent 当前加载的影像结果，用于地图渲染与图层面板显示。
   const [agentImagery, setAgentImagery] = useState(null);
   const [agentImageryLoading, setAgentImageryLoading] = useState(false);
   
@@ -168,6 +192,8 @@ export const AppProvider = ({ children }) => {
   const [agentShowPopulationLayer, setAgentShowPopulationLayer] = useState(false);
   const [agentShowUrbanLayer, setAgentShowUrbanLayer] = useState(false);
   const [agentShowLandcoverLayer, setAgentShowLandcoverLayer] = useState(false);
+  const [agentRasterLayerVisibility, setAgentRasterLayerVisibility] = useState(defaultAgentRasterLayerVisibility);
+  const [agentRasterLoading, setAgentRasterLoading] = useState(false);
   const [agentImpactData, setAgentImpactData] = useState(null);
   const [agentImpactLoading, setAgentImpactLoading] = useState(false);
   const [agentTileLoading, setAgentTileLoading] = useState(false);
@@ -178,7 +204,7 @@ export const AppProvider = ({ children }) => {
   const [agentLayerLoading, setAgentLayerLoading] = useState({});
   const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
   
-  // 闁哄洤鐡ㄩ弻?FloodAgent 闁告娲戦柌婊呪偓娑欘殕椤?
+  // 更新 Flood Agent 单个字段，避免在组件里散落手写对象合并逻辑。
   const updateFloodAgentField = useCallback((field, value) => {
     setFloodAgentState(prev => ({
       ...prev,
@@ -186,12 +212,14 @@ export const AppProvider = ({ children }) => {
     }));
   }, []);
   
-  // 闂佹彃绉堕悿?FloodAgent 闁绘鍩栭埀?
+  // 重置 Flood Agent 共享状态，并清空相关影像与推荐图层缓存。
   const resetFloodAgentState = useCallback(() => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
+    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLoading(false);
     setAgentLayerOrder(defaultAgentLayerOrder);
   }, []);
 
@@ -203,6 +231,8 @@ export const AppProvider = ({ children }) => {
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
+    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLoading(false);
     setAgentLayerOrder(defaultAgentLayerOrder);
     setAgentLayerLoading({});
     setAgentTileError(null);
@@ -424,6 +454,8 @@ export const AppProvider = ({ children }) => {
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
+    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLoading(false);
     setAgentLayerOrder(defaultAgentLayerOrder);
     setAgentLayerLoading({});
     setAgentTileError(null);
@@ -446,6 +478,32 @@ export const AppProvider = ({ children }) => {
   }, [selectedAOI]);
 
   useEffect(() => {
+    const previousMode = previousAppModeRef.current;
+
+    if (
+      previousMode === 'ask'
+      && appMode === 'agent'
+    ) {
+      const nextScopeAoi = resolveCurrentBusinessScopeAoi(businessLayers, selectedAOI);
+
+      if (
+        nextScopeAoi
+        && (
+          !selectedAOI?.id
+          || !isBusinessLayerAoiSource(selectedAOI?.source)
+          || selectedAOI.id !== nextScopeAoi.id
+        )
+      ) {
+        setSelectedAOI(nextScopeAoi);
+        setDraftAOI(null);
+        setWarning('');
+      }
+    }
+
+    previousAppModeRef.current = appMode;
+  }, [appMode, agentLayerOrder, businessLayers, selectedAOI, setDraftAOI, setWarning]);
+
+  useEffect(() => {
     let cancelled = false;
     setBusinessLayersReady(false);
 
@@ -454,8 +512,9 @@ export const AppProvider = ({ children }) => {
         if (cancelled) {
           return;
         }
+        const supportedRecords = (records || []).filter((record) => isBusinessLayerAoiSource(record?.source));
         const currentSelectedAoi = selectedAOIRef.current;
-        const fallbackSelectedAoi = (!records.length && currentSelectedAoi?.id && isBusinessLayerAoiSource(currentSelectedAoi?.source))
+        const fallbackSelectedAoi = (!supportedRecords.length && currentSelectedAoi?.id && isBusinessLayerAoiSource(currentSelectedAoi?.source))
           ? [buildBusinessLayerRecordFromAoi(currentSelectedAoi, {
               id: currentSelectedAoi.id,
               label: currentSelectedAoi.label,
@@ -464,7 +523,7 @@ export const AppProvider = ({ children }) => {
               is_active: true,
             })].filter(Boolean)
           : [];
-        setBusinessLayers(records.length ? records : fallbackSelectedAoi);
+        setBusinessLayers(supportedRecords.length ? supportedRecords : fallbackSelectedAoi);
         setBusinessLayersReady(true);
       })
       .catch((error) => {
@@ -851,6 +910,10 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     setAgentRecommendedLayerVisibility,
+    agentRasterLayerVisibility,
+    setAgentRasterLayerVisibility,
+    agentRasterLoading,
+    setAgentRasterLoading,
     agentLayerOrder,
     setAgentLayerOrder,
     agentLayerLoading,

@@ -43,12 +43,14 @@ function CatalogLegendPreview({ legendModel }) {
   if (legendModel.type === 'palette') {
     return (
       <div className="recommended-legend-preview">
-        <div
-          className="recommended-legend-swatch gradient"
-          style={{
-            backgroundImage: `linear-gradient(90deg, ${legendModel.palette.join(', ')})`,
-          }}
-        />
+        <div className="recommended-legend-swatch gradient">
+          <div
+            className="recommended-legend-swatch-fill"
+            style={{
+              backgroundImage: `linear-gradient(90deg, ${legendModel.palette.join(', ')})`,
+            }}
+          />
+        </div>
         <div className="recommended-legend-meta">
           <span className="recommended-legend-label">{legendModel.label}</span>
           {(legendModel.min !== undefined && legendModel.max !== undefined) ? (

@@ -8,7 +8,6 @@ const BUSINESS_LAYER_SOURCES = new Set([
   'draw',
   'place_search',
   'edited',
-  'fishnet',
   'bounds',
   'legacy_polygon',
 ]);

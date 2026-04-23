@@ -76,7 +76,7 @@ app = Flask(
     static_folder=FRONTEND_BUILD_STATIC_DIR,
     static_url_path='/static',
 )
-# Enable CORS for all origins (支持内网/局域网访问)
+# Enable CORS for all origins（兼容本机开发与局域网访问）
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 
