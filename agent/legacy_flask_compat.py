@@ -7,6 +7,10 @@ from typing import Any, Dict, Optional
 
 import ee
 import openai
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - old openai SDK
+    OpenAI = None
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -456,8 +460,65 @@ def _configure_openai() -> None:
         openai.api_base = api_base
 
 
-def get_chatgpt_response(user_input: str) -> Optional[str]:
+def _create_chat_completion(model: str, messages: list[dict[str, str]], functions: Optional[list[dict[str, Any]]] = None):
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
+    api_base = os.getenv("OPENAI_API_BASE")
+
+    if OpenAI is not None:
+        client_kwargs: Dict[str, Any] = {}
+        if api_key:
+            client_kwargs["api_key"] = api_key
+        if api_base:
+            client_kwargs["base_url"] = api_base
+
+        client = OpenAI(**client_kwargs)
+        request_kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+        }
+        if functions:
+            request_kwargs["functions"] = functions
+        return client.chat.completions.create(**request_kwargs)
+
     _configure_openai()
+    return openai.ChatCompletion.create(
+        model=model,
+        messages=messages,
+        functions=functions,
+    )
+
+
+def _extract_function_call_arguments(completion: Any) -> Optional[str]:
+    try:
+        message = completion.choices[0].message
+    except Exception:
+        return None
+
+    function_call = getattr(message, "function_call", None)
+    if function_call and getattr(function_call, "arguments", None):
+        return function_call.arguments
+
+    tool_calls = getattr(message, "tool_calls", None) or []
+    if tool_calls:
+        function = getattr(tool_calls[0], "function", None)
+        if function and getattr(function, "arguments", None):
+            return function.arguments
+
+    if isinstance(message, dict):
+        legacy_function_call = message.get("function_call") or {}
+        if legacy_function_call.get("arguments"):
+            return legacy_function_call["arguments"]
+
+        legacy_tool_calls = message.get("tool_calls") or []
+        if legacy_tool_calls:
+            function = legacy_tool_calls[0].get("function") or {}
+            if function.get("arguments"):
+                return function["arguments"]
+
+    return None
+
+
+def get_chatgpt_response(user_input: str) -> Optional[str]:
     prompt = f"""
     {user_input}
     Provide detailed information about the affected areas in JSON format.
@@ -469,7 +530,7 @@ def get_chatgpt_response(user_input: str) -> Optional[str]:
     'CountryCode': ,
     'content':
     """
-    completion = openai.ChatCompletion.create(
+    completion = _create_chat_completion(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful GEE Assistant."},
@@ -496,20 +557,16 @@ def get_chatgpt_response(user_input: str) -> Optional[str]:
             },
         }],
     )
-    try:
-        return completion.choices[0].message.function_call.arguments
-    except Exception:
-        return None
+    return _extract_function_call_arguments(completion)
 
 
 def get_code_response(user_input: str) -> Optional[str]:
-    _configure_openai()
     prompt = f"""
    Provide a complete script/code in JSON Format for accessing data related to the {user_input} flood using Google Earth Engine (GEE) in the following JSON structure.
    e.g 'script':
             'content':
     """
-    completion = openai.ChatCompletion.create(
+    completion = _create_chat_completion(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful GEE Assistant."},
@@ -534,7 +591,7 @@ def get_code_response(user_input: str) -> Optional[str]:
         }],
     )
     try:
-        assistant_response = completion.choices[0].message.function_call.arguments
+        assistant_response = _extract_function_call_arguments(completion)
         json_data = json.loads(assistant_response)
         return json_data["response"][0]["script"]
     except Exception:

@@ -17,6 +17,10 @@ import socket
 import re
 from flask_cors import CORS
 import openai
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - old openai SDK
+    OpenAI = None
 
 """GOOGLE DRIVE START"""
 import pickle
@@ -76,8 +80,86 @@ app = Flask(
     static_folder=FRONTEND_BUILD_STATIC_DIR,
     static_url_path='/static',
 )
+
+
+def get_allowed_cors_origins():
+    configured = os.getenv("SATGPT_CORS_ORIGINS", "").strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+    frontend_port = os.getenv("FRONTEND_PORT", "3000")
+    public_host = os.getenv("SATGPT_PUBLIC_HOST", "localhost").strip() or "localhost"
+    origins = {
+        f"http://localhost:{frontend_port}",
+        f"http://127.0.0.1:{frontend_port}",
+    }
+
+    if public_host not in {"localhost", "127.0.0.1", "0.0.0.0"}:
+        origins.add(f"http://{public_host}:{frontend_port}")
+
+    return sorted(origins)
+
+
+def create_chat_completion(model, messages, functions=None):
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
+    api_base = os.getenv("OPENAI_API_BASE")
+
+    if OpenAI is not None:
+        client_kwargs = {}
+        if api_key:
+            client_kwargs["api_key"] = api_key
+        if api_base:
+            client_kwargs["base_url"] = api_base
+
+        client = OpenAI(**client_kwargs)
+        request_kwargs = {
+            "model": model,
+            "messages": messages,
+        }
+        if functions:
+            request_kwargs["functions"] = functions
+        return client.chat.completions.create(**request_kwargs)
+
+    openai.api_key = api_key
+    if api_base:
+        openai.api_base = api_base
+    return openai.ChatCompletion.create(
+        model=model,
+        messages=messages,
+        functions=functions,
+    )
+
+
+def extract_function_call_arguments(completion):
+    try:
+        message = completion.choices[0].message
+    except Exception:
+        return None
+
+    function_call = getattr(message, "function_call", None)
+    if function_call and getattr(function_call, "arguments", None):
+        return function_call.arguments
+
+    tool_calls = getattr(message, "tool_calls", None) or []
+    if tool_calls:
+        function = getattr(tool_calls[0], "function", None)
+        if function and getattr(function, "arguments", None):
+            return function.arguments
+
+    if isinstance(message, dict):
+        legacy_function_call = message.get("function_call") or {}
+        if legacy_function_call.get("arguments"):
+            return legacy_function_call["arguments"]
+
+        legacy_tool_calls = message.get("tool_calls") or []
+        if legacy_tool_calls:
+            function = legacy_tool_calls[0].get("function") or {}
+            if function.get("arguments"):
+                return function["arguments"]
+
+    return None
 # Enable CORS for all origins（兼容本机开发与局域网访问）
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": get_allowed_cors_origins()}})
 
 
 def load_layer_catalog():
@@ -489,7 +571,7 @@ def gpt_response(user_input):
     'CountryCode': ,
     'content':
     """
-    completion = openai.ChatCompletion.create(
+    completion = create_chat_completion(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful GEE Assistant."},
@@ -514,7 +596,7 @@ def gpt_response(user_input):
         }}],
     )
     try:
-        generated_text = completion.choices[0].message.function_call.arguments
+        generated_text = extract_function_call_arguments(completion)
         return generated_text
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -627,7 +709,7 @@ def get_code_response(user_input):
    e.g 'script': 
             'content':
     """
-    completion = openai.ChatCompletion.create(
+    completion = create_chat_completion(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful GEE Assistant."},
@@ -649,7 +731,7 @@ def get_code_response(user_input):
         }}],
     )
     try:
-        assistant_response = completion.choices[0].message.function_call.arguments
+        assistant_response = extract_function_call_arguments(completion)
         json_data = json.loads(assistant_response)
         generated_script = json_data["response"][0]["script"]
         return generated_script

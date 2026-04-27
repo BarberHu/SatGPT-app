@@ -180,8 +180,8 @@
 }
 
 .layer-manager-checkbox:checked {
-  background: #52525b;
-  border-color: #52525b;
+  background: #2563eb;
+  border-color: #2563eb;
 }
 
 .layer-manager-checkbox:checked::after {
@@ -191,6 +191,7 @@
 
 .layer-manager-checkbox.is-ready {
   border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.06);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
 }
 
@@ -201,6 +202,7 @@
 
 .layer-manager-checkbox.is-loading {
   border-color: rgba(37, 99, 235, 0.38);
+  background: rgba(37, 99, 235, 0.04);
 }
 
 .layer-manager-checkbox:disabled {
