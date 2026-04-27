@@ -258,8 +258,18 @@ function MapContainer() {
   const agentLayerOrderRef = useRef(agentLayerOrder);
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
   const agentRasterTileUrlRef = useRef({});
+  const agentRasterLayerVisibilityRef = useRef(agentRasterLayerVisibility);
+  const appModeRef = useRef(appMode);
+  const layerDataRef = useRef(layerData);
+  const syncAgentRasterLayersRef = useRef(null);
   const chatModeRef = useRef(chatMode);
   const handleMapModeToggleRef = useRef(null);
+
+  agentLayerOrderRef.current = agentLayerOrder;
+  agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
+  agentRasterLayerVisibilityRef.current = agentRasterLayerVisibility;
+  appModeRef.current = appMode;
+  layerDataRef.current = layerData;
 
   const clearTransientWarningTimer = useCallback(() => {
     if (transientWarningTimeoutRef.current) {
@@ -414,6 +424,8 @@ function MapContainer() {
         map.removeSource(id);
       }
     });
+
+    agentRasterTileUrlRef.current = {};
   }, []);
 
   const removeAoiLayers = useCallback((map) => {
@@ -582,6 +594,96 @@ function MapContainer() {
 
     return undefined;
   }, [getExistingLayerBands]);
+
+  const syncAgentRasterLayers = useCallback((map) => {
+    if (!map || !map.isStyleLoaded()) {
+      return false;
+    }
+
+    const currentAppMode = appModeRef.current;
+    const currentLayerData = layerDataRef.current || {};
+    const currentRasterVisibility = agentRasterLayerVisibilityRef.current || {};
+    const currentLayerOrder = agentLayerOrderRef.current || [];
+
+    if (currentAppMode === 'agent') {
+      removeAskRasterSiblings(map, AGENT_RASTER_LAYER_NAMES);
+    }
+
+    const rasterOrderIndex = new Map(
+      currentLayerOrder.map((layerId, index) => [layerId, index])
+    );
+    const orderedRasterNames = [...AGENT_RASTER_LAYER_NAMES].sort((left, right) => {
+      const leftId = `agent-raster-${left}`;
+      const rightId = `agent-raster-${right}`;
+      const leftIndex = rasterOrderIndex.has(leftId) ? rasterOrderIndex.get(leftId) : Number.MAX_SAFE_INTEGER;
+      const rightIndex = rasterOrderIndex.has(rightId) ? rasterOrderIndex.get(rightId) : Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    });
+
+    orderedRasterNames.forEach((layerName) => {
+      const mapLayerId = `agent-raster-${layerName}`;
+      const descriptor = currentAppMode === 'agent' ? currentLayerData?.[layerName] : null;
+      const nextTileUrl = currentRasterVisibility?.[layerName] && descriptor?.tileUrl
+        ? descriptor.tileUrl
+        : null;
+      const previousTileUrl = agentRasterTileUrlRef.current?.[layerName] || null;
+
+      if (!nextTileUrl) {
+        if (map.getLayer(mapLayerId)) {
+          map.removeLayer(mapLayerId);
+        }
+        if (map.getSource(mapLayerId)) {
+          map.removeSource(mapLayerId);
+        }
+        agentRasterTileUrlRef.current[layerName] = null;
+        return;
+      }
+
+      if (previousTileUrl === nextTileUrl && map.getLayer(mapLayerId) && map.getSource(mapLayerId)) {
+        return;
+      }
+
+      if (map.getLayer(mapLayerId)) {
+        map.removeLayer(mapLayerId);
+      }
+      if (map.getSource(mapLayerId)) {
+        map.removeSource(mapLayerId);
+      }
+
+      map.addSource(mapLayerId, {
+        type: 'raster',
+        tiles: [nextTileUrl],
+        tileSize: 256,
+      });
+
+      const rasterLayerDefinition = {
+        id: mapLayerId,
+        type: 'raster',
+        source: mapLayerId,
+        paint: {
+          'raster-opacity': 1,
+        },
+      };
+      const rasterBeforeId = getInsertBeforeId(map, mapLayerId);
+      if (rasterBeforeId) {
+        map.addLayer(rasterLayerDefinition, rasterBeforeId);
+      } else {
+        map.addLayer(rasterLayerDefinition);
+      }
+      agentRasterTileUrlRef.current[layerName] = nextTileUrl;
+    });
+
+    reconcileLayerOrder(map);
+    return true;
+  }, [
+    getInsertBeforeId,
+    reconcileLayerOrder,
+    removeAskRasterSiblings,
+  ]);
+
+  useEffect(() => {
+    syncAgentRasterLayersRef.current = syncAgentRasterLayers;
+  }, [syncAgentRasterLayers]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -757,6 +859,7 @@ function MapContainer() {
     });
 
     const handleStyleData = () => {
+      syncAgentRasterLayersRef.current?.(map);
       window.requestAnimationFrame(() => reconcileLayerOrder(map));
     };
     map.on('styledata', handleStyleData);
@@ -1569,83 +1672,39 @@ function MapContainer() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return undefined;
 
-    if (appMode === 'agent') {
-      removeAskRasterSiblings(map, AGENT_RASTER_LAYER_NAMES);
+    const runSync = () => {
+      syncAgentRasterLayers(map);
+      window.requestAnimationFrame(() => {
+        if (mapRef.current === map && map.isStyleLoaded()) {
+          syncAgentRasterLayers(map);
+        }
+      });
+    };
+
+    if (syncAgentRasterLayers(map)) {
+      window.requestAnimationFrame(() => {
+        if (mapRef.current === map && map.isStyleLoaded()) {
+          syncAgentRasterLayers(map);
+        }
+      });
+      return undefined;
     }
 
-    const rasterOrderIndex = new Map(
-      (agentLayerOrder || []).map((layerId, index) => [layerId, index])
-    );
-    const orderedRasterNames = [...AGENT_RASTER_LAYER_NAMES].sort((left, right) => {
-      const leftId = `agent-raster-${left}`;
-      const rightId = `agent-raster-${right}`;
-      const leftIndex = rasterOrderIndex.has(leftId) ? rasterOrderIndex.get(leftId) : Number.MAX_SAFE_INTEGER;
-      const rightIndex = rasterOrderIndex.has(rightId) ? rasterOrderIndex.get(rightId) : Number.MAX_SAFE_INTEGER;
-      return leftIndex - rightIndex;
-    });
-
-    orderedRasterNames.forEach((layerName) => {
-      const mapLayerId = `agent-raster-${layerName}`;
-      const descriptor = appMode === 'agent' ? layerData?.[layerName] : null;
-      const nextTileUrl = agentRasterLayerVisibility?.[layerName] && descriptor?.tileUrl
-        ? descriptor.tileUrl
-        : null;
-      const previousTileUrl = agentRasterTileUrlRef.current?.[layerName] || null;
-
-      if (!nextTileUrl) {
-        if (map.getLayer(mapLayerId)) {
-          map.removeLayer(mapLayerId);
-        }
-        if (map.getSource(mapLayerId)) {
-          map.removeSource(mapLayerId);
-        }
-        agentRasterTileUrlRef.current[layerName] = null;
-        return;
-      }
-
-      if (previousTileUrl === nextTileUrl && map.getLayer(mapLayerId) && map.getSource(mapLayerId)) {
-        return;
-      }
-
-      if (map.getLayer(mapLayerId)) {
-        map.removeLayer(mapLayerId);
-      }
-      if (map.getSource(mapLayerId)) {
-        map.removeSource(mapLayerId);
-      }
-
-      map.addSource(mapLayerId, {
-        type: 'raster',
-        tiles: [nextTileUrl],
-        tileSize: 256,
-      });
-
-      const rasterLayerDefinition = {
-        id: mapLayerId,
-        type: 'raster',
-        source: mapLayerId,
-        paint: {
-          'raster-opacity': 1,
-        },
-      };
-      const rasterBeforeId = getInsertBeforeId(map, mapLayerId);
-      if (rasterBeforeId) {
-        map.addLayer(rasterLayerDefinition, rasterBeforeId);
-      } else {
-        map.addLayer(rasterLayerDefinition);
-      }
-      agentRasterTileUrlRef.current[layerName] = nextTileUrl;
-    });
-
-    reconcileLayerOrder(map);
-    window.requestAnimationFrame(() => {
-      if (mapRef.current === map && map.isStyleLoaded()) {
-        reconcileLayerOrder(map);
-      }
-    });
-  }, [agentLayerOrder, agentRasterLayerVisibility, appMode, getInsertBeforeId, layerData, reconcileLayerOrder, removeAskRasterSiblings]);
+    map.once('load', runSync);
+    map.once('styledata', runSync);
+    return () => {
+      map.off('load', runSync);
+      map.off('styledata', runSync);
+    };
+  }, [
+    agentLayerOrder,
+    agentRasterLayerVisibility,
+    appMode,
+    layerData,
+    syncAgentRasterLayers,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;

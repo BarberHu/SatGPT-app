@@ -73,4 +73,5 @@ E
 # Legacy local launcher scripts
 start_*.bat
 stop_*.bat
+!start_all.bat
 scripts/local/

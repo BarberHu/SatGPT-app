@@ -20,10 +20,42 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: resolve(__dirname, "..", ".env") });
 
 const app = express();
+const FRONTEND_PORT = process.env.FRONTEND_PORT || "3000";
+const PUBLIC_HOST = process.env.SATGPT_PUBLIC_HOST || "localhost";
+
+function getAllowedCorsOrigins(): string[] {
+  const configured = (process.env.SATGPT_CORS_ORIGINS || "").trim();
+  if (configured) {
+    return configured
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+  }
+
+  const origins = new Set([
+    `http://localhost:${FRONTEND_PORT}`,
+    `http://127.0.0.1:${FRONTEND_PORT}`,
+  ]);
+
+  if (!["localhost", "127.0.0.1", "0.0.0.0"].includes(PUBLIC_HOST)) {
+    origins.add(`http://${PUBLIC_HOST}:${FRONTEND_PORT}`);
+  }
+
+  return [...origins];
+}
+
+const allowedCorsOrigins = getAllowedCorsOrigins();
 
 // CORS 配置：允许前端从不同来源访问运行时服务。
 app.use(cors({
-  origin: true,
+  origin: (origin, callback) => {
+    if (!origin || allowedCorsOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
   credentials: true,
 }));
 
@@ -32,7 +64,6 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Python LangGraph 后端地址（FastAPI）。
-const PUBLIC_HOST = process.env.SATGPT_PUBLIC_HOST || "localhost";
 const AGENT_PORT = process.env.AGENT_PORT || "8000";
 const AGENT_URL = process.env.AGENT_URL || `http://${PUBLIC_HOST}:${AGENT_PORT}`;
 
@@ -44,7 +75,7 @@ const runtime = new CopilotRuntime({
   agents: {
     flood_agent: new LangGraphHttpAgent({
       url: `${AGENT_URL}/agent`,
-    }),
+    }) as any,
   },
 });
 

@@ -6,7 +6,7 @@
  */
 
 import React, { Profiler, startTransition, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
@@ -945,6 +945,7 @@ function AgentPanel() {
     setAgentSelectedType,
     agentShowBaseImagery,
     setAgentShowBaseImagery,
+    agentShowFloodDetection,
     setAgentShowFloodDetection,
     agentShowPopulationLayer,
     setAgentShowPopulationLayer,
@@ -969,6 +970,7 @@ function AgentPanel() {
     agentLayerLoading,
     setAgentLayerLoading,
     setAgentTileError,
+    mapInstance,
     businessLayers,
     selectedAOI,
     toggleBusinessLayerVisibility,
@@ -1330,6 +1332,24 @@ function AgentPanel() {
     setDraggedLayerId(null);
     setDragOverState({ groupKey: null, targetLayerId: null, position: 'before' });
   }, []);
+  const removeMapLayerFromMap = useCallback((mapLayerId) => {
+    const map = mapInstance;
+
+    if (!mapLayerId || !map?.getLayer || !map?.getSource) {
+      return;
+    }
+
+    try {
+      if (map.getLayer(mapLayerId)) {
+        map.removeLayer(mapLayerId);
+      }
+      if (map.getSource(mapLayerId)) {
+        map.removeSource(mapLayerId);
+      }
+    } catch (error) {
+      console.warn(`Failed to remove map layer ${mapLayerId}:`, error);
+    }
+  }, [mapInstance]);
 
   const layerManagerGroups = useMemo(() => {
     const imageryGroup = {
@@ -1339,6 +1359,7 @@ function AgentPanel() {
           const descriptor = agentImagery?.[agentSelectedPeriod]?.[type] || null;
           const isCurrent = agentSelectedType === type;
           const isAvailable = Boolean(descriptor?.tile_url);
+          const isLoading = Boolean((agentImageryLoading || agentLayerLoading['base-imagery']) && isCurrent && agentShowBaseImagery);
 
           return {
             id: `base-imagery-${type}`,
@@ -1356,26 +1377,82 @@ function AgentPanel() {
             legend: CORE_LAYER_LEGENDS[type],
             checked: Boolean(isCurrent && agentShowBaseImagery && isAvailable),
             disabled: !isAvailable,
-            loading: Boolean((agentImageryLoading || agentLayerLoading['base-imagery']) && isCurrent && agentShowBaseImagery),
+            loading: isLoading,
+            checkboxState: isLoading ? 'loading' : (isAvailable ? 'ready' : 'idle'),
             badge: isCurrent ? 'Current' : null,
-            onToggle: () => {
+            onToggle: (event) => {
               if (!isAvailable) {
                 return;
               }
 
-              setAgentSelectedType(type);
-              setAgentShowBaseImagery((previous) => (isCurrent ? !previous : true));
+              const nextVisible = Boolean(event?.target?.checked);
+              flushSync(() => {
+                setAgentSelectedType(type);
+                setAgentShowBaseImagery(isCurrent ? nextVisible : true);
+              });
+
+              if (isCurrent && !nextVisible) {
+                [
+                  'agent-s2-pre',
+                  'agent-s2-peek',
+                  'agent-s2-after',
+                  'agent-s1-pre',
+                  'agent-s1-peek',
+                  'agent-s1-after',
+                ].forEach(removeMapLayerFromMap);
+              }
             },
           };
         }),
     };
+
+    const floodDetectionDescriptor = agentImagery?.flood_detection || null;
+    const floodDetectionAvailable = Boolean(floodDetectionDescriptor?.tile_url);
+    const floodDetectionLoading = Boolean(agentShowFloodDetection && agentLayerLoading?.['flood-detection']);
+    const floodDetectionItem = analysisDisplayEnabled ? [{
+      id: 'core-flood-detection',
+      orderId: 'agent-flood-detection',
+      defaultOrder: 0,
+      draggable: true,
+      title: 'Flood Detection',
+      infoText: LAYER_META.flood_detection.description,
+      infoDetails: [
+        { label: 'Source', value: LAYER_META.flood_detection.source },
+        { label: 'Method', value: LAYER_META.flood_detection.method },
+        { label: 'Resolution', value: LAYER_META.flood_detection.resolution },
+        { label: 'Status', value: floodDetectionLoading ? 'Loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'Visible' : 'Pending') : (floodDetectionAvailable ? 'Ready' : 'Pending')) },
+      ],
+      legend: CORE_LAYER_LEGENDS.flood_detection,
+      checked: Boolean(agentShowFloodDetection && floodDetectionAvailable),
+      disabled: !floodDetectionAvailable,
+      loading: floodDetectionLoading,
+      checkboxState: floodDetectionLoading ? 'loading' : (floodDetectionAvailable ? 'ready' : 'idle'),
+      status: floodDetectionLoading ? 'Loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'Visible' : 'Pending') : (floodDetectionAvailable ? 'Ready' : 'Pending')),
+      tone: floodDetectionLoading ? 'loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'ready' : 'pending') : (floodDetectionAvailable ? 'off' : 'pending')),
+      badge: agentShowFloodDetection ? 'Current' : null,
+      onToggle: (event) => {
+        if (!floodDetectionAvailable) {
+          return;
+        }
+
+        const nextVisible = Boolean(event?.target?.checked);
+        flushSync(() => {
+          setAgentShowFloodDetection(nextVisible);
+        });
+
+        if (!nextVisible) {
+          removeMapLayerFromMap('agent-flood-detection');
+          window.requestAnimationFrame(() => removeMapLayerFromMap('agent-flood-detection'));
+        }
+      },
+    }] : [];
 
     const rasterItems = AGENT_RASTER_LAYER_CONFIG.map((layer, index) => {
       const descriptor = layerData?.[layer.key] || null;
       const visible = Boolean(agentRasterLayerVisibility?.[layer.key]);
       const hasScope = Boolean(selectedAOI);
       const hasTile = Boolean(descriptor?.tileUrl);
-      const loading = Boolean(hasScope && agentRasterLoading && !hasTile);
+      const loading = Boolean(visible && hasScope && agentRasterLoading && !hasTile);
 
       return {
         id: `raster-${layer.key}`,
@@ -1396,14 +1473,23 @@ function AgentPanel() {
         checkboxState: !hasScope ? 'idle' : (loading ? 'loading' : (hasTile ? 'ready' : 'idle')),
         status: !hasScope ? 'Unavailable' : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : (hasTile ? 'Ready' : 'Pending'))),
         tone: !hasScope ? 'idle' : (loading ? 'loading' : (visible ? (hasTile ? 'ready' : 'pending') : (hasTile ? 'off' : 'pending'))),
-        onToggle: () => {
+        onToggle: (event) => {
           if (!hasScope) {
             return;
           }
-          setAgentRasterLayerVisibility((previous) => ({
-            ...previous,
-            [layer.key]: !previous?.[layer.key],
-          }));
+
+          const nextVisible = Boolean(event?.target?.checked);
+          flushSync(() => {
+            setAgentRasterLayerVisibility((previous) => ({
+              ...previous,
+              [layer.key]: nextVisible,
+            }));
+          });
+
+          if (!nextVisible) {
+            removeMapLayerFromMap(layer.orderId);
+            window.requestAnimationFrame(() => removeMapLayerFromMap(layer.orderId));
+          }
         },
       };
     });
@@ -1412,6 +1498,7 @@ function AgentPanel() {
       const descriptor = agentRecommendedLayerData?.[layer.id] || null;
       const visible = Boolean(agentRecommendedLayerVisibility?.[layer.id]);
       const loading = Boolean(visible && agentLayerLoading?.[layer.id]);
+      const hasTile = Boolean(descriptor?.tile_url);
       const orderId = getCatalogMapLayerId(layer.id);
       return {
         id: `recommended-${layer.id}`,
@@ -1429,25 +1516,35 @@ function AgentPanel() {
         checked: visible,
         disabled: !analysisDisplayEnabled,
         loading,
+        checkboxState: !analysisDisplayEnabled ? 'idle' : (loading ? 'loading' : (hasTile ? 'ready' : 'idle')),
         status: !analysisDisplayEnabled
           ? 'Unavailable'
-          : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')),
+          : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : 'Hidden')),
         tone: !analysisDisplayEnabled
           ? 'idle'
-          : (loading ? 'loading' : (visible ? (descriptor?.tile_url ? 'ready' : 'pending') : 'off')),
+          : (loading ? 'loading' : (visible ? (hasTile ? 'ready' : 'pending') : 'off')),
         badge: layer.ui_profile?.badge_label || null,
-        onToggle: () => {
+        onToggle: (event) => {
           if (analysisDisplayEnabled) {
-            setAgentRecommendedLayerVisibility((previous) => ({
-              ...previous,
-              [layer.id]: !previous[layer.id],
-            }));
+            const nextVisible = Boolean(event?.target?.checked);
+            flushSync(() => {
+              setAgentRecommendedLayerVisibility((previous) => ({
+                ...previous,
+                [layer.id]: nextVisible,
+              }));
+            });
+
+            if (!nextVisible) {
+              removeMapLayerFromMap(orderId);
+              window.requestAnimationFrame(() => removeMapLayerFromMap(orderId));
+            }
           }
         },
       };
     });
 
     const overlayItems = orderLayerManagerItems([
+      ...floodDetectionItem,
       ...rasterItems,
       ...recommendedItems,
     ]);
@@ -1477,6 +1574,7 @@ function AgentPanel() {
             checked: isVisible,
             disabled: false,
             loading: false,
+            checkboxState: 'ready',
             status: isVisible ? 'Visible' : 'Hidden',
             tone: isVisible ? 'ready' : 'off',
             badge: layer.is_active ? 'Current' : null,
@@ -1507,14 +1605,17 @@ function AgentPanel() {
     orderLayerManagerItems,
     scopeSourceLabel,
     agentSelectedPeriod,
+    agentShowFloodDetection,
     selectedPeriodMeta.label,
     selectedAOI,
     activateBusinessLayerRecord,
     deleteBusinessLayer,
+    removeMapLayerFromMap,
     setAgentRasterLayerVisibility,
     setAgentRecommendedLayerVisibility,
     setAgentSelectedType,
     setAgentShowBaseImagery,
+    setAgentShowFloodDetection,
     toggleBusinessLayerVisibility,
   ]);
   useEffect(() => {
@@ -1538,15 +1639,19 @@ function AgentPanel() {
     });
 
     setAgentRecommendedLayerVisibility(() => {
+      const selectedIds = new Set(currentSelectedLayerIds);
       const next = {};
       currentRecommendedLayers.forEach((layer) => {
-        next[layer.id] = false;
+        if (layer.layer_family === 'catalog') {
+          next[layer.id] = selectedIds.has(layer.id);
+        }
       });
       return next;
     });
   }, [
     analysisDisplayEnabled,
     currentConfirmationVersion,
+    currentSelectedLayerIds,
     currentRecommendedLayers,
     currentRecommendedLayerSignature,
     setAgentLayerOrder,
@@ -1563,13 +1668,15 @@ function AgentPanel() {
       return;
     }
 
-    setAgentShowFloodDetection(false);
+    const selectedIds = new Set(currentSelectedLayerIds);
+    setAgentShowFloodDetection(selectedIds.has('core:flood_detection'));
     setAgentShowPopulationLayer(false);
     setAgentShowUrbanLayer(false);
     setAgentShowLandcoverLayer(false);
   }, [
     analysisDisplayEnabled,
     currentConfirmationVersion,
+    currentSelectedLayerIds,
     currentRecommendedLayerSignature,
     setAgentShowFloodDetection,
     setAgentShowLandcoverLayer,
@@ -1969,7 +2076,7 @@ function AgentPanel() {
                         return (
                           <div
                             key={item.id}
-                            className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${(item.disabled || item.loading) ? 'is-disabled' : ''} ${draggedLayerId === item.orderId ? 'is-dragging' : ''} ${isDragOverTarget && dragOverState.position === 'before' ? 'is-drag-over-before' : ''} ${isDragOverTarget && dragOverState.position === 'after' ? 'is-drag-over-after' : ''}`}
+                            className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${item.disabled ? 'is-disabled' : ''} ${draggedLayerId === item.orderId ? 'is-dragging' : ''} ${isDragOverTarget && dragOverState.position === 'before' ? 'is-drag-over-before' : ''} ${isDragOverTarget && dragOverState.position === 'after' ? 'is-drag-over-after' : ''}`}
                             draggable={Boolean(item.draggable)}
                             onDragStart={item.draggable ? (event) => handleLayerDragStart(event, item.orderId) : undefined}
                             onDragEnd={item.draggable ? handleLayerDragEnd : undefined}
@@ -1983,7 +2090,7 @@ function AgentPanel() {
                                   className={`layer-manager-checkbox ${item.checkboxState ? `is-${item.checkboxState}` : ''}`}
                                   checked={item.checked}
                                   onChange={item.onToggle}
-                                  disabled={item.disabled || item.loading}
+                                  disabled={item.disabled}
                                 />
                               </div>
                               <div className="layer-manager-item-content">
@@ -1992,7 +2099,7 @@ function AgentPanel() {
                                     type="button"
                                     className="layer-manager-item-trigger"
                                     onClick={item.onSelect}
-                                    disabled={item.disabled || item.loading}
+                                    disabled={item.disabled}
                                   >
                                     <LayerManagerItemCopy item={item} />
                                   </button>

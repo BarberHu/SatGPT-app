@@ -37,8 +37,8 @@ SatGPT-app/
 │   └── server.ts          # Express + CopilotKit
 ├── static/                # Static assets
 ├── templates/             # HTML templates
-├── start_all.bat          # One-click startup (Windows)
-└── stop_all.bat           # Stop all services
+├── start_all.bat          # Compatibility wrapper to scripts/windows/start_windows.bat
+└── scripts/               # Windows setup/start scripts
 ```
 
 ## 🚀 Quick Start
@@ -92,7 +92,10 @@ same-origin React proxy instead of hard-coding `localhost`.
 ### Start Services
 
 ```bash
-# One-click start (Windows)
+# Preferred Windows entrypoint
+.\scripts\windows\start_windows.bat
+
+# Compatibility alias
 .\start_all.bat
 
 # Or start individually:

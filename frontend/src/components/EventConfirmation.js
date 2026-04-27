@@ -170,26 +170,34 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
               </div>
 
               <div className="recommended-layers-list">
-                {(formData.recommended_layers || []).map((layer) => (
-                  <label key={layer.id} className="recommended-layer-item">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(layerSelection[layer.id])}
-                      onChange={() => handleLayerToggle(layer.id)}
-                    />
-                    <div className="recommended-layer-copy">
-                      <div className="recommended-layer-title">{layer.title}</div>
-                      <div className="recommended-layer-meta">
-                        <span>{layer.temporal_type}</span>
-                        <span>{layer.spatial_scope}</span>
-                        {layer.has_official_recipe ? <span>official style</span> : null}
+                {(formData.recommended_layers || []).map((layer) => {
+                  const checked = Boolean(layerSelection[layer.id]);
+
+                  return (
+                    <label
+                      key={layer.id}
+                      className={`recommended-layer-item ${checked ? 'is-selected' : ''}`}
+                    >
+                      <input
+                        className="event-confirmation-checkbox"
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => handleLayerToggle(layer.id)}
+                      />
+                      <div className="recommended-layer-copy">
+                        <div className="recommended-layer-title">{layer.title}</div>
+                        <div className="recommended-layer-meta">
+                          <span>{layer.temporal_type}</span>
+                          <span>{layer.spatial_scope}</span>
+                          {layer.has_official_recipe ? <span>official style</span> : null}
+                        </div>
+                        {layer.summary ? (
+                          <div className="recommended-layer-summary">{layer.summary}</div>
+                        ) : null}
                       </div>
-                      {layer.summary ? (
-                        <div className="recommended-layer-summary">{layer.summary}</div>
-                      ) : null}
-                    </div>
-                  </label>
-                ))}
+                    </label>
+                  );
+                })}
                 {!(formData.recommended_layers || []).length && (
                   <div className="no-recommendation-copy">Dataset unavailable for this region/time.</div>
                 )}

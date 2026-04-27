@@ -147,6 +147,24 @@ if https_proxy:
     os.environ["HTTPS_PROXY"] = https_proxy
 
 
+def _get_allowed_cors_origins() -> list[str]:
+    configured = os.getenv("SATGPT_CORS_ORIGINS", "").strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+    frontend_port = os.getenv("FRONTEND_PORT", "3000")
+    public_host = os.getenv("SATGPT_PUBLIC_HOST", "localhost").strip() or "localhost"
+    origins = {
+        f"http://localhost:{frontend_port}",
+        f"http://127.0.0.1:{frontend_port}",
+    }
+
+    if public_host not in {"localhost", "127.0.0.1", "0.0.0.0"}:
+        origins.add(f"http://{public_host}:{frontend_port}")
+
+    return sorted(origins)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -166,7 +184,7 @@ app = FastAPI(
 # CORS 配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名
+    allow_origins=_get_allowed_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

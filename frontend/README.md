@@ -1,5 +1,10 @@
 # SatGPT - React + Flask Application
 
+> This file is kept for historical frontend context only. For the current
+> project startup flow, environment variables, and Agent/Runtime integration,
+> use the repository root [README](../README.md) and
+> `scripts\windows\start_windows.bat`.
+
 This project has been restructured as a React frontend with a Flask backend API.
 
 ## Project Structure
