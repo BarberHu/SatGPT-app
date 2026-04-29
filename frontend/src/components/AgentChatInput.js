@@ -1,5 +1,6 @@
 import React, { Profiler, useEffect, useMemo, useRef, useState } from 'react';
 import { useCopilotChatInternal } from '@copilotkit/react-core';
+import { Paperclip, SendHorizontal, Square } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import {
   appendMentionContext,
@@ -64,6 +65,7 @@ function AgentChatInput({
   inProgress,
   onSend,
   onStop,
+  onOpenSpatialUpload = null,
   hideStopButton = false,
   chatReady = false,
 }) {
@@ -296,8 +298,6 @@ function AgentChatInput({
     }
   };
 
-  const buttonLabel = !chatReady ? '...' : canStop ? 'Stop' : 'Send';
-
   return (
     <Profiler id="AgentChatInput" onRender={inputProfiler}>
       <div className="agent-chat-input-shell" ref={rootRef}>
@@ -335,13 +335,34 @@ function AgentChatInput({
           </div>
 
           <div className="agent-chat-controls">
+            {onOpenSpatialUpload ? (
+              <button
+                type="button"
+                className="agent-chat-attach-btn"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenSpatialUpload();
+                }}
+                disabled={!chatReady}
+                aria-label="Upload spatial scope"
+                title="Upload spatial scope"
+              >
+                <Paperclip size={18} strokeWidth={2.2} aria-hidden="true" />
+              </button>
+            ) : null}
             <button
               type="button"
-              className="agent-chat-send-btn"
+              className={`agent-chat-send-btn ${canStop ? 'is-stop' : ''}`}
               onClick={canStop ? onStop : handleSend}
               disabled={!canStop && !canSend}
+              aria-label={canStop ? 'Stop generating' : 'Send message'}
+              title={canStop ? 'Stop generating' : 'Send message'}
             >
-              {buttonLabel}
+              {canStop ? (
+                <Square size={15} fill="currentColor" strokeWidth={2.4} aria-hidden="true" />
+              ) : (
+                <SendHorizontal size={18} strokeWidth={2.4} aria-hidden="true" />
+              )}
             </button>
           </div>
         </div>

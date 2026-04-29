@@ -111,6 +111,13 @@ cd frontend && npm start
 
 Open http://localhost:3000
 
+If startup reports a port conflict, stop the printed PID first or change the
+matching value in the repository root `.env` (`FRONTEND_PORT`, `RUNTIME_PORT`,
+or `AGENT_PORT`) and rerun the Windows start script. The Agent mode request path
+is `React frontend -> CopilotKit runtime -> FastAPI agent`, so a stale or stuck
+runtime process on `RUNTIME_PORT` can make the frontend and agent look started
+while chat requests still fail.
+
 ## 🎯 Usage
 
 1. Open the app and switch to **"Agent"** mode

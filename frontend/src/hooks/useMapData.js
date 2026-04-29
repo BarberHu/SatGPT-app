@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { getAgentRasterLayers, getHistoricalMap, getFloodHotspotMap, getWaterRegimeChangeMap, createCodeSnippet } from '../services/api';
+import { getAgentRasterLayers, getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams } from '../utils/aoi';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 
@@ -9,6 +9,7 @@ const ASK_AUTOLOAD_AOI_SOURCES = new Set(['fishnet']);
 const AGENT_AUTOLOAD_AOI_SOURCES = new Set(['fishnet']);
 
 const isAskAutoloadAoi = (aoi) => ASK_AUTOLOAD_AOI_SOURCES.has(String(aoi?.source || '').toLowerCase());
+const isFishnetAoi = (aoi) => String(aoi?.source || '').toLowerCase() === 'fishnet';
 const isAgentAutoloadAoi = (aoi) => {
   const source = String(aoi?.source || '').toLowerCase();
   return AGENT_AUTOLOAD_AOI_SOURCES.has(source) || isBusinessLayerAoiSource(source);
@@ -78,8 +79,6 @@ export const useMapData = () => {
         data = await getAgentRasterLayers(params);
       } else if (dataType === 'historical') {
         data = await getHistoricalMap(params);
-      } else if (dataType === 'waterRegimeChange') {
-        data = await getWaterRegimeChangeMap(params);
       } else {
         // Flood hotspot
         params.year_from = FLOOD_HOTSPOT_YEAR_FROM;
@@ -101,8 +100,6 @@ export const useMapData = () => {
       // Create GEE code snippet and download URL
       const codeType = dataType === 'historical'
         ? 'historical'
-        : dataType === 'waterRegimeChange'
-        ? 'water_regime_change'
         : 'flood_hotspot';
       const codeSnippet = createCodeSnippet(params, codeType);
       if (codeSnippet) {
@@ -153,6 +150,10 @@ export const useMapData = () => {
       requestIdRef.current += 1;
       setIsLoading(false);
       setAgentRasterLoading(false);
+
+      if (isFishnetAoi(selectedAOI)) {
+        return;
+      }
     }
 
     if (selectedAOI && canAutoloadAoi(appMode, selectedAOI)) {

@@ -1,6 +1,5 @@
 import React, { Profiler, useCallback, useMemo, useRef } from 'react';
 import { CopilotChat } from "@copilotkit/react-ui";
-import { useCopilotContext } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import { trackUxEvent } from '../utils/analytics';
 import {
@@ -26,11 +25,7 @@ function AgentChatPane() {
   const uploadPanelRef = useRef(null);
   const {
     chatMode,
-    setWarning,
-    resetAgentSession,
-    startNewAgentSession,
   } = useAppContext();
-  const { setThreadId } = useCopilotContext();
   const paneProfiler = useMemo(
     () => createReactProfilerHandler('AgentChatPane', () => ({ chatMode })),
     [chatMode]
@@ -49,14 +44,12 @@ function AgentChatPane() {
     trackUxEvent('agent_scope_upload_open', { mode: 'agent', entry: 'chat_sidebar' });
   }, []);
 
-  const handleNewChat = () => {
-    const newId = crypto.randomUUID();
-    setThreadId(newId);
-    startNewAgentSession({ preserveSelectedAoi: true });
-    resetAgentSession({ preserveSelectedAoi: true });
-    setWarning('');
-    trackUxEvent('agent_new_chat', { mode: chatMode });
-  };
+  const renderAgentChatInput = useCallback((inputProps) => (
+    <AgentChatInput
+      {...inputProps}
+      onOpenSpatialUpload={handleOpenSpatialUpload}
+    />
+  ), [handleOpenSpatialUpload]);
 
   return (
     <Profiler id="AgentChatPane" onRender={paneProfiler}>
@@ -85,7 +78,7 @@ function AgentChatPane() {
                 },
               ]}
               className="agent-chat-pane__copilot"
-              Input={AgentChatInput}
+              Input={renderAgentChatInput}
               UserMessage={AgentUserMessage}
               onError={(copilotError) => {
                 if (
@@ -103,27 +96,6 @@ function AgentChatPane() {
               }}
             />
           </Profiler>
-        </div>
-
-        <div className="agent-chat-pane__toolbar">
-          <div className="agent-chat-pane__toolbar-left">
-            <button
-              type="button"
-              className="agent-chat-pane__icon-btn"
-              title="New conversation"
-              onClick={handleNewChat}
-            >
-              <i className="fa fa-plus"></i>
-            </button>
-            <button
-              type="button"
-              className="agent-chat-pane__text-btn"
-              title="Upload Scope"
-              onClick={handleOpenSpatialUpload}
-            >
-              Upload
-            </button>
-          </div>
         </div>
 
         <AoiUploadPanel

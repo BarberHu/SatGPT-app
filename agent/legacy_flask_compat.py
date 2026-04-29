@@ -241,14 +241,6 @@ def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         jrc_surface_flood, historical_catalog["flood"]["visualization"]
     )
 
-    seasonality = ee.Image(supplementary_catalog["seasonality"]["dataset"]).select(
-        supplementary_catalog["seasonality"]["band"]
-    ).clip(region)
-    seasonality = seasonality.updateMask(seasonality.gt(0))
-    seasonality = visualize_image(
-        seasonality, supplementary_catalog["seasonality"]["visualization"]
-    )
-
     lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
     population_density = ee.Image(
         supplementary_catalog["populationDensity"]["dataset"]
@@ -272,7 +264,6 @@ def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     content: Dict[str, Any] = {}
     attach_map_id(content, "Flood", jrc_surface_flood.getMapId())
     attach_map_id(content, "Water", jrc_surface_water.getMapId())
-    attach_map_id(content, "Seasonality", seasonality.getMapId())
     attach_map_id(content, "LCLU", lclu.getMapId())
     attach_map_id(content, "PopulationDensity", population_density.getMapId())
     attach_map_id(content, "SoilTexture", soil_texture.getMapId())
@@ -358,14 +349,6 @@ def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         flood_frequency_map.select("waterClass"), hotspot_catalog["floodFrequency"]["visualization"]
     )
 
-    seasonality = ee.Image(supplementary_catalog["seasonality"]["dataset"]).select(
-        supplementary_catalog["seasonality"]["band"]
-    ).clip(region)
-    seasonality = seasonality.updateMask(seasonality.gt(0))
-    seasonality = visualize_image(
-        seasonality, supplementary_catalog["seasonality"]["visualization"]
-    )
-
     lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
     population_density = ee.Image(
         supplementary_catalog["populationDensity"]["dataset"]
@@ -389,7 +372,6 @@ def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     content: Dict[str, Any] = {}
     attach_map_id(content, "Flood", flood_layer.getMapId())
     attach_map_id(content, "Water", permanent_water_layer.getMapId())
-    attach_map_id(content, "Seasonality", seasonality.getMapId())
     attach_map_id(content, "LCLU", lclu.getMapId())
     attach_map_id(content, "PopulationDensity", population_density.getMapId())
     attach_map_id(content, "SoilTexture", soil_texture.getMapId())

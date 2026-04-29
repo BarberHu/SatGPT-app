@@ -941,10 +941,11 @@ function AgentPanel() {
     agentImageryLoading,
     // Agent control states from context
     agentSelectedPeriod,
-    agentSelectedType,
     setAgentSelectedType,
     agentShowBaseImagery,
     setAgentShowBaseImagery,
+    agentBaseImageryVisibility,
+    setAgentBaseImageryVisibility,
     agentShowFloodDetection,
     setAgentShowFloodDetection,
     agentShowPopulationLayer,
@@ -1356,13 +1357,25 @@ function AgentPanel() {
       key: 'imagery',
       label: 'Imagery',
       items: ['sentinel2', 'sentinel1'].map((type) => {
+          const periodSlug = agentSelectedPeriod.replace('_date', '');
+          const orderId = `agent-${type === 'sentinel2' ? 's2' : 's1'}-${periodSlug}`;
           const descriptor = agentImagery?.[agentSelectedPeriod]?.[type] || null;
-          const isCurrent = agentSelectedType === type;
+          const visible = Boolean(agentBaseImageryVisibility?.[type]);
           const isAvailable = Boolean(descriptor?.tile_url);
-          const isLoading = Boolean((agentImageryLoading || agentLayerLoading['base-imagery']) && isCurrent && agentShowBaseImagery);
+          const isLoading = Boolean(
+            visible
+            && (
+              agentImageryLoading
+              || agentLayerLoading?.[`base-imagery-${type}`]
+              || agentLayerLoading?.[orderId]
+            )
+          );
 
           return {
             id: `base-imagery-${type}`,
+            orderId,
+            defaultOrder: type === 'sentinel2' ? 0 : 1,
+            draggable: true,
             title: type === 'sentinel2' ? 'Optical Imagery' : 'SAR Imagery',
             infoText: type === 'sentinel2'
               ? 'Optical base imagery for visual flood context'
@@ -1372,33 +1385,35 @@ function AgentPanel() {
               { label: 'Period', value: selectedPeriodMeta.label },
               { label: 'Date', value: descriptor?.date },
               { label: 'Resolution', value: descriptor?.resolution ? `${descriptor.resolution}m` : null },
-              { label: 'Status', value: isAvailable ? (isCurrent ? 'Current' : 'Available') : 'Unavailable' },
+              { label: 'Status', value: isAvailable ? (visible ? 'Visible' : 'Ready') : 'Unavailable' },
             ],
             legend: CORE_LAYER_LEGENDS[type],
-            checked: Boolean(isCurrent && agentShowBaseImagery && isAvailable),
+            checked: Boolean(visible && agentShowBaseImagery && isAvailable),
             disabled: !isAvailable,
             loading: isLoading,
             checkboxState: isLoading ? 'loading' : (isAvailable ? 'ready' : 'idle'),
-            badge: isCurrent ? 'Current' : null,
             onToggle: (event) => {
               if (!isAvailable) {
                 return;
               }
 
               const nextVisible = Boolean(event?.target?.checked);
+              const nextBaseVisibility = {
+                ...(agentBaseImageryVisibility || {}),
+                [type]: nextVisible,
+              };
+
               flushSync(() => {
                 setAgentSelectedType(type);
-                setAgentShowBaseImagery(isCurrent ? nextVisible : true);
+                setAgentBaseImageryVisibility(nextBaseVisibility);
+                setAgentShowBaseImagery(Object.values(nextBaseVisibility).some(Boolean));
               });
 
-              if (isCurrent && !nextVisible) {
+              if (!nextVisible) {
                 [
-                  'agent-s2-pre',
-                  'agent-s2-peek',
-                  'agent-s2-after',
-                  'agent-s1-pre',
-                  'agent-s1-peek',
-                  'agent-s1-after',
+                  `agent-${type === 'sentinel2' ? 's2' : 's1'}-pre`,
+                  `agent-${type === 'sentinel2' ? 's2' : 's1'}-peek`,
+                  `agent-${type === 'sentinel2' ? 's2' : 's1'}-after`,
                 ].forEach(removeMapLayerFromMap);
               }
             },
@@ -1429,7 +1444,6 @@ function AgentPanel() {
       checkboxState: floodDetectionLoading ? 'loading' : (floodDetectionAvailable ? 'ready' : 'idle'),
       status: floodDetectionLoading ? 'Loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'Visible' : 'Pending') : (floodDetectionAvailable ? 'Ready' : 'Pending')),
       tone: floodDetectionLoading ? 'loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'ready' : 'pending') : (floodDetectionAvailable ? 'off' : 'pending')),
-      badge: agentShowFloodDetection ? 'Current' : null,
       onToggle: (event) => {
         if (!floodDetectionAvailable) {
           return;
@@ -1559,6 +1573,7 @@ function AgentPanel() {
       });
     }
 
+    imageryGroup.items = orderLayerManagerItems(imageryGroup.items);
     groups.push(imageryGroup);
 
     if (businessLayers?.length) {
@@ -1577,7 +1592,6 @@ function AgentPanel() {
             checkboxState: 'ready',
             status: isVisible ? 'Visible' : 'Hidden',
             tone: isVisible ? 'ready' : 'off',
-            badge: layer.is_active ? 'Current' : null,
             actionLabel: 'Delete',
             onToggle: () => toggleBusinessLayerVisibility(layer.id),
             onSelect: () => activateBusinessLayerRecord(layer.id),
@@ -1591,12 +1605,12 @@ function AgentPanel() {
   }, [
     agentImageryLoading,
     agentImagery,
+    agentBaseImageryVisibility,
     agentLayerLoading,
     agentRasterLayerVisibility,
     agentRasterLoading,
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
-    agentSelectedType,
     agentShowBaseImagery,
     analysisDisplayEnabled,
     businessLayers,
@@ -1612,6 +1626,7 @@ function AgentPanel() {
     deleteBusinessLayer,
     removeMapLayerFromMap,
     setAgentRasterLayerVisibility,
+    setAgentBaseImageryVisibility,
     setAgentRecommendedLayerVisibility,
     setAgentSelectedType,
     setAgentShowBaseImagery,
@@ -2062,7 +2077,7 @@ function AgentPanel() {
                     {group.items.map((item) => {
                         const visibleOrderIds = group.items.filter((entry) => entry.draggable).map((entry) => entry.orderId);
                         const canReceiveDrop = (
-                          group.key === 'overlays'
+                          ['overlays', 'imagery'].includes(group.key)
                           && Boolean(draggedLayerId)
                           && visibleOrderIds.includes(draggedLayerId)
                           && item.draggable

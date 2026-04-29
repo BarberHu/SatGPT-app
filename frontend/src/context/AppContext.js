@@ -55,6 +55,11 @@ const defaultAgentLayerVisibility = {
   agentShowLandcoverLayer: false,
 };
 
+const defaultAgentBaseImageryVisibility = {
+  sentinel2: true,
+  sentinel1: false,
+};
+
 const defaultAgentRasterLayerVisibility = {
   lclu: false,
   populationDensity: false,
@@ -63,6 +68,12 @@ const defaultAgentRasterLayerVisibility = {
 };
 
 const defaultAgentLayerOrder = [
+  'agent-s2-pre',
+  'agent-s1-pre',
+  'agent-s2-peek',
+  'agent-s1-peek',
+  'agent-s2-after',
+  'agent-s1-after',
   'agent-raster-populationDensity',
   'agent-raster-lclu',
   'agent-raster-soilTexture',
@@ -119,7 +130,7 @@ export const AppProvider = ({ children }) => {
   const [gridClickEnabled, setGridClickEnabled] = useState(false);
   
   // Layer State
-  const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot', 'waterRegimeChange'
+  const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot'
   const [yearControl, setYearControl] = useState(5);
   const [is3DEnabled, setIs3DEnabled] = useState(false);
   const [isBuildingsEnabled, setIsBuildingsEnabled] = useState(false);
@@ -128,8 +139,6 @@ export const AppProvider = ({ children }) => {
   const [layerVisibility, setLayerVisibility] = useState({
     flood: true,
     water: true,
-    regimeChange: true,
-    seasonality: false,
     lclu: false,
     populationDensity: false,
     soilTexture: false,
@@ -140,8 +149,6 @@ export const AppProvider = ({ children }) => {
   const [layerOpacity, setLayerOpacity] = useState({
     flood: 1,
     water: 1,
-    regimeChange: 1,
-    seasonality: 1,
     lclu: 1,
     populationDensity: 1,
     soilTexture: 1,
@@ -158,8 +165,6 @@ export const AppProvider = ({ children }) => {
   const [layerData, setLayerData] = useState({
     water: null,
     flood: null,
-    regimeChange: null,
-    seasonality: null,
     lclu: null,
     populationDensity: null,
     soilTexture: null,
@@ -188,6 +193,7 @@ export const AppProvider = ({ children }) => {
   const [agentSelectedPeriod, setAgentSelectedPeriod] = useState('peek_date'); // 'pre_date' | 'peek_date' | 'after_date'
   const [agentSelectedType, setAgentSelectedType] = useState('sentinel2'); // 'sentinel2' | 'sentinel1'
   const [agentShowBaseImagery, setAgentShowBaseImagery] = useState(true);
+  const [agentBaseImageryVisibility, setAgentBaseImageryVisibility] = useState(defaultAgentBaseImageryVisibility);
   const [agentShowFloodDetection, setAgentShowFloodDetection] = useState(true);
   const [agentShowPopulationLayer, setAgentShowPopulationLayer] = useState(false);
   const [agentShowUrbanLayer, setAgentShowUrbanLayer] = useState(false);
@@ -219,6 +225,7 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
     setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentRasterLoading(false);
     setAgentLayerOrder(defaultAgentLayerOrder);
   }, []);
@@ -232,6 +239,7 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
     setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentRasterLoading(false);
     setAgentLayerOrder(defaultAgentLayerOrder);
     setAgentLayerLoading({});
@@ -462,6 +470,7 @@ export const AppProvider = ({ children }) => {
     setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
     setAgentSelectedType(defaultAgentLayerVisibility.agentSelectedType);
     setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
+    setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentShowFloodDetection(defaultAgentLayerVisibility.agentShowFloodDetection);
     setAgentShowPopulationLayer(defaultAgentLayerVisibility.agentShowPopulationLayer);
     setAgentShowUrbanLayer(defaultAgentLayerVisibility.agentShowUrbanLayer);
@@ -477,8 +486,41 @@ export const AppProvider = ({ children }) => {
     selectedAOIRef.current = selectedAOI;
   }, [selectedAOI]);
 
+  const resetAskSession = useCallback(() => {
+    setGptResponse(null);
+    setResultText('');
+    setIsResultVisible(true);
+    setWarning('');
+    setLayerData({
+      water: null,
+      flood: null,
+      lclu: null,
+      populationDensity: null,
+      soilTexture: null,
+      healthCareAccess: null,
+    });
+    setGeeCodeUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return null;
+    });
+  }, []);
+
   useEffect(() => {
     const previousMode = previousAppModeRef.current;
+
+    if (previousMode !== appMode) {
+      if (String(selectedAOI?.source || '').toLowerCase() === 'fishnet') {
+        resetAskSession();
+        setSelectedGridCords(null);
+        setSelectedAOI(null);
+        setDraftAOI(null);
+        setWarning('');
+        previousAppModeRef.current = appMode;
+        return;
+      }
+    }
 
     if (
       previousMode === 'ask'
@@ -501,7 +543,7 @@ export const AppProvider = ({ children }) => {
     }
 
     previousAppModeRef.current = appMode;
-  }, [appMode, agentLayerOrder, businessLayers, selectedAOI, setDraftAOI, setWarning]);
+  }, [appMode, agentLayerOrder, businessLayers, resetAskSession, selectedAOI, setDraftAOI, setWarning]);
 
   useEffect(() => {
     let cancelled = false;
@@ -624,8 +666,6 @@ export const AppProvider = ({ children }) => {
     setLayerOpacity({
       flood: 1,
       water: 1,
-      regimeChange: 1,
-      seasonality: 1,
       lclu: 1,
       populationDensity: 1,
       soilTexture: 1,
@@ -636,16 +676,6 @@ export const AppProvider = ({ children }) => {
   // Update layer data from API response
   const updateLayerData = useCallback((data) => {
     setLayerData({
-      regimeChange: data.eeMapURLRegimeChange ? {
-        mapId: data.eeMapIdRegimeChange,
-        token: data.eeTokenRegimeChange,
-        tileUrl: data.eeMapURLRegimeChange
-      } : null,
-      seasonality: data.eeMapURLSeasonality ? {
-        mapId: data.eeMapIdSeasonality,
-        token: data.eeTokenSeasonality,
-        tileUrl: data.eeMapURLSeasonality
-      } : null,
       water: data.eeMapURLWater ? { 
         mapId: data.eeMapIdWater, 
         token: data.eeTokenWater, 
@@ -676,29 +706,6 @@ export const AppProvider = ({ children }) => {
         token: data.eeTokenHealthCareAccess, 
         tileUrl: data.eeMapURLHealthCareAccess 
       } : null,
-    });
-  }, []);
-
-  const resetAskSession = useCallback(() => {
-    setGptResponse(null);
-    setResultText('');
-    setIsResultVisible(true);
-    setWarning('');
-    setLayerData({
-      seasonality: null,
-      water: null,
-      flood: null,
-      regimeChange: null,
-      lclu: null,
-      populationDensity: null,
-      soilTexture: null,
-      healthCareAccess: null,
-    });
-    setGeeCodeUrl((previousUrl) => {
-      if (previousUrl) {
-        URL.revokeObjectURL(previousUrl);
-      }
-      return null;
     });
   }, []);
 
@@ -892,6 +899,8 @@ export const AppProvider = ({ children }) => {
     setAgentSelectedType,
     agentShowBaseImagery,
     setAgentShowBaseImagery,
+    agentBaseImageryVisibility,
+    setAgentBaseImageryVisibility,
     agentShowFloodDetection,
     setAgentShowFloodDetection,
     agentShowPopulationLayer,

@@ -8,8 +8,8 @@
 .agent-chat-input-card {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
   border: 1px solid #d9dee7;
   border-radius: 16px;
   background: #ffffff;
@@ -91,32 +91,73 @@
 .agent-chat-controls {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+
+.agent-chat-attach-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #5f6f83;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.agent-chat-attach-btn:hover:not(:disabled) {
+  background: #eef2f7;
+  color: #0f172a;
+  transform: translateY(-1px);
+}
+
+.agent-chat-attach-btn:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .agent-chat-send-btn {
   border: none;
   border-radius: 999px;
-  min-width: 76px;
+  width: 38px;
   height: 38px;
-  background: #4a90d9;
+  background: #2563eb;
   color: #ffffff;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 0 16px;
+  padding: 0;
   cursor: pointer;
-  box-shadow: none;
-  transition: background 0.2s ease, transform 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .agent-chat-send-btn:hover:not(:disabled) {
-  background: #5a9fe9;
+  background: #1d4ed8;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.28);
   transform: translateY(-1px);
 }
 
 .agent-chat-send-btn:disabled {
   background: #c7d2e1;
+  color: #ffffff;
   cursor: not-allowed;
+  box-shadow: none;
   transform: none;
+}
+
+.agent-chat-send-btn.is-stop {
+  background: #0f172a;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+}
+
+.agent-chat-send-btn.is-stop:hover:not(:disabled) {
+  background: #1e293b;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.24);
 }
 
 .agent-mention-token {

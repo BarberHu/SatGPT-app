@@ -41,12 +41,6 @@ export const getFloodHotspotMap = async (params) => {
   return response.data;
 };
 
-// Get water regime change map
-export const getWaterRegimeChangeMap = async (params) => {
-  const response = await axios.post(`${API_BASE}/get_water_regime_change_map`, params);
-  return response.data;
-};
-
 // ChatGPT API
 export const sendChatMessage = async (message) => {
   const response = await axios.post(`${API_BASE}/chatGPT`, { message });
@@ -79,7 +73,6 @@ export const createCodeSnippet = (params, dataType) => {
   const geometryExpression = buildEarthEngineGeometryExpression(aoi);
   const historicalCatalog = catalog.historical;
   const hotspotCatalog = catalog.hotspot;
-  const regimeCatalog = catalog.waterRegimeChange;
   const supplementaryCatalog = catalog.supplementary;
   
   let code = `// Google Earth Engine Code for ${dataType} Analysis
@@ -112,12 +105,6 @@ var jrcSurfaceFlood = ee.ImageCollection('${historicalCatalog.jrcYearlyHistory.d
     .sum()
     .clip(AoI);
 
-var Seasonality = ee.Image('${supplementaryCatalog.seasonality.dataset}')
-    .select('${supplementaryCatalog.seasonality.band}')
-    .clip(AoI);
-Seasonality = Seasonality.updateMask(Seasonality.gt(0));
-Seasonality = Seasonality.visualize(${JSON.stringify(supplementaryCatalog.seasonality.visualization)});
-
 var LCLU = ee.ImageCollection('${supplementaryCatalog.landcover.dataset}').first().clip(AoI);
 var PopulationDensity = ee.Image('${supplementaryCatalog.populationDensity.dataset}').clip(AoI);
 PopulationDensity = PopulationDensity.visualize(${JSON.stringify(supplementaryCatalog.populationDensity.visualization)});
@@ -128,7 +115,6 @@ HealthCareAccess = HealthCareAccess.visualize(${JSON.stringify(supplementaryCata
 
 // Visualize
 Map.centerObject(AoI, 10);
-Map.addLayer(Seasonality, {}, 'Seasonality');
 Map.addLayer(jrcSurfaceWater.updateMask(jrcSurfaceWater.gt(0)), 
              ${JSON.stringify(historicalCatalog.water.visualization)}, 'Permanent Water');
 Map.addLayer(jrcSurfaceFlood.updateMask(jrcSurfaceFlood.gt(0)), 
@@ -166,12 +152,6 @@ var floodFrequency = yearsWithWater.divide(year_count);
 var floodFrequencyMap = floodFrequency.where(PermanentWaterLayer.eq(1), 0).selfMask().clip(AoI);
 floodFrequencyMap = floodFrequencyMap.where(floodFrequencyMap.gt(0.9), 0.90);
 
-var Seasonality = ee.Image('${supplementaryCatalog.seasonality.dataset}')
-    .select('${supplementaryCatalog.seasonality.band}')
-    .clip(AoI);
-Seasonality = Seasonality.updateMask(Seasonality.gt(0));
-Seasonality = Seasonality.visualize(${JSON.stringify(supplementaryCatalog.seasonality.visualization)});
-
 var LCLU = ee.ImageCollection('${supplementaryCatalog.landcover.dataset}').first().clip(AoI);
 var PopulationDensity = ee.Image('${supplementaryCatalog.populationDensity.dataset}').clip(AoI);
 PopulationDensity = PopulationDensity.visualize(${JSON.stringify(supplementaryCatalog.populationDensity.visualization)});
@@ -181,44 +161,8 @@ var HealthCareAccess = ee.Image('${supplementaryCatalog.healthCareAccess.dataset
 HealthCareAccess = HealthCareAccess.visualize(${JSON.stringify(supplementaryCatalog.healthCareAccess.visualization)});
 
 Map.centerObject(AoI, 10);
-Map.addLayer(Seasonality, {}, 'Seasonality');
 Map.addLayer(PermanentWaterLayer, ${JSON.stringify(hotspotCatalog.water.visualization)}, 'Permanent Water');
 Map.addLayer(floodFrequencyMap, ${JSON.stringify(hotspotCatalog.floodFrequency.visualization)}, 'Flood Frequency');
-Map.addLayer(LCLU, {}, 'LCLU');
-Map.addLayer(PopulationDensity, {}, 'Population Density');
-Map.addLayer(SoilTexture, {}, 'Soil Texture');
-Map.addLayer(HealthCareAccess, {}, 'Healthcare Access');
-`;
-  } else if (dataType === 'water_regime_change') {
-    code += `// Water Regime Change Analysis using JRC transition classes
-var transition = ee.Image('${regimeCatalog.jrcGlobalSurfaceWater.dataset}')
-    .select('${regimeCatalog.jrcGlobalSurfaceWater.band}')
-    .clip(AoI);
-
-var regimeChange = transition.remap(
-    ${JSON.stringify(regimeCatalog.transitionClasses.sourceValues)},
-    ${JSON.stringify(regimeCatalog.transitionClasses.displayValues)}
-);
-regimeChange = regimeChange.updateMask(regimeChange.gt(0));
-regimeChange = regimeChange.visualize(${JSON.stringify(regimeCatalog.visualization)});
-
-var Seasonality = ee.Image('${supplementaryCatalog.seasonality.dataset}')
-    .select('${supplementaryCatalog.seasonality.band}')
-    .clip(AoI);
-Seasonality = Seasonality.updateMask(Seasonality.gt(0));
-Seasonality = Seasonality.visualize(${JSON.stringify(supplementaryCatalog.seasonality.visualization)});
-
-var LCLU = ee.ImageCollection('${supplementaryCatalog.landcover.dataset}').first().clip(AoI);
-var PopulationDensity = ee.Image('${supplementaryCatalog.populationDensity.dataset}').clip(AoI);
-PopulationDensity = PopulationDensity.visualize(${JSON.stringify(supplementaryCatalog.populationDensity.visualization)});
-var SoilTexture = ee.Image('${supplementaryCatalog.soilTexture.dataset}').select('${supplementaryCatalog.soilTexture.band}').clip(AoI);
-SoilTexture = SoilTexture.visualize(${JSON.stringify(supplementaryCatalog.soilTexture.visualization)});
-var HealthCareAccess = ee.Image('${supplementaryCatalog.healthCareAccess.dataset}').select('${supplementaryCatalog.healthCareAccess.band}').clip(AoI);
-HealthCareAccess = HealthCareAccess.visualize(${JSON.stringify(supplementaryCatalog.healthCareAccess.visualization)});
-
-Map.centerObject(AoI, 10);
-Map.addLayer(Seasonality, {}, 'Seasonality');
-Map.addLayer(regimeChange, {}, 'Water Regime Change');
 Map.addLayer(LCLU, {}, 'LCLU');
 Map.addLayer(PopulationDensity, {}, 'Population Density');
 Map.addLayer(SoilTexture, {}, 'Soil Texture');
@@ -236,7 +180,6 @@ const apiService = {
   getAgentRasterLayers,
   getUnsupervisedMap,
   getFloodHotspotMap,
-  getWaterRegimeChangeMap,
   sendChatMessage,
   getGEEScript,
   getPDF,
