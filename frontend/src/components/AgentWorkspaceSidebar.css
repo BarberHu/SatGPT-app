@@ -56,6 +56,14 @@
   line-height: 1.2;
 }
 
+.agent-workspace-sidebar__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.agent-workspace-sidebar__icon-btn,
 .agent-workspace-sidebar__collapse-btn {
   border: none;
   width: 32px;
@@ -71,6 +79,11 @@
   transition: background 0.2s ease, color 0.2s ease;
 }
 
+.agent-workspace-sidebar__icon-btn {
+  background: transparent;
+}
+
+.agent-workspace-sidebar__icon-btn:hover,
 .agent-workspace-sidebar__collapse-btn:hover {
   background: #cbd5e1;
   color: #0f172a;

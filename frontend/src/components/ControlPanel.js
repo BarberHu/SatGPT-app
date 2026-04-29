@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { ArrowLeftRight } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import AgentPanel from './AgentPanel';
+import { trackUxEvent } from '../utils/analytics';
 
 function ControlPanel() {
   const {
@@ -24,7 +26,13 @@ function ControlPanel() {
     setCountries,
     selectedAOI,
     appMode,
+    chatMode,
+    setAppMode,
+    setChatMode,
+    setChatInput,
+    setWarning,
     resetAskSession,
+    resetAgentSession,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -39,6 +47,27 @@ function ControlPanel() {
 
   const handleCollapsePanel = () => {
     setIsPanelVisible(false);
+  };
+
+  const handleModeToggle = () => {
+    const nextMode = chatMode === 'ask' ? 'agent' : 'ask';
+
+    if (nextMode !== chatMode) {
+      trackUxEvent('mode_switch', {
+        from: chatMode,
+        to: nextMode,
+        entry: 'control_panel_header',
+      });
+
+      if (chatMode === 'agent' || nextMode === 'agent') {
+        resetAgentSession({ preserveSelectedAoi: true });
+      }
+    }
+
+    setChatMode(nextMode);
+    setAppMode(nextMode);
+    setChatInput('');
+    setWarning('');
   };
 
   const handleDataTypeChange = (type) => {
@@ -78,7 +107,7 @@ function ControlPanel() {
     }
   };
 
-  const activeLayerOrder = getAskLayerOrder(dataType);
+  const activeLayerOrder = getAskLayerOrder();
 
   // Get visible layers for dropdown
   const visibleLayers = activeLayerOrder
@@ -100,15 +129,32 @@ function ControlPanel() {
 
   return (
     <div className="panel">
-      <header>
-        <div className="collapse-button" onClick={handleCollapsePanel}>
-          &#187;
-        </div>
+      <header className="control-panel-header">
         <img 
           src="/assets/images/Sat-GPT-Logos-01.png" 
           alt="SatGPT Logo" 
-          style={{ width: '90%' }}
+          className="control-panel-logo"
         />
+        <div className="control-panel-header-actions">
+          <button
+            type="button"
+            className={`panel-mode-toggle-btn ${chatMode === 'agent' ? 'is-agent' : ''}`}
+            onClick={handleModeToggle}
+            title={`Switch to ${chatMode === 'ask' ? 'Agent' : 'Ask'} mode`}
+            aria-label={`Switch to ${chatMode === 'ask' ? 'Agent' : 'Ask'} mode`}
+          >
+            <ArrowLeftRight size={13} strokeWidth={2.1} />
+          </button>
+          <button
+            type="button"
+            className="collapse-button"
+            onClick={handleCollapsePanel}
+            title="Collapse control panel"
+            aria-label="Collapse control panel"
+          >
+            &#187;
+          </button>
+        </div>
       </header>
       
       <hr style={{ margin: '10px 0px 20px 0px' }} />
@@ -142,37 +188,28 @@ function ControlPanel() {
             />
             <span>Inundation Hotspot</span>
           </div>
-          <div>
-            <input
-              type="checkbox"
-              className="select-box"
-              id="waterRegimeChangeCheckbox"
-              checked={dataType === 'waterRegimeChange'}
-              onChange={() => handleDataTypeChange('waterRegimeChange')}
-            />
-            <span>Water Regime Change</span>
-          </div>
         </div>
       </div>
 
       {/* Year Control Slider */}
-      {dataType === 'floodHotspot' && (
-        <div id="yearControlledSlider">
-          <p>Hotspot Duration</p>
-          <div className="trp-range">
-            <label>5 Years</label>
-            <label>25 Years</label>
-          </div>
-          <input
-            type="range"
-            min="5"
-            max="25"
-            value={yearControl}
-            onChange={(e) => setYearControl(parseInt(e.target.value))}
-          />
-          <span className="year-slider-value">{yearControl} Years</span>
+      <div id="yearControlledSlider">
+        <p>Hotspot Duration</p>
+        <div className="trp-range">
+          <label>5 Years</label>
+          <label>25 Years</label>
         </div>
-      )}
+        <input
+          className="year-range-slider"
+          type="range"
+          min="5"
+          max="25"
+          value={yearControl}
+          onChange={(e) => setYearControl(parseInt(e.target.value))}
+          disabled={dataType !== 'floodHotspot'}
+          style={{ '--slider-progress': `${((yearControl - 5) / 20) * 100}%` }}
+        />
+        <span className="year-slider-value">{yearControl} Years</span>
+      </div>
 
       {/* 3D Toggle */}
       <div className="toggle-switcher-css">
@@ -202,22 +239,14 @@ function ControlPanel() {
           <h1>Legend</h1>
         </div>
         <div className="water-legends">
-          {dataType === 'waterRegimeChange' ? (
-            <span style={{ fontSize: '13px', color: '#555' }}>
-              Water regime transition classes are shown in the map legend.
-            </span>
-          ) : (
-            <>
-              <div className="legend-value">
-                <div className="legend-block" style={{ backgroundColor: '#00008B' }}></div>
-                <span>Permanent Water Body</span>
-              </div>
-              <div className="legend-value">
-                <div className="legend-block" style={{ backgroundColor: '#FD0303' }}></div>
-                <span>Inundated Area</span>
-              </div>
-            </>
-          )}
+          <div className="legend-value">
+            <div className="legend-block" style={{ backgroundColor: '#00008B' }}></div>
+            <span>Permanent Water Body</span>
+          </div>
+          <div className="legend-value">
+            <div className="legend-block" style={{ backgroundColor: '#FD0303' }}></div>
+            <span>Inundated Area</span>
+          </div>
         </div>
       </div>
 
@@ -226,7 +255,7 @@ function ControlPanel() {
         <h4>Layers</h4>
         <div style={{ display: 'flex', flexDirection: 'row', paddingLeft: '10px' }}>
           <div style={{ width: '50%' }}>
-            {getLeftColumnLayers(dataType).map((layerName) => (
+            {getLeftColumnLayers().map((layerName) => (
               <LayerCheckbox
                 key={layerName}
                 name={layerName}
@@ -350,8 +379,6 @@ function LayerCheckbox({ name, label, checked, onChange }) {
 
 function getLayerLabel(name) {
   const labels = {
-    regimeChange: 'Regime Change',
-    seasonality: 'Seasonality',
     flood: 'Inundated Area',
     water: 'Permanent Water',
     lclu: 'LCLU',
@@ -362,20 +389,12 @@ function getLayerLabel(name) {
   return labels[name] || name;
 }
 
-function getAskLayerOrder(dataType) {
-  if (dataType === 'waterRegimeChange') {
-    return ['regimeChange', 'seasonality', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-  }
-
-  return ['flood', 'water', 'seasonality', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+function getAskLayerOrder() {
+  return ['flood', 'water', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
 }
 
-function getLeftColumnLayers(dataType) {
-  if (dataType === 'waterRegimeChange') {
-    return ['regimeChange', 'seasonality', 'lclu', 'populationDensity'];
-  }
-
-  return ['flood', 'water', 'seasonality', 'lclu', 'populationDensity'];
+function getLeftColumnLayers() {
+  return ['flood', 'water', 'lclu', 'populationDensity'];
 }
 
 function getRightColumnLayers(dataType) {

@@ -44,6 +44,7 @@ body,
 
 .water .panel {
   border-radius: 2px;
+  min-height: 93vh;
   max-height: 93vh !important;
   background-color: white;
   padding: 15px;
@@ -57,17 +58,68 @@ body,
   padding-bottom: 5px;
 }
 
+.water .control-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.water .control-panel-logo {
+  width: min(250px, calc(100% - 34px));
+  height: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.water .control-panel-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
 .water h1 {
   margin-top: 0;
   margin-bottom: 0;
 }
 
-.water .collapse-button {
-  display: inline;
-  font-size: 20px;
-  float: right;
+.water .collapse-button,
+.water .panel-mode-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #0f172a;
   cursor: pointer;
+  line-height: 1;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.water .collapse-button {
+  font-size: 16px;
   transform: rotate(180deg);
+}
+
+.water .collapse-button:hover,
+.water .panel-mode-toggle-btn:hover {
+  background: #eef2f7;
+  color: #0f172a;
+}
+
+.water .collapse-button:focus-visible,
+.water .panel-mode-toggle-btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.32);
+  outline-offset: 1px;
+}
+
+.water .panel-mode-toggle-btn.is-agent {
+  color: #0f172a;
 }
 
 .water .settings-button {
@@ -870,6 +922,59 @@ p.error {
   margin: 10px 0;
 }
 
+#yearControlledSlider .year-range-slider {
+  background: linear-gradient(
+    to right,
+    #0b6ff3 0%,
+    #0b6ff3 var(--slider-progress),
+    #d9dee3 var(--slider-progress),
+    #d9dee3 100%
+  );
+}
+
+#yearControlledSlider .year-range-slider::-webkit-slider-thumb {
+  background: #0b6ff3;
+}
+
+#yearControlledSlider .year-range-slider::-moz-range-track {
+  height: 10px;
+  background: #d9dee3;
+  border-radius: 5px;
+}
+
+#yearControlledSlider .year-range-slider::-moz-range-progress {
+  height: 10px;
+  background: #0b6ff3;
+  border-radius: 5px;
+}
+
+#yearControlledSlider .year-range-slider::-moz-range-thumb {
+  background: #0b6ff3;
+}
+
+#yearControlledSlider .year-range-slider:disabled {
+  background: #d9dee3;
+  cursor: default;
+}
+
+#yearControlledSlider .year-range-slider:disabled::-webkit-slider-thumb {
+  background: #c6cbd0;
+  cursor: default;
+}
+
+#yearControlledSlider .year-range-slider:disabled::-moz-range-track {
+  background: #d9dee3;
+}
+
+#yearControlledSlider .year-range-slider:disabled::-moz-range-progress {
+  background: #d9dee3;
+}
+
+#yearControlledSlider .year-range-slider:disabled::-moz-range-thumb {
+  background: #c6cbd0;
+  cursor: default;
+}
+
 /*****************************/
 /* Mapbox Controls */
 /*****************************/
@@ -936,10 +1041,6 @@ p.error {
 .satgpt-map-toggle-btn:focus-visible {
   outline: 2px solid rgba(37, 99, 235, 0.35);
   outline-offset: -2px;
-}
-
-.satgpt-map-mode-toggle-btn {
-  color: #475569;
 }
 
 .satgpt-map-toggle-btn.disabled {
@@ -1036,6 +1137,7 @@ a.mapboxgl-ctrl-logo {
 
   .panel {
     max-height: 80vh !important;
+    min-height: auto;
   }
 
   .population-health-soil-container {

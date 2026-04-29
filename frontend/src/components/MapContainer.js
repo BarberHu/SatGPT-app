@@ -14,7 +14,6 @@ import {
   getCatalogMapLayerId,
   isCatalogMapLayerId,
 } from '../utils/catalogLayers';
-import { trackUxEvent } from '../utils/analytics';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -24,7 +23,7 @@ const DEFAULT_ZOOM = 5;
 
 // Custom Mapbox style (same as original project)
 const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
-const ASK_LAYER_NAMES = ['seasonality', 'water', 'flood', 'regimeChange', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
+const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
 const AGENT_RASTER_LAYER_NAMES = ['populationDensity', 'lclu', 'soilTexture', 'healthCareAccess'];
 const AGENT_RASTER_LAYER_IDS = AGENT_RASTER_LAYER_NAMES.map((layerName) => `agent-raster-${layerName}`);
 const AGENT_BASE_LAYER_IDS = [
@@ -192,7 +191,6 @@ function MapContainer() {
   const mapRef = useRef(null);
   const drawRef = useRef(null);
   const utilityControlRef = useRef(null);
-  const modeToggleButtonRef = useRef(null);
   const gridClickButtonRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
   const lastConfirmationFocusRef = useRef(null);
@@ -217,12 +215,8 @@ function MapContainer() {
     isAoiEditing,
     aoiEditorMode,
     setWarning,
-    chatMode,
-    setChatMode,
-    setAppMode,
-    setChatInput,
-    resetAgentSession,
     resetAskSession,
+    resetAgentSession,
     layerData,
     layerVisibility,
     layerOpacity,
@@ -233,8 +227,8 @@ function MapContainer() {
     floodAgentState,
     // Agent control states
     agentSelectedPeriod,
-    agentSelectedType,
     agentShowBaseImagery,
+    agentBaseImageryVisibility,
     agentShowFloodDetection,
     agentShowPopulationLayer,
     agentShowUrbanLayer,
@@ -262,8 +256,6 @@ function MapContainer() {
   const appModeRef = useRef(appMode);
   const layerDataRef = useRef(layerData);
   const syncAgentRasterLayersRef = useRef(null);
-  const chatModeRef = useRef(chatMode);
-  const handleMapModeToggleRef = useRef(null);
 
   agentLayerOrderRef.current = agentLayerOrder;
   agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
@@ -315,21 +307,6 @@ function MapContainer() {
       : (gridClickEnabled ? 'Click map grids to load data.' : 'Map grid click loading is off.');
   }, [gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
 
-  useEffect(() => {
-    const button = modeToggleButtonRef.current;
-    if (!button) {
-      return;
-    }
-
-    const nextMode = chatMode === 'ask' ? 'agent' : 'ask';
-    const currentLabel = chatMode === 'ask' ? 'Ask' : 'Agent';
-    const nextLabel = nextMode === 'ask' ? 'Ask' : 'Agent';
-    const tooltip = `当前模式：${currentLabel}，点击切换到 ${nextLabel}`;
-
-    button.setAttribute('aria-pressed', 'false');
-    button.setAttribute('aria-label', tooltip);
-    button.setAttribute('title', tooltip);
-  }, [chatMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -363,28 +340,6 @@ function MapContainer() {
   useEffect(() => {
     agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
   }, [agentRecommendedLayerData]);
-
-  useEffect(() => {
-    chatModeRef.current = chatMode;
-  }, [chatMode]);
-
-  const handleMapModeToggle = useCallback((mode) => {
-    if (mode !== chatMode) {
-      trackUxEvent('mode_switch', { from: chatMode, to: mode });
-      if (chatMode === 'agent' || mode === 'agent') {
-        resetAgentSession({ preserveSelectedAoi: true });
-      }
-    }
-
-    setChatMode(mode);
-    setAppMode(mode);
-    setChatInput('');
-    setWarning('');
-  }, [chatMode, resetAgentSession, setAppMode, setChatInput, setChatMode, setWarning]);
-
-  useEffect(() => {
-    handleMapModeToggleRef.current = handleMapModeToggle;
-  }, [handleMapModeToggle]);
 
   const removeAskLayers = useCallback((map) => {
     ASK_LAYER_NAMES.forEach((id) => {
@@ -471,18 +426,29 @@ function MapContainer() {
     const styleLayerIds = styleLayers.map((layer) => layer.id);
     const existingLayerIds = new Set(styleLayerIds);
     const catalogLayers = styleLayerIds.filter((id) => isCatalogMapLayerId(id));
+    const orderIndex = new Map((agentLayerOrderRef.current || []).map((id, index) => [id, index]));
+    const sortByLayerOrder = (ids) => [...ids].sort((left, right) => {
+      const leftIndex = orderIndex.has(left) ? orderIndex.get(left) : Number.MAX_SAFE_INTEGER;
+      const rightIndex = orderIndex.has(right) ? orderIndex.get(right) : Number.MAX_SAFE_INTEGER;
+
+      if (leftIndex !== rightIndex) {
+        return leftIndex - rightIndex;
+      }
+
+      return AGENT_BASE_LAYER_IDS.indexOf(left) - AGENT_BASE_LAYER_IDS.indexOf(right);
+    });
     const agentOverlayCandidates = [
       ...(agentLayerOrderRef.current || []),
       ...AGENT_OVERLAY_LAYER_IDS,
       ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
       ...catalogLayers,
-    ];
+    ].filter((id) => !AGENT_BASE_LAYER_IDS.includes(id));
     const agentOverlayLayers = Array.from(new Set(agentOverlayCandidates))
       .filter((id) => existingLayerIds.has(id));
 
     return {
       gridLayers: ['grid_cell-layer'].filter((id) => existingLayerIds.has(id)),
-      baseImageryLayers: AGENT_BASE_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
+      baseImageryLayers: sortByLayerOrder(AGENT_BASE_LAYER_IDS.filter((id) => existingLayerIds.has(id))),
       analysisLayers: [
         ...ASK_LAYER_NAMES.map((layerName) => `${layerName}-layer`),
       ].filter((id) => existingLayerIds.has(id)),
@@ -553,12 +519,23 @@ function MapContainer() {
 
     const bands = getExistingLayerBands(map);
     const withExtra = (items = []) => (items.includes(layerId) ? items : [...items, layerId]);
+    const orderIndex = new Map((agentLayerOrderRef.current || []).map((id, index) => [id, index]));
+    const orderBaseLayers = (ids = []) => Array.from(new Set(ids)).sort((left, right) => {
+      const leftIndex = orderIndex.has(left) ? orderIndex.get(left) : Number.MAX_SAFE_INTEGER;
+      const rightIndex = orderIndex.has(right) ? orderIndex.get(right) : Number.MAX_SAFE_INTEGER;
+
+      if (leftIndex !== rightIndex) {
+        return leftIndex - rightIndex;
+      }
+
+      return AGENT_BASE_LAYER_IDS.indexOf(left) - AGENT_BASE_LAYER_IDS.indexOf(right);
+    });
 
     const overlayCandidates = [
       ...(agentLayerOrderRef.current || []),
       ...AGENT_OVERLAY_LAYER_IDS,
       ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
-    ];
+    ].filter((id) => !AGENT_BASE_LAYER_IDS.includes(id));
     const overlayOrdered = Array.from(new Set(
       isCatalogMapLayerId(layerId) || AGENT_OVERLAY_LAYER_IDS.includes(layerId)
         ? [...overlayCandidates, layerId]
@@ -575,7 +552,7 @@ function MapContainer() {
       ...bands.gridLayers.slice().reverse(),
       ...(
         AGENT_BASE_LAYER_IDS.includes(layerId)
-          ? withExtra(bands.baseImageryLayers).slice().reverse()
+          ? orderBaseLayers(withExtra(bands.baseImageryLayers)).slice().reverse()
           : bands.baseImageryLayers.slice().reverse()
       ),
     ];
@@ -695,6 +672,7 @@ function MapContainer() {
   }, [
     agentLayerOrder,
     agentRecommendedLayerVisibility,
+    agentBaseImageryVisibility,
     agentShowBaseImagery,
     agentShowFloodDetection,
     agentShowPopulationLayer,
@@ -793,25 +771,6 @@ function MapContainer() {
           const container = document.createElement('div');
           container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group satgpt-map-utility-group';
 
-          const modeButton = document.createElement('button');
-          modeButton.type = 'button';
-          modeButton.className = 'satgpt-map-toggle-btn satgpt-map-mode-toggle-btn';
-          modeButton.innerHTML = '<i class="fa fa-exchange" aria-hidden="true"></i>';
-          modeButton.setAttribute('aria-label', '切换 Ask / Agent 模式');
-          modeButton.onclick = (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const nextMode = chatModeRef.current === 'ask' ? 'agent' : 'ask';
-            handleMapModeToggleRef.current?.(nextMode);
-          };
-
-          const nextMode = chatModeRef.current === 'ask' ? 'agent' : 'ask';
-          const currentLabel = chatModeRef.current === 'ask' ? 'Ask' : 'Agent';
-          const nextLabel = nextMode === 'ask' ? 'Ask' : 'Agent';
-          const tooltip = `当前模式：${currentLabel}，点击切换到 ${nextLabel}`;
-          modeButton.setAttribute('title', tooltip);
-          modeButton.setAttribute('aria-label', tooltip);
-
           const gridButton = document.createElement('button');
           gridButton.type = 'button';
           gridButton.className = 'satgpt-map-toggle-btn';
@@ -834,20 +793,14 @@ function MapContainer() {
           gridButton.classList.toggle('disabled', disabled);
           gridButton.setAttribute('aria-pressed', gridClickEnabledRef.current ? 'true' : 'false');
 
-          container.appendChild(modeButton);
           container.appendChild(gridButton);
-          modeToggleButtonRef.current = modeButton;
           gridClickButtonRef.current = gridButton;
           return container;
         },
         onRemove() {
-          if (modeToggleButtonRef.current) {
-            modeToggleButtonRef.current.onclick = null;
-          }
           if (gridClickButtonRef.current) {
             gridClickButtonRef.current.onclick = null;
           }
-          modeToggleButtonRef.current = null;
           gridClickButtonRef.current = null;
         },
       };
@@ -877,7 +830,7 @@ function MapContainer() {
         mapInitialized.current = false;
       }
     };
-  }, [loadGridLayer, reconcileLayerOrder, resetAgentSession, setGridClickEnabled, setMapInstance]);
+  }, [loadGridLayer, reconcileLayerOrder, setGridClickEnabled, setMapInstance]);
 
   const fitAoiBounds = useCallback((aoi, { force = false, padding = 50, duration = 600 } = {}) => {
     const map = mapRef.current;
@@ -1470,29 +1423,34 @@ function MapContainer() {
     setAgentTileError(null);
 
     const periodKey = agentSelectedPeriod;
-    const typeKey = agentSelectedType;
     const periodData = agentImagery[periodKey];
+    const visibleBaseTypes = ['sentinel2', 'sentinel1'].filter((type) => (
+      agentBaseImageryVisibility?.[type]
+      && periodData?.[type]?.tile_url
+    ));
 
-    if (!periodData?.[typeKey]?.tile_url) return;
+    if (!visibleBaseTypes.length) return;
 
-    const sourceId = `agent-${typeKey === 'sentinel2' ? 's2' : 's1'}-${periodKey.replace('_date', '')}`;
-    map.addSource(sourceId, {
-      type: 'raster',
-      tiles: [periodData[typeKey].tile_url],
-      tileSize: 256,
+    visibleBaseTypes.forEach((typeKey) => {
+      const sourceId = `agent-${typeKey === 'sentinel2' ? 's2' : 's1'}-${periodKey.replace('_date', '')}`;
+      map.addSource(sourceId, {
+        type: 'raster',
+        tiles: [periodData[typeKey].tile_url],
+        tileSize: 256,
+      });
+      const imageryLayerDefinition = {
+        id: sourceId,
+        type: 'raster',
+        source: sourceId,
+        paint: { 'raster-opacity': 1 },
+      };
+      const imageryBeforeId = getInsertBeforeId(map, sourceId);
+      if (imageryBeforeId) {
+        map.addLayer(imageryLayerDefinition, imageryBeforeId);
+      } else {
+        map.addLayer(imageryLayerDefinition);
+      }
     });
-    const imageryLayerDefinition = {
-      id: sourceId,
-      type: 'raster',
-      source: sourceId,
-      paint: { 'raster-opacity': 1 },
-    };
-    const imageryBeforeId = getInsertBeforeId(map, sourceId);
-    if (imageryBeforeId) {
-      map.addLayer(imageryLayerDefinition, imageryBeforeId);
-    } else {
-      map.addLayer(imageryLayerDefinition);
-    }
     reconcileLayerOrder(map);
 
     // Track tile errors (only on base imagery since it's the primary GEE layer)
@@ -1505,14 +1463,22 @@ function MapContainer() {
     };
     map.on('error', onTileError);
 
-    setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': true }));
+    const loadingUpdates = visibleBaseTypes.reduce((updates, typeKey) => ({
+      ...updates,
+      [`base-imagery-${typeKey}`]: true,
+    }), { 'base-imagery': true });
+    setAgentLayerLoading(prev => ({ ...prev, ...loadingUpdates }));
 
     let resolved = false;
     const finish = (isTimeout) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timeout);
-      setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
+      const nextLoadingUpdates = visibleBaseTypes.reduce((updates, typeKey) => ({
+        ...updates,
+        [`base-imagery-${typeKey}`]: false,
+      }), { 'base-imagery': false });
+      setAgentLayerLoading(prev => ({ ...prev, ...nextLoadingUpdates }));
       if (tileErrorCount > 0) {
         console.warn(`${tileErrorCount} tile(s) failed to load.`);
         setAgentTileError({
@@ -1531,12 +1497,16 @@ function MapContainer() {
 
     return () => {
       resolved = true;
-      setAgentLayerLoading(prev => ({ ...prev, 'base-imagery': false }));
+      const nextLoadingUpdates = visibleBaseTypes.reduce((updates, typeKey) => ({
+        ...updates,
+        [`base-imagery-${typeKey}`]: false,
+      }), { 'base-imagery': false });
+      setAgentLayerLoading(prev => ({ ...prev, ...nextLoadingUpdates }));
       map.off('error', onTileError);
       map.off('idle', finish);
       clearTimeout(timeout);
     };
-  }, [agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, agentSelectedType, getInsertBeforeId, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
+  }, [agentBaseImageryVisibility, agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, getInsertBeforeId, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
 
   // ========== Effect B: Flood Detection Overlay ==========
   useEffect(() => {

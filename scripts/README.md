@@ -14,9 +14,24 @@
   - Treat the repository root `.env` as the actual runtime config file.
   - Read Agent / Runtime / Frontend ports from the root `.env`.
   - Sync public `REACT_APP_*` variables from the root `.env` into `frontend\.env.local`.
+  - Fail fast when Agent / Runtime / Frontend ports are already occupied, and print the owning PID / command.
   - Start FastAPI agent on `8000`.
   - Start CopilotKit runtime on `5000`.
   - Start React frontend on `3000`.
+
+## Port conflicts
+
+The local development chain is:
+
+`React frontend (3000) -> CopilotKit runtime (5000) -> FastAPI agent (8000)`
+
+If one of these ports is already occupied, do not keep launching another copy of the app. Stop the owning process first, or change the matching port in the repository root `.env`:
+
+- `FRONTEND_PORT` for React
+- `RUNTIME_PORT` for CopilotKit runtime
+- `AGENT_PORT` for FastAPI agent
+
+After changing ports, rerun `scripts\windows\start_windows.bat` so `frontend\.env.local` is regenerated with the correct proxy targets.
 
 ## Recommended onboarding flow
 

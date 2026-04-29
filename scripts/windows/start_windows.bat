@@ -72,10 +72,8 @@ if "%DRY_RUN%"=="1" (
 )
 
 echo [1/3] Checking port usage...
-for %%P in (%AGENT_PORT% %RUNTIME_PORT% %FRONTEND_PORT%) do (
-    powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort %%P -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>&1
-    if not errorlevel 1 echo Warning: Port %%P is already in use.
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%check_ports_available.ps1" -Ports "%AGENT_PORT%,%RUNTIME_PORT%,%FRONTEND_PORT%"
+if errorlevel 1 exit /b 1
 
 echo.
 echo [2/3] Starting FastAPI agent on %AGENT_PORT%...

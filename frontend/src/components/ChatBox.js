@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, getWaterRegimeChangeMap, createCodeSnippet } from '../services/api';
+import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams } from '../utils/aoi';
 import { CopilotChat } from "@copilotkit/react-ui";
 import { useCopilotContext } from "@copilotkit/react-core";
@@ -25,12 +25,6 @@ const SUGGESTIONS_HOTSPOT = [
   'Tell me about the 2010 to 2020 Bangkok floods',
   'Provide information regarding floods occurring in North India between 2015 and 2021',
   'Inform me about the floods in Jakarta spanning from 2007 to 2020',
-];
-
-const SUGGESTIONS_REGIME_CHANGE = [
-  'Show long-term water regime changes around Tonle Sap',
-  'Diagnose historical water regime transitions in the Nile Delta',
-  'Map permanent and seasonal water changes for this AOI',
 ];
 
 const AGENT_MENTION_INSTRUCTIONS = `
@@ -88,8 +82,6 @@ function ChatBox() {
   const suggestions =
     dataType === 'floodHotspot'
       ? SUGGESTIONS_HOTSPOT
-      : dataType === 'waterRegimeChange'
-      ? SUGGESTIONS_REGIME_CHANGE
       : SUGGESTIONS;
 
   const handleInputChange = (e) => {
@@ -118,7 +110,7 @@ function ChatBox() {
   };
 
   const handleSubmit = async () => {
-    if (!chatInput.trim() && dataType !== 'waterRegimeChange') {
+    if (!chatInput.trim()) {
       setError('* Please Enter the Valid Prompt to Proceed');
       return;
     }
@@ -133,30 +125,6 @@ function ChatBox() {
     setError('');
 
     try {
-      if (dataType === 'waterRegimeChange') {
-        const params = buildAskMapRequestParams(selectedAOI, {
-          time_start: '1984-03-16',
-          time_end: '2021-12-31',
-        });
-
-        const mapData = await getWaterRegimeChangeMap(params);
-        updateLayerData(mapData);
-        setGptResponse(null);
-        setResultText('Water Regime Change diagnoses long-term hydrologic transition using the JRC Global Surface Water transition classes. It highlights where water has become more permanent, more seasonal, or has been lost over the long-term record.');
-
-        const codeSnippet = createCodeSnippet(params, 'water_regime_change');
-        const blob = new Blob([codeSnippet], { type: 'text/javascript' });
-        const nextUrl = URL.createObjectURL(blob);
-        setGeeCodeUrl((previousUrl) => {
-          if (previousUrl) {
-            URL.revokeObjectURL(previousUrl);
-          }
-          return nextUrl;
-        });
-        setChatInput('');
-        return;
-      }
-
       const gptResult = await sendChatMessage(chatInput);
       const parsedResponse = JSON.parse(gptResult.message);
       const responseData = parsedResponse.response[0];
@@ -631,30 +599,6 @@ function ChatBox() {
         {error && <p className="error">{error}</p>}
       </div>
 
-      <div className="chat-bottom-toolbar">
-        <div className="toolbar-left">
-          <button className="toolbar-icon-btn" title="Download code">
-            <i className="fa fa-arrow-down"></i>
-          </button>
-        </div>
-        <div className="toolbar-right">
-          <div className="mode-toggle">
-            <button
-              className={`mode-toggle-btn ${chatMode === 'ask' ? 'active' : ''}`}
-              onClick={() => handleModeToggle('ask')}
-            >
-              Ask
-            </button>
-            <button
-              className={`mode-toggle-btn ${chatMode === 'agent' ? 'active' : ''}`}
-              onClick={() => handleModeToggle('agent')}
-            >
-              Agent
-            </button>
-          </div>
-        </div>
-      </div>
-
       <style jsx="true">{`
         .chat-box-gemini {
           display: flex;
@@ -713,66 +657,6 @@ function ChatBox() {
         .send-btn-gemini:disabled {
           background: #ccc;
           cursor: not-allowed;
-        }
-        .chat-bottom-toolbar {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 4px 8px;
-          margin: 0 8px 6px 8px;
-          background: transparent;
-          border-radius: 20px;
-        }
-        .toolbar-left, .toolbar-right {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-        .toolbar-icon-btn {
-          width: 28px;
-          height: 28px;
-          border: none;
-          background: transparent;
-          color: #666;
-          cursor: pointer;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 12px;
-          transition: all 0.2s;
-        }
-        .toolbar-icon-btn:hover {
-          background: #e8e8e8;
-          color: #333;
-        }
-        .mode-toggle {
-          display: flex;
-          align-items: center;
-          background: #e8e8e8;
-          border-radius: 16px;
-          padding: 2px;
-          gap: 0;
-        }
-        .mode-toggle-btn {
-          padding: 4px 14px;
-          border: none;
-          background: transparent;
-          color: #888;
-          font-size: 12px;
-          font-weight: 500;
-          cursor: pointer;
-          border-radius: 14px;
-          transition: all 0.25s ease;
-          line-height: 1.4;
-        }
-        .mode-toggle-btn:hover {
-          color: #555;
-        }
-        .mode-toggle-btn.active {
-          background: #ffffff;
-          color: #333;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.12);
         }
         #suggestionsBox {
           background: #fafafa;
