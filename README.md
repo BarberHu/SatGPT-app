@@ -6,7 +6,7 @@ An intelligent flood event analysis platform integrating AI-powered chatbot, sat
 
 ## 🎬 Demo
 
-https://github.com/BarberHu/SatGPT-app/issues/2#issue-4355010361
+https://github.com/user-attachments/assets/87be7cf0-fb08-4b6c-b1f1-3ef6008f5eb5
 
 ## 📋 Overview
 
