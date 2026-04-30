@@ -43,8 +43,7 @@ class GEEService:
     
     def __init__(self):
         self.initialized = False
-        # 支持两种环境变量名: GEE_PROJECT_ID 或 PROJECT_ID
-        self.project_id = os.getenv("GEE_PROJECT_ID") or os.getenv("PROJECT_ID", "flood-agent")
+        self.project_id = os.getenv("GEE_PROJECT_ID", "flood-agent")
         self._initialize_ee()
     
     def _initialize_ee(self):

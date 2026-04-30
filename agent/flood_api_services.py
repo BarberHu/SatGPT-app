@@ -53,18 +53,15 @@ def get_bounds_from_ring(coordinates: list[list[float]]) -> Dict[str, float]:
     }
 
 
-def build_aoi_from_legacy_coords(coordinates: list[list[float]]) -> Dict[str, Any]:
+def build_aoi_from_coordinate_ring(coordinates: list[list[float]]) -> Dict[str, Any]:
     return {
         "version": 1,
-        "source": "legacy_polygon",
+        "source": "coordinate_ring",
         "kind": "polygon",
         "bounds": get_bounds_from_ring(coordinates),
         "geojson": {
             "type": "Polygon",
             "coordinates": [coordinates],
-        },
-        "legacy": {
-            "AoI_cords": coordinates,
         },
     }
 
@@ -93,11 +90,11 @@ def parse_aoi_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(serialized_aoi, dict):
         return serialized_aoi
 
-    legacy_coords = _deserialize_payload_value(payload.get("AoI_cords"))
-    if isinstance(legacy_coords, list) and legacy_coords:
-        return build_aoi_from_legacy_coords(legacy_coords)
+    coordinate_ring = _deserialize_payload_value(payload.get("coordinates"))
+    if isinstance(coordinate_ring, list) and coordinate_ring:
+        return build_aoi_from_coordinate_ring(coordinate_ring)
 
-    raise ValueError("Missing AOI definition. Expected 'aoi' or legacy 'AoI_cords'.")
+    raise ValueError("Missing AOI definition. Expected 'aoi' or 'coordinates'.")
 
 
 def aoi_to_ee_geometry(aoi: Dict[str, Any]) -> ee.Geometry:
@@ -114,11 +111,7 @@ def aoi_to_ee_geometry(aoi: Dict[str, Any]) -> ee.Geometry:
             bounds["north"],
         ])
 
-    legacy_coords = (aoi.get("legacy") or {}).get("AoI_cords")
-    if legacy_coords:
-        return ee.Geometry.Polygon(legacy_coords)
-
-    raise ValueError("AOI payload does not include geojson, bounds, or legacy coordinates.")
+    raise ValueError("AOI payload does not include geojson or bounds.")
 
 
 def visualize_image(image: ee.Image, vis_params: Dict[str, Any]) -> ee.Image:
@@ -436,14 +429,14 @@ def get_water_regime_change_map_payload(payload: Dict[str, Any]) -> Dict[str, An
 
 
 def _configure_openai() -> None:
-    openai.api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
+    openai.api_key = os.getenv("OPENAI_API_KEY")
     api_base = os.getenv("OPENAI_API_BASE")
     if api_base:
         openai.api_base = api_base
 
 
 def _create_chat_completion(model: str, messages: list[dict[str, str]], functions: Optional[list[dict[str, Any]]] = None):
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     api_base = os.getenv("OPENAI_API_BASE")
 
     if OpenAI is not None:
@@ -487,13 +480,13 @@ def _extract_function_call_arguments(completion: Any) -> Optional[str]:
             return function.arguments
 
     if isinstance(message, dict):
-        legacy_function_call = message.get("function_call") or {}
-        if legacy_function_call.get("arguments"):
-            return legacy_function_call["arguments"]
+        function_call = message.get("function_call") or {}
+        if function_call.get("arguments"):
+            return function_call["arguments"]
 
-        legacy_tool_calls = message.get("tool_calls") or []
-        if legacy_tool_calls:
-            function = legacy_tool_calls[0].get("function") or {}
+        tool_calls = message.get("tool_calls") or []
+        if tool_calls:
+            function = tool_calls[0].get("function") or {}
             if function.get("arguments"):
                 return function["arguments"]
 

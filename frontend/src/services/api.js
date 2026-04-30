@@ -1,6 +1,6 @@
 import axios from 'axios';
 import layerCatalog from '../config/layerCatalog.json';
-import { buildEarthEngineGeometryExpression, buildAoiFromLegacyCoords, parseSerializedAoi } from '../utils/aoi';
+import { buildEarthEngineGeometryExpression, buildAoiFromCoordinateRing, parseSerializedAoi } from '../utils/aoi';
 import { resolveBrowserEndpoint } from '../utils/runtimeUrls';
 
 // API Base URL - in development, the proxy in package.json handles routing
@@ -8,19 +8,19 @@ const API_BASE = resolveBrowserEndpoint(process.env.REACT_APP_API_URL, '');
 
 // Health check
 export const healthCheck = async () => {
-  const response = await axios.get(`${API_BASE}/flask-health-check`);
+  const response = await axios.get(`${API_BASE}/health`);
   return response.data;
 };
 
 // Get default water map
 export const getDefaultMap = async () => {
-  const response = await axios.get(`${API_BASE}/get_default`);
+  const response = await axios.get(`${API_BASE}/api/maps/default`);
   return response.data;
 };
 
 // Get historical map data
 export const getHistoricalMap = async (params) => {
-  const response = await axios.post(`${API_BASE}/get_historical_map`, params);
+  const response = await axios.post(`${API_BASE}/api/maps/historical`, params);
   return response.data;
 };
 
@@ -31,31 +31,31 @@ export const getAgentRasterLayers = async (params) => {
 
 // Get unsupervised classification map
 export const getUnsupervisedMap = async (params) => {
-  const response = await axios.post(`${API_BASE}/get_unsupervised_map`, params);
+  const response = await axios.post(`${API_BASE}/api/maps/unsupervised`, params);
   return response.data;
 };
 
 // Get flood hotspot map
 export const getFloodHotspotMap = async (params) => {
-  const response = await axios.post(`${API_BASE}/get_flood_hotspot_map`, params);
+  const response = await axios.post(`${API_BASE}/api/maps/flood-hotspot`, params);
   return response.data;
 };
 
 // ChatGPT API
 export const sendChatMessage = async (message) => {
-  const response = await axios.post(`${API_BASE}/chatGPT`, { message });
+  const response = await axios.post(`${API_BASE}/api/chat`, { message });
   return response.data;
 };
 
 // Get GEE Script
 export const getGEEScript = async (message) => {
-  const response = await axios.post(`${API_BASE}/get_script`, { message });
+  const response = await axios.post(`${API_BASE}/api/scripts/gee`, { message });
   return response.data;
 };
 
 // Get PDF
 export const getPDF = async () => {
-  const response = await axios.get(`${API_BASE}/get_pdf`, { responseType: 'blob' });
+  const response = await axios.get(`${API_BASE}/api/scripts/pdf`, { responseType: 'blob' });
   return response.data;
 };
 
@@ -64,7 +64,7 @@ export const createCodeSnippet = (params, dataType) => {
   const catalog = layerCatalog.basic;
   const aoi =
     parseSerializedAoi(params.aoi) ||
-    buildAoiFromLegacyCoords(JSON.parse(params.AoI_cords || '[]'));
+    buildAoiFromCoordinateRing(JSON.parse(params.coordinates || '[]'));
 
   if (!aoi) {
     return '';

@@ -34,11 +34,9 @@ function Get-EnvValue {
 
 $values = [ordered]@{
     SATGPT_PUBLIC_HOST = Get-EnvValue -Names @("SATGPT_PUBLIC_HOST") -Default "localhost"
-    FLASK_RUN_HOST = Get-EnvValue -Names @("FLASK_RUN_HOST") -Default "0.0.0.0"
-    FLASK_RUN_PORT = Get-EnvValue -Names @("FLASK_RUN_PORT") -Default "5001"
-    AGENT_HOST = Get-EnvValue -Names @("AGENT_HOST", "HOST") -Default "0.0.0.0"
-    AGENT_PORT = Get-EnvValue -Names @("AGENT_PORT", "PORT") -Default "8000"
-    AGENT_DEBUG = Get-EnvValue -Names @("AGENT_DEBUG", "DEBUG") -Default "True"
+    AGENT_HOST = Get-EnvValue -Names @("AGENT_HOST") -Default "0.0.0.0"
+    AGENT_PORT = Get-EnvValue -Names @("AGENT_PORT") -Default "8000"
+    AGENT_DEBUG = Get-EnvValue -Names @("AGENT_DEBUG") -Default "True"
     RUNTIME_HOST = Get-EnvValue -Names @("RUNTIME_HOST") -Default "0.0.0.0"
     RUNTIME_PORT = Get-EnvValue -Names @("RUNTIME_PORT") -Default "5000"
     FRONTEND_HOST = Get-EnvValue -Names @("FRONTEND_HOST") -Default "0.0.0.0"

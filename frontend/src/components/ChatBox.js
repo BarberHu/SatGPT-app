@@ -1,6 +1,6 @@
 /**
  * ChatBox Component
- * Supports two modes: Ask (traditional Flask API) and Agent (CopilotKit)
+ * Supports two modes: Ask (FastAPI) and Agent (CopilotKit)
  * Left side: vertical mode toggle button
  * Right side: chat input or agent chat interface
  */

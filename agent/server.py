@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import Response
 from pydantic import BaseModel
 from pydantic.warnings import UnsupportedFieldAttributeWarning
 import uvicorn
@@ -28,7 +28,7 @@ from gee_code_generator import generate_flood_gee_code
 from flood_dataset_service import build_confirmation_context, renderer
 from flood_aoi import search_location_candidates
 from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
-from legacy_flask_compat import (
+from flood_api_services import (
     build_script_pdf,
     get_agent_raster_layers_payload,
     get_chatgpt_response,
@@ -279,11 +279,11 @@ class BusinessLayerResolveRequest(BaseModel):
     layer_ids: list[str]
 
 
-class LegacyChatRequest(BaseModel):
+class ChatRequest(BaseModel):
     message: str
 
 
-async def _get_legacy_payload(request: Request) -> dict:
+async def _get_request_payload(request: Request) -> dict:
     if request.method == "POST":
         payload = await request.json()
         return payload if isinstance(payload, dict) else {}
@@ -299,7 +299,7 @@ def _ensure_gee_ready() -> None:
 
 
 def _ensure_openai_ready() -> None:
-    if not (os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")):
+    if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(
             status_code=503,
             detail="OpenAI API key is not configured.",
@@ -328,13 +328,8 @@ async def health():
     }
 
 
-@app.get("/flask-health-check", response_class=PlainTextResponse)
-async def legacy_flask_health():
-    return "healthy"
-
-
-@app.get("/get_default")
-async def legacy_get_default():
+@app.get("/api/maps/default")
+async def get_default_map():
     _ensure_gee_ready()
     try:
         return get_default_map_payload()
@@ -342,38 +337,38 @@ async def legacy_get_default():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.api_route("/get_unsupervised_map", methods=["GET", "POST"])
-async def legacy_get_unsupervised_map(request: Request):
+@app.post("/api/maps/unsupervised")
+async def get_unsupervised_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_unsupervised_map_payload(await _get_legacy_payload(request))
+        return get_unsupervised_map_payload(await _get_request_payload(request))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.api_route("/get_historical_map", methods=["GET", "POST"])
-async def legacy_get_historical_map(request: Request):
+@app.post("/api/maps/historical")
+async def get_historical_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_historical_map_payload(await _get_legacy_payload(request))
+        return get_historical_map_payload(await _get_request_payload(request))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.api_route("/get_flood_hotspot_map", methods=["GET", "POST"])
-async def legacy_get_flood_hotspot_map(request: Request):
+@app.post("/api/maps/flood-hotspot")
+async def get_flood_hotspot_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_flood_hotspot_map_payload(await _get_legacy_payload(request))
+        return get_flood_hotspot_map_payload(await _get_request_payload(request))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.api_route("/get_water_regime_change_map", methods=["GET", "POST"])
-async def legacy_get_water_regime_change_map(request: Request):
+@app.post("/api/maps/water-regime-change")
+async def get_water_regime_change_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_water_regime_change_map_payload(await _get_legacy_payload(request))
+        return get_water_regime_change_map_payload(await _get_request_payload(request))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -382,13 +377,13 @@ async def legacy_get_water_regime_change_map(request: Request):
 async def get_agent_raster_layers(request: Request):
     _ensure_gee_ready()
     try:
-        return get_agent_raster_layers_payload(await _get_legacy_payload(request))
+        return get_agent_raster_layers_payload(await _get_request_payload(request))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/chatGPT")
-async def legacy_chatgpt(request: LegacyChatRequest):
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
     _ensure_openai_ready()
     chatgpt_response = get_chatgpt_response(request.message)
     if not chatgpt_response:
@@ -396,8 +391,8 @@ async def legacy_chatgpt(request: LegacyChatRequest):
     return {"message": chatgpt_response}
 
 
-@app.post("/get_script")
-async def legacy_get_script(request: LegacyChatRequest):
+@app.post("/api/scripts/gee")
+async def get_script(request: ChatRequest):
     _ensure_openai_ready()
     code_snippet = get_code_response(request.message)
     if not code_snippet:
@@ -406,8 +401,8 @@ async def legacy_get_script(request: LegacyChatRequest):
     return {"message": code_snippet}
 
 
-@app.get("/get_pdf")
-async def legacy_get_pdf():
+@app.get("/api/scripts/pdf")
+async def get_pdf():
     latest_script = get_latest_script()
     if not latest_script:
         raise HTTPException(status_code=500, detail="No generated script is available.")
@@ -730,9 +725,9 @@ async def update_state(state: FloodState):
 if __name__ == "__main__":
     import uvicorn
     
-    host = os.getenv("AGENT_HOST") or os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("AGENT_PORT") or os.getenv("PORT", 8000))
-    debug = (os.getenv("AGENT_DEBUG") or os.getenv("DEBUG", "True")).lower() == "true"
+    host = os.getenv("AGENT_HOST", "0.0.0.0")
+    port = int(os.getenv("AGENT_PORT", 8000))
+    debug = os.getenv("AGENT_DEBUG", "True").lower() == "true"
     
     print(f"[INFO] Flood agent listening at http://{host}:{port}")
     print(f"[INFO] API docs: http://{host}:{port}/docs")
