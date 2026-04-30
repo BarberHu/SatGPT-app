@@ -5,9 +5,6 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "ROOT_DIR=%%~fI"
 set "VENV_DIR=%ROOT_DIR%\flood-venv"
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
-set "DRY_RUN=0"
-
-if /I "%~1"=="--dry-run" set "DRY_RUN=1"
 
 echo ==========================================
 echo        SatGPT Windows Start Script
@@ -63,34 +60,21 @@ if not "%SATGPT_HTTP_PROXY%"=="" (
     echo.
 )
 
-echo Syncing frontend public environment from root .env...
-if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
-) else (
-    powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
-    if errorlevel 1 exit /b 1
-)
-
 echo [1/3] Checking port usage...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%check_ports_available.ps1" -Ports "%AGENT_PORT%,%RUNTIME_PORT%,%FRONTEND_PORT%"
 if errorlevel 1 exit /b 1
 
+echo Syncing frontend public environment from root .env...
+powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
+if errorlevel 1 exit /b 1
+
 echo.
 echo [2/3] Starting FastAPI agent on %AGENT_PORT%...
-if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" server.py
-) else (
-    start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" server.py
-)
+start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" server.py
 
 echo [3/3] Starting Node services...
-if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& call npm start
-    echo DRY-RUN: start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
-) else (
-    start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& call npm start
-    start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
-)
+start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& call npm start
+start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
 
 echo.
 echo ==========================================

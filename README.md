@@ -6,7 +6,7 @@ An intelligent flood event analysis platform integrating AI-powered chatbot, sat
 
 ## 🎬 Demo
 
-https://github.com/user-attachments/assets/ad1d281f-39ff-4202-bfe2-ebb5150994da
+https://github.com/BarberHu/SatGPT-app/issues/2#issue-4355010361
 
 ## 📋 Overview
 
@@ -56,7 +56,6 @@ SatGPT-app/
 python -m venv flood-venv
 .\flood-venv\Scripts\activate        # Windows
 pip install -r requirements.txt
-pip install -r agent/requirements.txt
 
 # 2. Frontend dependencies
 cd frontend && npm install && cd ..
