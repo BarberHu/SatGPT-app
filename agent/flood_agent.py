@@ -27,7 +27,7 @@ from langgraph.types import Command, interrupt
 from state import FloodAgentState
 from prompts import SYSTEM_PROMPT, FLOOD_REPORT_TEMPLATE, REPORT_GENERATION_PROMPT
 from gee_code_generator import generate_flood_gee_code
-from flood_aoi import aoi_to_legacy_fields
+from flood_aoi import aoi_to_geo_fields
 from flood_dataset_service import build_confirmation_context
 from mention_context import resolve_mention_context
 from project_env import load_project_env
@@ -879,7 +879,7 @@ async def processing_node(
     geo_data = existing_geo_data
 
     if confirmed_aoi:
-        geo_data.update(aoi_to_legacy_fields(confirmed_aoi))
+        geo_data.update(aoi_to_geo_fields(confirmed_aoi))
     else:
         if state.get("coordinates") is not None:
             geo_data["coordinates"] = state.get("coordinates")

@@ -214,9 +214,6 @@ export const buildAoiFromGeoJSON = (input, overrides = {}) => {
       },
       geometry,
     },
-    legacy: {
-      AoI_cords: geometry.type === 'Polygon' ? geometry.coordinates[0] : [],
-    },
   };
 };
 
@@ -279,7 +276,7 @@ export const getDrawFeaturesFromAoi = (aoi) => {
   return [];
 };
 
-export const buildAoiFromDrawFeatureLegacy = (feature, overrides = {}) => {
+export const buildAoiFromDrawFeatureGeometry = (feature, overrides = {}) => {
   if (!feature || typeof feature !== 'object') {
     return null;
   }
@@ -368,20 +365,17 @@ export const buildAoiFromGridSelection = (coordinates, overrides = {}) => {
         coordinates: [ring],
       },
     },
-    legacy: {
-      AoI_cords: ring,
-    },
   };
 };
 
-export const buildAoiFromLegacyCoords = (coordinates) => {
+export const buildAoiFromCoordinateRing = (coordinates) => {
   if (!Array.isArray(coordinates)) {
     return null;
   }
 
   return buildAoiFromGridSelection(coordinates, {
-    source: 'legacy_polygon',
-    label: 'Legacy polygon selection',
+    source: 'coordinate_ring',
+    label: 'Polygon selection',
   });
 };
 
@@ -444,13 +438,6 @@ export const getAoiGeometry = (aoi) => {
     return parsed.geojson.type === 'Feature' ? parsed.geojson.geometry || null : parsed.geojson;
   }
 
-  if (parsed.legacy?.AoI_cords) {
-    return {
-      type: 'Polygon',
-      coordinates: [closePolygonRing(parsed.legacy.AoI_cords)],
-    };
-  }
-
   return null;
 };
 
@@ -472,7 +459,7 @@ export const buildAskMapRequestParams = (aoi, extraParams = {}) => {
   return {
     ...extraParams,
     aoi: JSON.stringify(parsed),
-    AoI_cords: JSON.stringify(parsed.legacy?.AoI_cords || []),
+    coordinates: JSON.stringify(getAoiGeometry(parsed)?.coordinates?.[0] || []),
   };
 };
 

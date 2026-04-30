@@ -2,7 +2,7 @@ import axios from 'axios';
 import { resolveBrowserEndpoint } from '../utils/runtimeUrls';
 
 const AGENT_API_BASE =
-  resolveBrowserEndpoint(process.env.REACT_APP_AGENT_API_URL, '');
+  resolveBrowserEndpoint(process.env.REACT_APP_API_URL, '');
 
 const normalizeAgentApiError = (error, fallbackMessage) => {
   const detail =

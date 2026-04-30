@@ -33,16 +33,9 @@ function Get-EnvValue {
     return $Default
 }
 
-$publicHost = Get-EnvValue -Names @("SATGPT_PUBLIC_HOST") -Default "localhost"
-$flaskPort = Get-EnvValue -Names @("FLASK_RUN_PORT") -Default "5001"
-$agentPort = Get-EnvValue -Names @("AGENT_PORT", "PORT") -Default "8000"
-$runtimePort = Get-EnvValue -Names @("RUNTIME_PORT") -Default "5000"
 $frontendHost = Get-EnvValue -Names @("FRONTEND_HOST") -Default "0.0.0.0"
 $frontendPort = Get-EnvValue -Names @("FRONTEND_PORT") -Default "3000"
 
-$defaultFlaskProxyTarget = "http://${publicHost}:${flaskPort}"
-$defaultAgentApiUrl = ""
-$defaultRuntimeProxyTarget = "http://${publicHost}:${runtimePort}"
 $defaultCopilotkitUrl = "/copilotkit"
 
 $content = @(
@@ -51,13 +44,14 @@ $content = @(
     "HOST=${frontendHost}",
     "PORT=${frontendPort}",
     "GENERATE_SOURCEMAP=$(Get-EnvValue -Names @('GENERATE_SOURCEMAP') -Default 'false')",
-    "REACT_APP_MAPBOX_ACCESS_KEY=$(Get-EnvValue -Names @('REACT_APP_MAPBOX_ACCESS_KEY', 'MAPBOX_ACCESS_KEY'))",
+    "REACT_APP_MAPBOX_ACCESS_KEY=$(Get-EnvValue -Names @('REACT_APP_MAPBOX_ACCESS_KEY'))",
     "REACT_APP_API_URL=$(Get-EnvValue -Names @('REACT_APP_API_URL'))",
-    "REACT_APP_FLASK_PROXY_TARGET=$(Get-EnvValue -Names @('REACT_APP_FLASK_PROXY_TARGET') -Default $defaultFlaskProxyTarget)",
-    "REACT_APP_AGENT_API_URL=$(Get-EnvValue -Names @('REACT_APP_AGENT_API_URL') -Default $defaultAgentApiUrl)",
-    "REACT_APP_COPILOTKIT_PROXY_TARGET=$(Get-EnvValue -Names @('REACT_APP_COPILOTKIT_PROXY_TARGET') -Default $defaultRuntimeProxyTarget)",
     "REACT_APP_COPILOTKIT_URL=$(Get-EnvValue -Names @('REACT_APP_COPILOTKIT_URL') -Default $defaultCopilotkitUrl)"
 )
 
-Set-Content -Path $frontendEnvPath -Value $content -Encoding UTF8
+[System.IO.File]::WriteAllLines(
+    $frontendEnvPath,
+    $content,
+    [System.Text.UTF8Encoding]::new($false)
+)
 Write-Host "Synced frontend public env to $frontendEnvPath"
