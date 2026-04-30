@@ -28,7 +28,7 @@ if errorlevel 1 (
 )
 
 if not exist "%VENV_DIR%\Scripts\python.exe" (
-    echo [1/5] Creating Python virtual environment...
+    echo [1/6] Creating Python virtual environment...
     if "%DRY_RUN%"=="1" (
         echo DRY-RUN: python -m venv "%VENV_DIR%"
     ) else (
@@ -36,10 +36,10 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
         if errorlevel 1 exit /b 1
     )
 ) else (
-    echo [1/5] Reusing existing virtual environment: "%VENV_DIR%"
+    echo [1/6] Reusing existing virtual environment: "%VENV_DIR%"
 )
 
-echo [2/5] Upgrading pip...
+echo [2/6] Upgrading pip...
 if "%DRY_RUN%"=="1" (
     echo DRY-RUN: "%PYTHON_EXE%" -m pip install --upgrade pip
 ) else (
@@ -58,11 +58,8 @@ if "%DRY_RUN%"=="1" (
 echo [4/6] Installing Python dependencies...
 if "%DRY_RUN%"=="1" (
     echo DRY-RUN: "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\requirements.txt"
-    echo DRY-RUN: "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\agent\requirements.txt"
 ) else (
     "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\requirements.txt"
-    if errorlevel 1 exit /b 1
-    "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\agent\requirements.txt"
     if errorlevel 1 exit /b 1
 )
 
