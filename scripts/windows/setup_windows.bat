@@ -18,13 +18,15 @@ echo.
 where python >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python not found in PATH.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 where npm >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] npm not found in PATH.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 if not exist "%VENV_DIR%\Scripts\python.exe" (
@@ -33,7 +35,10 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
         echo DRY-RUN: python -m venv "%VENV_DIR%"
     ) else (
         python -m venv "%VENV_DIR%"
-        if errorlevel 1 exit /b 1
+        if errorlevel 1 (
+            set "EXIT_CODE=1"
+            goto :PauseAndExit
+        )
     )
 ) else (
     echo [1/5] Reusing existing virtual environment: "%VENV_DIR%"
@@ -44,7 +49,10 @@ if "%DRY_RUN%"=="1" (
     echo DRY-RUN: "%PYTHON_EXE%" -m pip install --upgrade pip
 ) else (
     "%PYTHON_EXE%" -m pip install --upgrade pip
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
+    )
 )
 
 echo [3/6] Pinning setuptools compatibility...
@@ -52,7 +60,10 @@ if "%DRY_RUN%"=="1" (
     echo DRY-RUN: "%PYTHON_EXE%" -m pip install "setuptools<81"
 ) else (
     "%PYTHON_EXE%" -m pip install "setuptools<81"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
+    )
 )
 
 echo [4/6] Installing Python dependencies...
@@ -61,9 +72,15 @@ if "%DRY_RUN%"=="1" (
     echo DRY-RUN: "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\agent\requirements.txt"
 ) else (
     "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\requirements.txt"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
+    )
     "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\agent\requirements.txt"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
+    )
 )
 
 echo [5/6] Installing frontend dependencies...
@@ -74,7 +91,8 @@ if "%DRY_RUN%"=="1" (
     call npm install
     if errorlevel 1 (
         popd
-        exit /b 1
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
     )
     popd
 )
@@ -87,7 +105,8 @@ if "%DRY_RUN%"=="1" (
     call npm install
     if errorlevel 1 (
         popd
-        exit /b 1
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
     )
     popd
 )
@@ -101,12 +120,14 @@ if "%DRY_RUN%"=="1" (
     if not exist "%ROOT_DIR%\frontend\node_modules\react-scripts\bin\react-scripts.js" (
         echo [ERROR] Frontend dependency check failed: react-scripts is missing.
         echo Try running: cd /d "%ROOT_DIR%\frontend" ^&^& npm install
-        exit /b 1
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
     )
     if not exist "%ROOT_DIR%\runtime\node_modules\.bin\tsx.cmd" (
         echo [ERROR] Runtime dependency check failed: tsx is missing.
         echo Try running: cd /d "%ROOT_DIR%\runtime" ^&^& npm install
-        exit /b 1
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
     )
 )
 
@@ -117,7 +138,10 @@ if not exist "%ROOT_DIR%\.env" (
         echo DRY-RUN: copy "%ROOT_DIR%\.env.example" "%ROOT_DIR%\.env"
     ) else (
         copy /Y "%ROOT_DIR%\.env.example" "%ROOT_DIR%\.env" >nul
-        if errorlevel 1 exit /b 1
+        if errorlevel 1 (
+            set "EXIT_CODE=1"
+            goto :PauseAndExit
+        )
     )
 ) else (
     echo.
@@ -130,7 +154,10 @@ if "%DRY_RUN%"=="1" (
     echo DRY-RUN: powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
 ) else (
     powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
+    )
 )
 
 echo.
@@ -141,4 +168,10 @@ echo 1. Fill in "%ROOT_DIR%\.env" with your API keys and service account path.
 echo 2. frontend\.env.local will be generated from the root .env.
 echo 3. Run "scripts\windows\start_windows.bat" to start all services.
 echo ==========================================
-exit /b 0
+set "EXIT_CODE=0"
+goto :PauseAndExit
+
+:PauseAndExit
+echo.
+if not "%SATGPT_SKIP_PAUSE%"=="1" pause
+exit /b %EXIT_CODE%
