@@ -18,37 +18,43 @@ echo.
 if not exist "%PYTHON_EXE%" (
     echo [ERROR] Missing Python environment: "%PYTHON_EXE%"
     echo Run "scripts\windows\setup_windows.bat" first.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 if not exist "%ROOT_DIR%\.env" (
     echo [ERROR] Missing .env file.
     echo Run "scripts\windows\setup_windows.bat" and then fill in .env.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 if not exist "%ROOT_DIR%\frontend\node_modules" (
     echo [ERROR] Missing frontend\node_modules.
     echo Run "scripts\windows\setup_windows.bat" first.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 if not exist "%ROOT_DIR%\frontend\node_modules\react-scripts\bin\react-scripts.js" (
     echo [ERROR] Frontend dependencies are incomplete: react-scripts is missing.
     echo Run "scripts\windows\setup_windows.bat" or reinstall frontend dependencies.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 if not exist "%ROOT_DIR%\runtime\node_modules" (
     echo [ERROR] Missing runtime\node_modules.
     echo Run "scripts\windows\setup_windows.bat" first.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 if not exist "%ROOT_DIR%\runtime\node_modules\.bin\tsx.cmd" (
     echo [ERROR] Runtime dependencies are incomplete: tsx is missing.
     echo Run "scripts\windows\setup_windows.bat" or reinstall runtime dependencies.
-    exit /b 1
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
 )
 
 for /f "usebackq delims=" %%A in (`powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%load_launch_env.ps1" -RootDir "%ROOT_DIR%"`) do set "%%A"
@@ -68,12 +74,18 @@ if "%DRY_RUN%"=="1" (
     echo DRY-RUN: powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
 ) else (
     powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        goto :PauseAndExit
+    )
 )
 
 echo [1/3] Checking port usage...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%check_ports_available.ps1" -Ports "%AGENT_PORT%,%RUNTIME_PORT%,%FRONTEND_PORT%"
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+    set "EXIT_CODE=1"
+    goto :PauseAndExit
+)
 
 echo.
 echo [2/3] Starting FastAPI agent on %AGENT_PORT%...
@@ -99,4 +111,10 @@ echo FastAPI Agent:      http://%SATGPT_PUBLIC_HOST%:%AGENT_PORT%
 echo CopilotKit Runtime: http://%SATGPT_PUBLIC_HOST%:%RUNTIME_PORT%
 echo React Frontend:     http://%SATGPT_PUBLIC_HOST%:%FRONTEND_PORT%
 echo ==========================================
-exit /b 0
+set "EXIT_CODE=0"
+goto :PauseAndExit
+
+:PauseAndExit
+echo.
+if not "%SATGPT_SKIP_PAUSE%"=="1" pause
+exit /b %EXIT_CODE%
