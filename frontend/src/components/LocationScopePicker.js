@@ -136,6 +136,15 @@ export default function LocationScopePicker({ isOpen = true, onClose, embedded =
     onClose?.();
   }, [onClose, restorePreviousSelection]);
 
+  const clearSearchResults = useCallback(() => {
+    restorePreviousSelection();
+    setCandidates([]);
+    setCheckedIds([]);
+    setPreviewId(null);
+    setError('');
+    setQuery('');
+  }, [restorePreviousSelection]);
+
   useEffect(() => {
     if (!isOpen || embedded) {
       return undefined;
@@ -369,7 +378,7 @@ export default function LocationScopePicker({ isOpen = true, onClose, embedded =
           <button
             type="button"
             className="location-scope-picker-action secondary"
-            onClick={embedded ? restorePreviousSelection : handleClose}
+            onClick={embedded ? clearSearchResults : handleClose}
           >
             {embedded ? 'Reset' : 'Cancel'}
           </button>
