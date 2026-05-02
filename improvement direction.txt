@@ -1,0 +1,1 @@
+建议把 Raster Layers 抽成统一配置注册表。
