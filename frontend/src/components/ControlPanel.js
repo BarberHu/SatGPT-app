@@ -59,6 +59,10 @@ function ControlPanel() {
         entry: 'control_panel_header',
       });
 
+      if (nextMode === 'agent') {
+        resetAskSession();
+      }
+
       if (chatMode === 'agent' || nextMode === 'agent') {
         resetAgentSession({ preserveSelectedAoi: true });
       }
