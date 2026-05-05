@@ -94,3 +94,6 @@ class FloodAgentState(CopilotKitState, total=False):
     
     # GEE JavaScript 代码（生成的可下载代码）
     gee_code: str
+
+    # LLM intent classification result
+    intent: Dict[str, Any]

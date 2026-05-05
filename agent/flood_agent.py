@@ -12,11 +12,13 @@
 """
 import os
 import json
+import re
 import requests
 from typing import Literal, Optional, Dict, Any
 
 from langchain.tools import tool
 from langchain_openai import ChatOpenAI
+from openai import AsyncOpenAI
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
@@ -182,6 +184,220 @@ def _get_latest_user_message_content(messages: list[Any]) -> Optional[str]:
         if isinstance(message, HumanMessage):
             return str(message.content)
     return None
+
+
+
+def _extract_json_object(content: Any) -> Dict[str, Any]:
+    text = str(content or "").strip()
+    if not text:
+        return {}
+
+    if "```json" in text:
+        text = text.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in text:
+        text = text.split("```", 1)[1].split("```", 1)[0].strip()
+    else:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+
+    return data if isinstance(data, dict) else {}
+
+
+_TIME_HINT_PATTERNS = (
+    re.compile(r"\b(?:19|20)\d{2}(?:[-/.]\d{1,2}(?:[-/.]\d{1,2})?)?\b"),
+    re.compile(r"(?:19|20)\d{2}\s*\u5e74(?:\s*\d{1,2}\s*\u6708(?:\s*\d{1,2}\s*[\u65e5\u53f7])?)?"),
+    re.compile(
+        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)"
+        r"[a-z]*\s+(?:19|20)\d{2}\b",
+        re.IGNORECASE,
+    ),
+)
+
+_SPECIFIC_TIME_HINT_PATTERNS = (
+    re.compile(r"\b(?:19|20)\d{2}[-/.]\d{1,2}(?:[-/.]\d{1,2})?\b"),
+    re.compile(r"(?:19|20)\d{2}\s*\u5e74\s*\d{1,2}\s*\u6708(?:\s*\d{1,2}\s*[\u65e5\u53f7])?"),
+    re.compile(
+        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)"
+        r"[a-z]*\s+(?:19|20)\d{2}\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:19|20)\d{2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)"
+        r"[a-z]*\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _has_event_time_hint(content: Optional[str]) -> bool:
+    text = str(content or "")
+    return any(pattern.search(text) for pattern in _TIME_HINT_PATTERNS)
+
+
+def _has_specific_event_time_hint(content: Optional[str]) -> bool:
+    text = str(content or "")
+    return any(pattern.search(text) for pattern in _SPECIFIC_TIME_HINT_PATTERNS)
+
+
+def _has_explicit_spatial_mention(content: Optional[str]) -> bool:
+    return "<<SATGPT_MENTION_CONTEXT>>" in str(content or "")
+
+
+def _has_spatial_scope_mention(content: Optional[str]) -> bool:
+    text = str(content or "")
+    return _has_explicit_spatial_mention(text) or bool(re.search(r"@[\w\u4e00-\u9fff-]+", text))
+
+
+def _default_intent(message_content: Optional[str]) -> Dict[str, Any]:
+    has_scope = _has_spatial_scope_mention(message_content)
+    return {
+        "intent_type": "event_discovery",
+        "is_specific_flood_event": False,
+        "requests_workflow": False,
+        "requests_inundation_extraction": False,
+        "has_time": False,
+        "has_location": False,
+        "has_spatial_scope_mention": has_scope,
+        "missing_requirements": ["time", "location"],
+        "should_use_search": False,
+        "should_append_json": False,
+        "should_start_workflow": False,
+        "user_guidance": "Please provide the flood event time and location.",
+        "confidence": 0.0,
+    }
+
+
+def _normalize_intent(raw_intent: Dict[str, Any], message_content: Optional[str]) -> Dict[str, Any]:
+    intent = _default_intent(message_content)
+    if isinstance(raw_intent, dict):
+        intent.update({key: value for key, value in raw_intent.items() if key in intent})
+
+    has_time_hint = _has_event_time_hint(message_content)
+    has_specific_time_hint = _has_specific_event_time_hint(message_content)
+
+    bool_fields = (
+        "is_specific_flood_event",
+        "requests_workflow",
+        "requests_inundation_extraction",
+        "has_time",
+        "has_location",
+        "has_spatial_scope_mention",
+        "should_use_search",
+        "should_append_json",
+        "should_start_workflow",
+    )
+    for field in bool_fields:
+        intent[field] = bool(intent.get(field))
+
+    intent["has_spatial_scope_mention"] = _has_spatial_scope_mention(message_content)
+    intent["has_time"] = intent["has_time"] or has_time_hint
+
+    missing = intent.get("missing_requirements")
+    if not isinstance(missing, list):
+        missing = []
+    missing = [str(item) for item in missing if str(item).strip()]
+    if intent["has_time"]:
+        missing = [item for item in missing if item != "time"]
+    if intent["has_location"]:
+        missing = [item for item in missing if item != "location"]
+    if intent["has_spatial_scope_mention"]:
+        missing = [item for item in missing if item != "@spatial scope"]
+
+    has_ambiguous_year_event = (
+        intent["has_time"]
+        and intent["has_location"]
+        and not has_specific_time_hint
+        and (
+            intent["is_specific_flood_event"]
+            or intent["requests_workflow"]
+            or intent["should_use_search"]
+        )
+    )
+    if has_ambiguous_year_event:
+        intent["is_specific_flood_event"] = False
+        if "specific flood event" not in missing:
+            missing.append("specific flood event")
+
+    if intent["requests_workflow"]:
+        if not intent["has_time"] and "time" not in missing:
+            missing.append("time")
+        elif not has_specific_time_hint and "specific flood event" not in missing:
+            missing.append("specific flood event")
+        if not intent["has_spatial_scope_mention"] and "@spatial scope" not in missing:
+            missing.append("@spatial scope")
+        if missing:
+            intent["should_use_search"] = bool(has_ambiguous_year_event)
+            intent["should_append_json"] = False
+            intent["should_start_workflow"] = False
+        else:
+            intent["should_use_search"] = True
+            intent["should_append_json"] = True
+            intent["should_start_workflow"] = True
+    elif not intent["is_specific_flood_event"]:
+        intent["should_use_search"] = bool(has_ambiguous_year_event)
+        intent["should_append_json"] = False
+        intent["should_start_workflow"] = False
+    else:
+        intent["should_append_json"] = False
+        intent["should_start_workflow"] = False
+
+    intent["missing_requirements"] = missing
+    if intent["requests_inundation_extraction"]:
+        intent["intent_type"] = "inundation_extraction_workflow"
+    elif intent["requests_workflow"]:
+        intent["intent_type"] = "analysis_workflow"
+    elif intent["is_specific_flood_event"]:
+        intent["intent_type"] = "specific_event_information"
+    else:
+        intent["intent_type"] = "event_discovery"
+
+    return intent
+
+
+async def _classify_user_intent(message_content: Optional[str], config: RunnableConfig) -> Dict[str, Any]:
+    has_scope = _has_spatial_scope_mention(message_content)
+    prompt = f"""Classify the latest user message for a flood-analysis assistant.
+Return only JSON, no markdown.
+
+Rules:
+- Specific event = flood/disaster subject + location + month/date/time window, or a uniquely named event.
+- Year-only + location is ambiguous: set is_specific_flood_event=false, should_use_search=true, missing_requirements=[\"specific flood event\"].
+- Workflow = analysis/mapping/imagery/report/impact/raster/flood processing/inundation extraction.
+- Workflow can start only with a specific event and explicit @ spatial scope.
+- Normal specific-event info may search, but must not append workflow JSON.
+
+UI: has_explicit_at_spatial_scope={str(has_scope).lower()}
+
+Schema:
+{{\"intent_type\":\"event_discovery|specific_event_information|analysis_workflow|inundation_extraction_workflow\",\"is_specific_flood_event\":false,\"requests_workflow\":false,\"requests_inundation_extraction\":false,\"has_time\":false,\"has_location\":false,\"has_spatial_scope_mention\":false,\"missing_requirements\":[],\"should_use_search\":false,\"should_append_json\":false,\"should_start_workflow\":false,\"user_guidance\":\"\",\"confidence\":0.0}}
+
+User message:
+{message_content or ""}
+"""
+    try:
+        client_kwargs = {"api_key": os.getenv("OPENAI_API_KEY", "")}
+        base_url = os.getenv("OPENAI_API_BASE")
+        if base_url:
+            client_kwargs["base_url"] = base_url
+
+        client = AsyncOpenAI(**client_kwargs)
+        response = await client.chat.completions.create(
+            model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = response.choices[0].message.content if response.choices else ""
+        return _normalize_intent(_extract_json_object(content), message_content)
+    except Exception as exc:
+        print(f"[WARN] Intent classification failed: {exc}")
+        return _normalize_intent({}, message_content)
 
 
 def _get_location_from_nominatim(location_name: str) -> Optional[Dict[str, Any]]:
@@ -385,7 +601,25 @@ def _extract_flood_info_from_content(content: str) -> dict:
                     updates["bounds"] = data["bounds"]
     except (json.JSONDecodeError, IndexError, KeyError):
         pass
-    
+
+    if updates:
+        return updates
+
+    field_patterns = {
+        "event": r"(?:^|\n)\s*[-*]?\s*\**Event\**\s*:\s*([^\n]+)",
+        "event_description": r"(?:^|\n)\s*[-*]?\s*\**Description\**\s*:\s*(.+?)(?=\n\s*[-*]\s*\**(?:Location|Pre[- ]?Date|Peak Date|After Date)\**\s*:|\Z)",
+        "location": r"(?:^|\n)\s*[-*]?\s*\**Location\**\s*:\s*([^\n]+)",
+        "pre_date": r"(?:^|\n)\s*[-*]?\s*\**Pre[- ]?Date\**\s*:\s*(\d{4}-\d{2}-\d{2})",
+        "peek_date": r"(?:^|\n)\s*[-*]?\s*\**Peak Date\**\s*:\s*(\d{4}-\d{2}-\d{2})",
+        "after_date": r"(?:^|\n)\s*[-*]?\s*\**After Date\**\s*:\s*(\d{4}-\d{2}-\d{2})",
+    }
+    for field, pattern in field_patterns.items():
+        match = re.search(pattern, content, re.IGNORECASE | re.DOTALL)
+        if match:
+            value = " ".join(match.group(1).strip().split())
+            if value:
+                updates[field] = value
+
     return updates
 
 
@@ -425,7 +659,16 @@ def _has_complete_flood_info(state: FloodAgentState) -> bool:
 
 # 全局变量用于临时存储搜索来源信息和完整内容
 _pending_search_sources: list = []
-_pending_search_contents: list = []  # 存储完整的搜索内容用于报告生成
+_pending_search_contents: list = []
+MAX_SEARCH_SOURCES = 8
+MAX_SEARCH_CONTENT_CHARS = 700
+
+
+def _compact_search_content(content: str, limit: int = MAX_SEARCH_CONTENT_CHARS) -> str:
+    text = " ".join(str(content or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
 
 @tool
 def search_flood_event(query: str) -> str:
@@ -441,7 +684,16 @@ def search_flood_event(query: str) -> str:
     global _pending_search_sources, _pending_search_contents
     try:
         from tavily import TavilyClient
-        tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        tavily_api_key = os.getenv("TAVILY_API_KEY")
+        if not tavily_api_key:
+            _pending_search_sources = []
+            _pending_search_contents = []
+            return (
+                "Search tool is unavailable because TAVILY_API_KEY is not configured. "
+                "Use built-in knowledge only, and tell the user that online search is disabled."
+            )
+
+        tavily_client = TavilyClient(api_key=tavily_api_key)
         
         # 使用多个搜索策略获取更多来源
         all_results = []
@@ -466,7 +718,7 @@ def search_flood_event(query: str) -> str:
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 title = result.get("title", "")
-                content = result.get("content", "")
+                content = _compact_search_content(result.get("content", ""))
                 results.append(f"Title: {title}\nContent: {content}\nSource: {url}\n")
                 if title and url:
                     all_sources.append({"title": title, "url": url, "content": content})
@@ -485,7 +737,7 @@ def search_flood_event(query: str) -> str:
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     title = result.get("title", "")
-                    content = result.get("content", "")
+                    content = _compact_search_content(result.get("content", ""))
                     results.append(f"Title: {title}\nContent: {content}\nSource: {url}\n")
                     if title and url:
                         all_sources.append({"title": title, "url": url, "content": content})
@@ -506,13 +758,15 @@ def search_flood_event(query: str) -> str:
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     title = result.get("title", "")
-                    content = result.get("content", "")
+                    content = _compact_search_content(result.get("content", ""))
                     results.append(f"Title: {title}\nContent: {content}\nSource: {url}\n")
                     if title and url:
                         all_sources.append({"title": title, "url": url, "content": content})
         except:
             pass
         
+        all_sources = all_sources[:MAX_SEARCH_SOURCES]
+        results = results[: MAX_SEARCH_SOURCES + 1]
         _pending_search_sources = [{"title": s["title"], "url": s["url"]} for s in all_sources]
         _pending_search_contents = all_sources  # Store full content for report generation
         
@@ -533,7 +787,7 @@ tools = [search_flood_event]
 # ============== 节点定义 ==============
 
 # 定义节点路由类型
-NodeType = Literal["chat_node", "tool_node", "extraction_node", "pre_confirmation_node", "confirmation_node", "processing_node", "__end__"]
+NodeType = Literal["intent_node", "chat_node", "tool_node", "extraction_node", "pre_confirmation_node", "confirmation_node", "processing_node", "__end__"]
 
 
 async def entry_node(
@@ -580,56 +834,82 @@ async def entry_node(
                 "geo_data": None,
                 "search_sources": [],
                 "gee_code": None,
+                "intent": None,
             }
         )
     
-    return Command(goto="chat_node")
+    return Command(goto="intent_node")
+
+
+async def intent_node(
+    state: FloodAgentState, config: RunnableConfig
+) -> Command[NodeType]:
+    latest_user_message = _get_latest_user_message_content(state.get("messages", []))
+    intent = await _classify_user_intent(latest_user_message, config)
+    print(f"[DEBUG] Classified user intent: {intent}")
+
+    return Command(
+        goto="chat_node",
+        update={"intent": intent},
+    )
 
 
 async def chat_node(
     state: FloodAgentState, config: RunnableConfig
 ) -> Command[NodeType]:
-    """
-    聊天节点 - 处理 LLM 对话和工具调用
-    
-    职责：
-    1. 与 LLM 交互
-    2. 处理工具调用请求
-    3. 路由到 tool_node 或 extraction_node
-    """
     model = _get_model()
-    
-    # 获取前端工具并绑定所有工具
-    fe_tools = state.get("copilotkit", {}).get("actions", [])
-    model_with_tools = model.bind_tools([*fe_tools, *tools])
-    
-    # 构建系统提示
     current_stage = state.get('stage', 'initial')
+    latest_user_message = _get_latest_user_message_content(state.get("messages", []))
+    intent = _normalize_intent(state.get("intent") or {}, latest_user_message)
+    intent_type = intent.get("intent_type", "event_discovery")
+    missing_requirements = ", ".join(intent.get("missing_requirements") or []) or "none"
+
+    fe_tools = state.get("copilotkit", {}).get("actions", [])
+    can_use_search_tools = bool(intent.get("should_use_search"))
+    model_with_tools = model.bind_tools([*fe_tools, *tools]) if can_use_search_tools else model
+
+    if intent.get("requests_inundation_extraction") and not intent.get("should_start_workflow"):
+        mode = "inundation_missing"
+    elif intent.get("requests_workflow") and not intent.get("should_start_workflow"):
+        mode = "workflow_missing"
+    elif intent.get("should_start_workflow"):
+        mode = "workflow_ready"
+    elif intent.get("is_specific_flood_event"):
+        mode = "specific_event_info"
+    else:
+        mode = "event_discovery"
+
+    search_rule = "candidate_search" if intent.get("should_use_search") and "specific flood event" in missing_requirements else ("allowed" if intent.get("should_use_search") else "forbidden")
+    json_rule = "append_required" if intent.get("should_start_workflow") else "forbidden"
+    workflow_instruction = (
+        f"Mode={mode}; Missing={missing_requirements}; Search={search_rule}; JSON={json_rule}. "
+        "Workflow starts only with a specific event and explicit @ spatial scope. "
+        "When JSON=append_required, end the response with one fenced ```json block containing event, event_description, location, pre_date, peek_date, and after_date. "
+        "If only a year is provided, explain ambiguity and ask for month/date or a candidate choice. "
+        "If @ is missing for workflow, ask for @ spatial scope. Keep the answer concise."
+    )
+
     system_message = SystemMessage(
         content=f"""{SYSTEM_PROMPT}
 
 [Current Stage]: {current_stage}
-When a user asks about a flood event, use the search_flood_event tool to search for information.
-After searching, append JSON-formatted event information at the end of the response.
+[Classified Intent]: {intent_type}
+{workflow_instruction}
 """
     )
-    
-    # 调用模型
+
     response = await model_with_tools.ainvoke(
         [system_message, *state["messages"]],
         config,
     )
-    
-    # 检查是否需要调用工具
+
     tool_calls = response.tool_calls
-    
     if tool_calls and _should_route_to_tool_node(tool_calls, fe_tools):
         return Command(
-            goto="tool_node", 
+            goto="tool_node",
             update={"messages": response}
         )
-    
-    # 没有工具调用，进入提取节点分析响应
+
     return Command(
         goto="extraction_node",
         update={"messages": response}
@@ -678,9 +958,12 @@ async def extraction_node(
     
     user_confirmed = state.get('user_confirmed', False)
     current_stage = state.get('stage', 'initial')
+    latest_user_message = _get_latest_user_message_content(messages)
+    intent = _normalize_intent(state.get("intent") or {}, latest_user_message)
+    analysis_workflow_requested = bool(intent.get("should_start_workflow"))
     
     # 如果有完整信息且未确认，进入确认节点
-    if has_complete_info and not user_confirmed and current_stage != "completed":
+    if has_complete_info and analysis_workflow_requested and not user_confirmed and current_stage != "completed":
         return Command(
             goto="pre_confirmation_node",
             update={
@@ -1024,6 +1307,7 @@ workflow = StateGraph(FloodAgentState)
 
 # 添加节点 - 清晰的职责分离
 workflow.add_node("entry_node", entry_node)           # 入口路由
+workflow.add_node("intent_node", intent_node)         # LLM intent classification
 workflow.add_node("chat_node", chat_node)             # LLM 对话 + 工具调用
 workflow.add_node("tool_node", ToolNode(tools=tools)) # 工具执行
 workflow.add_node("extraction_node", extraction_node) # 信息提取
