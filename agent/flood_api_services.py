@@ -435,6 +435,10 @@ def _configure_openai() -> None:
         openai.api_base = api_base
 
 
+def _get_llm_model() -> str:
+    return os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+
 def _create_chat_completion(model: str, messages: list[dict[str, str]], functions: Optional[list[dict[str, Any]]] = None):
     api_key = os.getenv("OPENAI_API_KEY")
     api_base = os.getenv("OPENAI_API_BASE")
@@ -506,7 +510,7 @@ def get_chatgpt_response(user_input: str) -> Optional[str]:
     'content':
     """
     completion = _create_chat_completion(
-        model="gpt-3.5-turbo",
+        model=_get_llm_model(),
         messages=[
             {"role": "system", "content": "You are a helpful GEE Assistant."},
             {"role": "user", "content": prompt},
@@ -542,7 +546,7 @@ def get_code_response(user_input: str) -> Optional[str]:
             'content':
     """
     completion = _create_chat_completion(
-        model="gpt-3.5-turbo",
+        model=_get_llm_model(),
         messages=[
             {"role": "system", "content": "You are a helpful GEE Assistant."},
             {"role": "user", "content": prompt},
