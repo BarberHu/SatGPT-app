@@ -9,10 +9,10 @@ const BUSINESS_LAYER_SOURCES = new Set([
   'place_search',
   'edited',
   'bounds',
-  'legacy_polygon',
+  'coordinate_ring',
 ]);
 
-const DRAW_LIKE_SOURCES = new Set(['draw', 'edited', 'fishnet', 'bounds', 'legacy_polygon']);
+const DRAW_LIKE_SOURCES = new Set(['draw', 'edited', 'fishnet', 'bounds', 'coordinate_ring']);
 
 function getCenterFromBounds(bounds) {
   if (!bounds) {
@@ -172,11 +172,6 @@ export function buildAoiFromBusinessLayerRecord(record) {
     created_at: record.created_at,
     updated_at: record.updated_at,
     origin: record.origin,
-    legacy: {
-      AoI_cords: record.geojson?.geometry?.type === 'Polygon'
-        ? record.geojson.geometry.coordinates?.[0] || []
-        : [],
-    },
   };
 }
 

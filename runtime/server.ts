@@ -144,4 +144,5 @@ app.listen(PORT, HOST, () => {
   console.log("[INFO] CopilotKit runtime started");
   console.log(`   - Runtime URL: http://${HOST}:${PORT}/copilotkit`);
   console.log(`   - LangGraph backend: ${AGENT_URL}`);
+  console.log(`   - CORS origins: ${allowedCorsOrigins.join(", ")}`);
 });

@@ -526,6 +526,8 @@ export const AppProvider = ({ children }) => {
       previousMode === 'ask'
       && appMode === 'agent'
     ) {
+      resetAskSession();
+
       const nextScopeAoi = resolveCurrentBusinessScopeAoi(businessLayers, selectedAOI);
 
       if (
@@ -542,8 +544,15 @@ export const AppProvider = ({ children }) => {
       }
     }
 
+    if (
+      previousMode === 'agent'
+      && appMode === 'ask'
+    ) {
+      resetAgentSession({ preserveSelectedAoi: true });
+    }
+
     previousAppModeRef.current = appMode;
-  }, [appMode, agentLayerOrder, businessLayers, resetAskSession, selectedAOI, setDraftAOI, setWarning]);
+  }, [appMode, agentLayerOrder, businessLayers, resetAgentSession, resetAskSession, selectedAOI, setDraftAOI, setWarning]);
 
   useEffect(() => {
     let cancelled = false;

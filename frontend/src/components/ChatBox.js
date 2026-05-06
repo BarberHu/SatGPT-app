@@ -1,6 +1,6 @@
 /**
  * ChatBox Component
- * Supports two modes: Ask (traditional Flask API) and Agent (CopilotKit)
+ * Supports two modes: Ask (FastAPI) and Agent (CopilotKit)
  * Left side: vertical mode toggle button
  * Right side: chat input or agent chat interface
  */
@@ -13,6 +13,7 @@ import { useCopilotContext } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 import { trackUxEvent } from '../utils/analytics';
 import AgentChatInput from './AgentChatInput';
+import AgentAssistantMessage from './AgentAssistantMessage';
 import AgentUserMessage from './AgentUserMessage';
 
 const SUGGESTIONS = [
@@ -31,8 +32,9 @@ const AGENT_MENTION_INSTRUCTIONS = `
 If the user's message contains a metadata block wrapped by <<SATGPT_MENTION_CONTEXT>> and <<END_SATGPT_MENTION_CONTEXT>>, parse that JSON first.
 Treat it as authoritative metadata for the spatial scope the user explicitly referenced in the text.
 The metadata only provides lightweight ids, labels, types, and sources. Do not treat it as raw geometry or as the full dataset payload.
-For spatial execution, only trust explicit uploaded or drawn scope mentions that resolve from the synced business layer store.
-If no explicit spatial mention is present, ask the user to provide one instead of silently falling back to a location-derived boundary.
+For normal flood information questions, do not require an @ spatial scope. Answer using general reasoning and web/tool search when needed.
+Only require an explicit uploaded or drawn @ spatial scope when the user asks to run spatial execution, such as map rendering, satellite imagery retrieval, raster layers, impact analysis, or a confirmed analysis workflow tied to a user-defined AOI.
+If spatial execution is requested without an explicit scope, ask for @ only at that point.
 When you explain your reasoning, refer to the visible @label the user typed, but do not expose the raw metadata block back to the user unless they explicitly ask for it.
 `;
 
@@ -226,25 +228,26 @@ function ChatBox() {
               instructions={AGENT_MENTION_INSTRUCTIONS}
               labels={{
                 title: "Flood Analysis Agent",
-                initial: "Describe a flood event, then type @ to attach an uploaded or drawn spatial scope.",
+                initial: "Ask about a flood event. Add @ only when you want to run analysis for a specific spatial scope.",
                 placeholder: "Enter flood event information...",
               }}
               suggestions={[
                 {
                   title: "2024 Chiang Mai Flood",
-                  message: "Please analyze the 2024 Chiang Mai flood event in Thailand",
+                  message: "Tell me about the 2024 Chiang Mai flood event in Thailand",
                 },
                 {
                   title: "2021 Zhengzhou Flood",
-                  message: "Please analyze the July 2021 Zhengzhou extreme rainfall event",
+                  message: "Tell me about the July 2021 Zhengzhou extreme rainfall event",
                 },
                 {
                   title: "2020 Jakarta Flood",
-                  message: "Please analyze the January 2020 Jakarta flood event",
+                  message: "Tell me about the January 2020 Jakarta flood event",
                 },
               ]}
               className="copilot-chat-full"
               Input={AgentChatInput}
+              AssistantMessage={AgentAssistantMessage}
               UserMessage={AgentUserMessage}
               onError={(copilotError) => {
                 if (
@@ -407,6 +410,31 @@ function ChatBox() {
             color: #1f2937;
             padding: 4px 0;
             margin-bottom: 4px;
+          }
+          .chat-box-gemini .agent-assistant-thinking {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            max-width: 94%;
+            padding: 8px 10px;
+            color: #64748b;
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1;
+          }
+          .chat-box-gemini .agent-assistant-thinking-spinner {
+            width: 15px;
+            height: 15px;
+            border: 2px solid rgba(100, 116, 139, 0.22);
+            border-top-color: #2563eb;
+            border-radius: 999px;
+            animation: agent-assistant-thinking-spin 0.8s linear infinite;
+          }
+          @keyframes agent-assistant-thinking-spin {
+            to {
+              transform: rotate(360deg);
+            }
           }
           .chat-box-gemini .copilotKitMessage.copilotKitAssistantMessage .copilotKitMessageControls {
             display: none !important;

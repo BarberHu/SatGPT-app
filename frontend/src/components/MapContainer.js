@@ -45,6 +45,12 @@ const BUSINESS_LAYER_LAYER_IDS = ['business-layer-scopes-fill', 'business-layer-
 const DRAW_BLUE = '#2563eb';
 const DRAW_ORANGE = '#f97316';
 const DRAW_WHITE = '#ffffff';
+const isTileRequestError = (event) => (
+  event?.error?.status >= 400
+  || event?.error?.statusCode >= 400
+  || event?.error?.message?.includes('HTTP')
+  || event?.error?.message?.includes('Bad Request')
+);
 const formatCoordinatePart = (value) => {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue.toFixed(6) : '';
@@ -284,6 +290,15 @@ function MapContainer() {
     }, timeoutMs);
   }, [clearTransientWarningTimer, setWarning]);
 
+  const removeLayerAndSource = useCallback((map, layerId, sourceId = layerId) => {
+    if (map.getLayer(layerId)) {
+      map.removeLayer(layerId);
+    }
+    if (map.getSource(sourceId)) {
+      map.removeSource(sourceId);
+    }
+  }, []);
+
   useEffect(() => {
     gridClickEnabledRef.current = gridClickEnabled;
   }, [gridClickEnabled]);
@@ -343,45 +358,23 @@ function MapContainer() {
 
   const removeAskLayers = useCallback((map) => {
     ASK_LAYER_NAMES.forEach((id) => {
-      if (map.getLayer(`${id}-layer`)) {
-        map.removeLayer(`${id}-layer`);
-      }
+      removeLayerAndSource(map, `${id}-layer`, id);
     });
-
-    ASK_LAYER_NAMES.forEach((id) => {
-      if (map.getSource(id)) {
-        map.removeSource(id);
-      }
-    });
-  }, []);
+  }, [removeLayerAndSource]);
 
   const removeAskRasterSiblings = useCallback((map, layerNames = []) => {
     (layerNames || []).forEach((layerName) => {
-      const askLayerId = `${layerName}-layer`;
-      if (map.getLayer(askLayerId)) {
-        map.removeLayer(askLayerId);
-      }
-      if (map.getSource(layerName)) {
-        map.removeSource(layerName);
-      }
+      removeLayerAndSource(map, `${layerName}-layer`, layerName);
     });
-  }, []);
+  }, [removeLayerAndSource]);
 
   const removeAgentLayers = useCallback((map) => {
     AGENT_SOURCE_IDS.forEach((id) => {
-      if (map.getLayer(id)) {
-        map.removeLayer(id);
-      }
-    });
-
-    AGENT_SOURCE_IDS.forEach((id) => {
-      if (map.getSource(id)) {
-        map.removeSource(id);
-      }
+      removeLayerAndSource(map, id, id);
     });
 
     agentRasterTileUrlRef.current = {};
-  }, []);
+  }, [removeLayerAndSource]);
 
   const removeAoiLayers = useCallback((map) => {
     AOI_LAYER_IDS.forEach((id) => {
@@ -1248,6 +1241,29 @@ function MapContainer() {
     reconcileLayerOrder(map);
   }, [appMode, layerData, layerOpacity, layerVisibility, reconcileLayerOrder, removeAskLayers]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || appMode !== 'ask') return undefined;
+
+    let handled = false;
+    const onAskTileError = (event) => {
+      const sourceId = event?.sourceId;
+      if (handled || !ASK_LAYER_NAMES.includes(sourceId) || !isTileRequestError(event)) {
+        return;
+      }
+
+      handled = true;
+      removeLayerAndSource(map, `${sourceId}-layer`, sourceId);
+      resetAskSession();
+      showTransientWarning('The previous GEE map tiles expired. Please reload the layer to continue.');
+    };
+
+    map.on('error', onAskTileError);
+    return () => {
+      map.off('error', onAskTileError);
+    };
+  }, [appMode, layerData, removeLayerAndSource, resetAskSession, showTransientWarning]);
+
   // Update layer visibility and opacity
   useEffect(() => {
     const map = mapRef.current;
@@ -1455,10 +1471,16 @@ function MapContainer() {
 
     // Track tile errors (only on base imagery since it's the primary GEE layer)
     let tileErrorCount = 0;
+    const failedSourceIds = new Set();
     const onTileError = (e) => {
-      if (e?.error?.status >= 400 || e?.error?.message?.includes('HTTP') || e?.type === 'error') {
+      if (isTileRequestError(e) || e?.type === 'error') {
         tileErrorCount++;
-        console.warn('Tile load error:', e?.sourceId || 'unknown', e?.error?.message || '');
+        const sourceId = e?.sourceId;
+        console.warn('Tile load error:', sourceId || 'unknown', e?.error?.message || '');
+        if (sourceId && AGENT_BASE_LAYER_IDS.includes(sourceId) && !failedSourceIds.has(sourceId)) {
+          failedSourceIds.add(sourceId);
+          removeLayerAndSource(map, sourceId, sourceId);
+        }
       }
     };
     map.on('error', onTileError);
@@ -1506,7 +1528,7 @@ function MapContainer() {
       map.off('idle', finish);
       clearTimeout(timeout);
     };
-  }, [agentBaseImageryVisibility, agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, getInsertBeforeId, reconcileLayerOrder, setAgentLayerLoading, setAgentTileError]);
+  }, [agentBaseImageryVisibility, agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, getInsertBeforeId, reconcileLayerOrder, removeLayerAndSource, setAgentLayerLoading, setAgentTileError]);
 
   // ========== Effect B: Flood Detection Overlay ==========
   useEffect(() => {

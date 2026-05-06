@@ -185,8 +185,22 @@ const CORE_LAYER_LEGENDS = {
     palette: ['#ffffe7', '#ffac1d', '#f2552c', '#9f0c21'],
   },
   soil_texture: {
-    type: 'text',
+    type: 'classes',
     label: 'Soil texture classes',
+    items: [
+      { value: 'Cl', color: '#d5c36b' },
+      { value: 'SiCl', color: '#b96947' },
+      { value: 'SaCl', color: '#9d3706' },
+      { value: 'ClLo', color: '#ae868f' },
+      { value: 'SiClLo', color: '#f86714' },
+      { value: 'SaClLo', color: '#46d143' },
+      { value: 'Lo', color: '#368f20' },
+      { value: 'SiLo', color: '#3e5a14' },
+      { value: 'SaLo', color: '#ffd557' },
+      { value: 'Si', color: '#fff72e' },
+      { value: 'LoSa', color: '#ff5a9d' },
+      { value: 'Sa', color: '#ff005b' },
+    ],
   },
   healthcare_access: {
     type: 'palette',

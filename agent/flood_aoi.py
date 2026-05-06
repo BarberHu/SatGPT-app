@@ -115,9 +115,6 @@ def _build_aoi(
         "geojson": feature,
         "confidence": confidence,
         "status": status,
-        "legacy": {
-            "AoI_cords": geometry.get("coordinates", [[]])[0] if geometry.get("type") == "Polygon" else [],
-        },
         "resolution_rank": resolution_rank,
     }
 
@@ -467,7 +464,7 @@ def resolve_location_aoi(location_name: str) -> Dict[str, Any]:
     }
 
 
-def aoi_to_legacy_fields(aoi: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def aoi_to_geo_fields(aoi: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not aoi:
         return {
             "coordinates": [0.0, 0.0],

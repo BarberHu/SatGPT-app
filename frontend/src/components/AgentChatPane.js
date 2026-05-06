@@ -8,6 +8,7 @@ import {
   useRenderDiagnostics,
 } from '../utils/agentDiagnostics';
 import AgentChatInput from './AgentChatInput';
+import AgentAssistantMessage from './AgentAssistantMessage';
 import AgentUserMessage from './AgentUserMessage';
 import AoiUploadPanel from './AoiUploadPanel';
 import './AgentChatPane.css';
@@ -16,8 +17,9 @@ const AGENT_MENTION_INSTRUCTIONS = `
 If the user's message contains a metadata block wrapped by <<SATGPT_MENTION_CONTEXT>> and <<END_SATGPT_MENTION_CONTEXT>>, parse that JSON first.
 Treat it as authoritative metadata for the spatial scope the user explicitly referenced in the text.
 The metadata only provides lightweight ids, labels, types, and sources. Do not treat it as raw geometry or as the full dataset payload.
-For spatial execution, only trust explicit uploaded or drawn scope mentions that resolve from the synced business layer store.
-If no explicit spatial mention is present, ask the user to provide one instead of silently falling back to a location-derived boundary.
+For normal flood information questions, do not require an @ spatial scope. Answer using general reasoning and web/tool search when needed.
+Only require an explicit uploaded or drawn @ spatial scope when the user asks to run spatial execution, such as map rendering, satellite imagery retrieval, raster layers, impact analysis, or a confirmed analysis workflow tied to a user-defined AOI.
+If spatial execution is requested without an explicit scope, ask for @ only at that point.
 When you explain your reasoning, refer to the visible @label the user typed, but do not expose the raw metadata block back to the user unless they explicitly ask for it.
 `;
 
@@ -60,25 +62,26 @@ function AgentChatPane() {
               instructions={AGENT_MENTION_INSTRUCTIONS}
               labels={{
                 title: "Flood Analysis Agent",
-                initial: "Describe a flood event, then type @ to attach an uploaded or drawn spatial scope.",
+                initial: "Ask about a flood event. Add @ only when you want to run analysis for a specific spatial scope.",
                 placeholder: "Enter flood event information...",
               }}
               suggestions={[
                 {
                   title: "2024 Chiang Mai Flood",
-                  message: "Please analyze the 2024 Chiang Mai flood event in Thailand",
+                  message: "Tell me about the 2024 Chiang Mai flood event in Thailand",
                 },
                 {
                   title: "2021 Zhengzhou Flood",
-                  message: "Please analyze the July 2021 Zhengzhou extreme rainfall event",
+                  message: "Tell me about the July 2021 Zhengzhou extreme rainfall event",
                 },
                 {
                   title: "2020 Jakarta Flood",
-                  message: "Please analyze the January 2020 Jakarta flood event",
+                  message: "Tell me about the January 2020 Jakarta flood event",
                 },
               ]}
               className="agent-chat-pane__copilot"
               Input={renderAgentChatInput}
+              AssistantMessage={AgentAssistantMessage}
               UserMessage={AgentUserMessage}
               onError={(copilotError) => {
                 if (

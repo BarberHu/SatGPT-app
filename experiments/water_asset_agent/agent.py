@@ -77,11 +77,10 @@ def _load_env(project_root: Path) -> None:
         return
 
     values = dotenv_values(env_path)
-    desired_project = values.get("GEE_PROJECT_ID") or values.get("PROJECT_ID")
+    desired_project = values.get("GEE_PROJECT_ID")
     if desired_project:
         os.environ["GEE_PROJECT_ID"] = desired_project
-        os.environ["PROJECT_ID"] = desired_project
-    for key in ["GOOGLE_APPLICATION_CREDENTIALS", "EE_PRIVATE_KEY_FILE", "EE_ACCOUNT"]:
+    for key in ["GOOGLE_APPLICATION_CREDENTIALS"]:
         if values.get(key):
             os.environ[key] = values[key]
 
