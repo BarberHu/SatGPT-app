@@ -4,10 +4,48 @@ SatGPT is a flood event analysis platform that combines a React map UI, a Copilo
 
 ## Architecture
 
+<<<<<<< codex/layeManagement-user-changes
 ```text
 React Frontend :3000
   |-- /api, /health, /agent --> FastAPI Agent :8000
   `-- /copilotkit ---------> CopilotKit Runtime :5000 --> FastAPI Agent :8000/agent
+=======
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/87be7cf0-fb08-4b6c-b1f1-3ef6008f5eb5
+
+## 📋 Overview
+
+- **🤖 AI Agent**: Conversational flood queries powered by LangGraph + CopilotKit
+- **🛰️ Satellite Imagery**: Sentinel-1/2 data via Google Earth Engine
+- **🗺️ Interactive Maps**: Multi-layer visualization with Mapbox
+- **📊 Impact Assessment**: Population, urban area, and land cover analysis
+
+## 🏗️ Project Structure
+
+```
+SatGPT-app/
+├── app.py                 # Flask backend (port 5001)
+├── agent/                 # AI Agent backend (FastAPI + LangGraph)
+│   ├── server.py          # FastAPI server (port 8000)
+│   ├── flood_agent.py     # LangGraph agent
+│   ├── gee_service.py     # Google Earth Engine service
+│   ├── tools.py           # Agent tools (Tavily search)
+│   ├── prompts.py         # System prompts
+│   └── state.py           # State definitions
+├── frontend/              # React frontend (port 3000)
+│   └── src/
+│       ├── components/    # UI components
+│       ├── context/       # React context
+│       ├── hooks/         # Custom hooks
+│       └── services/      # API services
+├── runtime/               # CopilotKit runtime (port 5000)
+│   └── server.ts          # Express + CopilotKit
+├── static/                # Static assets
+├── templates/             # HTML templates
+├── start_all.bat          # Compatibility wrapper to scripts/windows/start_windows.bat
+└── scripts/               # Windows setup/start scripts
+>>>>>>> experiment/layeManagement_develop
 ```
 
 ## Project Structure
@@ -23,6 +61,7 @@ requirements.txt       Root pointer to agent/requirements.txt
 
 ## Requirements
 
+<<<<<<< codex/layeManagement-user-changes
 - Python 3.12.10
 - Node.js 22.16.0
 - npm from Node.js 22.16.0
@@ -30,6 +69,13 @@ requirements.txt       Root pointer to agent/requirements.txt
 - Tavily API key
 - Google Earth Engine credentials
 - Mapbox access token
+=======
+```bash
+# 1. Python environment
+python -m venv flood-venv
+.\flood-venv\Scripts\activate        # Windows
+pip install -r requirements.txt
+>>>>>>> experiment/layeManagement_develop
 
 ## Setup
 

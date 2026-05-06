@@ -7,8 +7,11 @@ for %%I in ("%SCRIPT_DIR%..\..") do set "ROOT_DIR=%%~fI"
 
 set "VENV_DIR=%ROOT_DIR%\flood-venv"
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
+<<<<<<< codex/layeManagement-user-changes
 set "REQUIRED_NODE_VERSION=v22.16.0"
 set "NODE_VERSION_FILE=%TEMP%\satgpt-node-version.txt"
+=======
+>>>>>>> experiment/layeManagement_develop
 
 echo ==========================================
 echo        SatGPT Windows Start Script
@@ -91,6 +94,7 @@ echo Agent port: %AGENT_PORT%
 echo Runtime port: %RUNTIME_PORT%
 echo Frontend port: %FRONTEND_PORT%
 
+<<<<<<< codex/layeManagement-user-changes
 echo.
 echo [3/5] Syncing frontend public environment...
 powershell -ExecutionPolicy Bypass -File "%HELPERS_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
@@ -112,6 +116,21 @@ if errorlevel 1 (
 echo.
 echo [5/5] Starting services...
 start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" server.py
+=======
+echo [1/3] Checking port usage...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%check_ports_available.ps1" -Ports "%AGENT_PORT%,%RUNTIME_PORT%,%FRONTEND_PORT%"
+if errorlevel 1 exit /b 1
+
+echo Syncing frontend public environment from root .env...
+powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%sync_frontend_env.ps1" -RootDir "%ROOT_DIR%"
+if errorlevel 1 exit /b 1
+
+echo.
+echo [2/3] Starting FastAPI agent on %AGENT_PORT%...
+start "FastAPI Agent" cmd /k cd /d "%ROOT_DIR%\agent" ^&^& "%PYTHON_EXE%" server.py
+
+echo [3/3] Starting Node services...
+>>>>>>> experiment/layeManagement_develop
 start "CopilotKit Runtime" cmd /k cd /d "%ROOT_DIR%\runtime" ^&^& call npm start
 start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
 

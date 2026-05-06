@@ -1,0 +1,133 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e5]:
+      - region "Map" [ref=e6]
+      - generic:
+        - generic:
+          - generic [ref=e7]:
+            - button "Zoom in" [ref=e8] [cursor=pointer]
+            - button "Zoom out" [ref=e10] [cursor=pointer]
+            - button "Reset bearing to north" [ref=e12]
+          - generic [ref=e107]:
+            - button "Polygon tool (3)" [ref=e108] [cursor=pointer]
+            - button "Delete" [ref=e109] [cursor=pointer]
+          - button "Toggle map click loading" [ref=e111] [cursor=pointer]:
+            - generic [ref=e112]: 
+    - generic [ref=e21]:
+      - banner [ref=e22]:
+        - img "SatGPT Logo" [ref=e23]
+        - generic [ref=e24]:
+          - button "Switch to Ask mode" [active] [ref=e116] [cursor=pointer]:
+            - img [ref=e26]
+          - generic [ref=e29] [cursor=pointer]: »
+      - separator [ref=e30]
+      - generic [ref=e117]:
+        - generic [ref=e118]:
+          - generic [ref=e120]: Layer Manager
+          - generic [ref=e121]:
+            - generic [ref=e122]:
+              - generic [ref=e123]:
+                - generic [ref=e124]:
+                  - generic [ref=e125]: Raster Layers
+                  - generic [ref=e126]: "4"
+                - generic [ref=e127]:
+                  - generic [ref=e129]:
+                    - checkbox [disabled] [ref=e131]
+                    - generic [ref=e133]:
+                      - generic [ref=e134]:
+                        - generic [ref=e135]: Population Density
+                        - generic "WorldPop gridded population density for rapid exposure context." [ref=e137]: "!"
+                      - generic [ref=e138]:
+                        - generic [ref=e141]: Population density
+                        - generic [ref=e142]: 0 - 1000
+                  - generic [ref=e144]:
+                    - checkbox [disabled] [ref=e146]
+                    - generic [ref=e148]:
+                      - generic [ref=e149]:
+                        - generic [ref=e150]: LCLU
+                        - generic "ESA WorldCover land cover classification clipped to the selected AOI." [ref=e152]: "!"
+                      - generic [ref=e153]:
+                        - generic [ref=e154]:
+                          - generic [ref=e157]: Tree
+                          - generic [ref=e160]: Shrub
+                          - generic [ref=e163]: Grass
+                          - generic [ref=e166]: Crop
+                          - generic [ref=e169]: Built
+                          - generic [ref=e172]: Water
+                        - generic [ref=e173]: ESA WorldCover
+                  - generic [ref=e175]:
+                    - checkbox [disabled] [ref=e177]
+                    - generic [ref=e179]:
+                      - generic [ref=e180]:
+                        - generic [ref=e181]: Soil Texture
+                        - generic "Soil texture class layer for infiltration and runoff context." [ref=e183]: "!"
+                      - generic [ref=e185]: Soil texture classes
+                  - generic [ref=e187]:
+                    - checkbox [disabled] [ref=e189]
+                    - generic [ref=e191]:
+                      - generic [ref=e192]:
+                        - generic [ref=e193]: Healthcare Access
+                        - generic "Travel-time accessibility surface to nearby healthcare services." [ref=e195]: "!"
+                      - generic [ref=e196]:
+                        - generic [ref=e199]: Access time
+                        - generic [ref=e200]: 0 - >1000 min
+              - generic [ref=e201]:
+                - generic [ref=e202]:
+                  - generic [ref=e203]: Imagery
+                  - generic [ref=e204]: "2"
+                - generic [ref=e205]:
+                  - generic [ref=e206]:
+                    - generic [ref=e207]:
+                      - checkbox [disabled] [ref=e209]
+                      - generic [ref=e211]:
+                        - generic [ref=e212]:
+                          - generic [ref=e213]: Optical Imagery
+                          - generic "Optical base imagery for visual flood context" [ref=e215]: "!"
+                        - generic [ref=e217]: True color RGB composite
+                    - generic [ref=e219]: Current
+                  - generic [ref=e221]:
+                    - checkbox [disabled] [ref=e223]
+                    - generic [ref=e225]:
+                      - generic [ref=e226]:
+                        - generic [ref=e227]: SAR Imagery
+                        - generic "SAR base imagery for cloud-resistant flood context" [ref=e229]: "!"
+                      - generic [ref=e230]:
+                        - generic [ref=e233]: VV backscatter
+                        - generic [ref=e234]: "-25 dB - 0 dB"
+            - generic [ref=e235]:
+              - generic [ref=e236]: Search a place name, preview the boundary on the map, then add it to Vector Layers.
+              - generic [ref=e237]:
+                - textbox "e.g. Guangxi, China" [ref=e238]
+                - button "Search" [ref=e239] [cursor=pointer]
+        - generic [ref=e240]:
+          - button "DOWNLOAD GEE CODE"
+    - complementary [ref=e241]:
+      - generic [ref=e242]:
+        - generic [ref=e243]:
+          - generic [ref=e244]: Agent Workspace
+          - heading "Flood Analysis Chat" [level=2] [ref=e245]
+        - generic [ref=e246]:
+          - button "Start a new agent conversation" [ref=e247] [cursor=pointer]:
+            - generic [ref=e248]: 
+          - button "Collapse agent chat sidebar" [ref=e249] [cursor=pointer]:
+            - generic [ref=e250]: 
+      - generic [ref=e254]:
+        - generic [ref=e255]:
+          - paragraph [ref=e259]: Describe a flood event, then type @ to attach an uploaded or drawn spatial scope.
+          - generic [ref=e261]:
+            - button "2024 Chiang Mai Flood" [ref=e262] [cursor=pointer]
+            - button "2021 Zhengzhou Flood" [ref=e263] [cursor=pointer]
+            - button "2020 Jakarta Flood" [ref=e264] [cursor=pointer]
+        - generic [ref=e266]:
+          - generic [ref=e267]:
+            - generic: Describe the event, then use @ to select a spatial scope.
+            - textbox [ref=e268]
+          - generic [ref=e269]:
+            - button "Upload spatial scope" [ref=e270] [cursor=pointer]:
+              - img [ref=e271]
+            - button "Send message" [disabled] [ref=e274]:
+              - img [ref=e275]
+  - button "Web Inspector" [ref=e105]:
+    - note [ref=e113]:
+      - generic [ref=e114]: CopilotKit v1.50 is now live!
+    - img "Inspector logo" [ref=e106]

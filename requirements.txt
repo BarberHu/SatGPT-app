@@ -1,1 +1,83 @@
+<<<<<<< codex/layeManagement-user-changes
 -r agent/requirements.txt
+=======
+# SatGPT unified Python dependencies
+# Runtime baseline: Python 3.12.10 on Windows x64.
+#
+# This file is the single source of truth for the Python environment.
+# Keep agent/requirements.txt as a compatibility shim only.
+
+# Build / packaging compatibility
+setuptools<81
+packaging==26.1
+pyparsing==2.4.7
+
+# Legacy Flask compatibility layer
+Flask==2.2.5
+Flask-Cors==4.0.0
+Werkzeug==2.2.3
+Jinja2==3.0.3
+MarkupSafe==2.1.5
+itsdangerous==2.1.2
+click==8.1.8
+gunicorn==20.0.4
+
+# FastAPI / Agent service
+fastapi==0.115.14
+uvicorn==0.41.0
+pydantic==2.12.5
+python-dotenv==1.2.1
+httpx==0.28.1
+requests==2.33.1
+
+# LangGraph / CopilotKit / LLM tooling
+langgraph==1.0.10
+langchain==1.2.10
+langchain-openai==1.1.11
+langchain-community==0.4.1
+copilotkit==0.1.78
+ag-ui-langgraph==0.0.25
+tavily-python==0.7.23
+openai==2.32.0
+
+# Google Earth Engine / Google APIs
+earthengine-api==1.7.22
+google-api-core==1.31.0
+google-api-python-client==1.12.8
+google-auth==1.32.1
+google-auth-httplib2==0.1.0
+google-auth-oauthlib==0.4.1
+google-cloud-core==1.7.1
+google-cloud-storage==1.40.0
+google-resumable-media==1.3.1
+googleapis-common-protos==1.52.0
+httplib2==0.19.1
+httplib2shim==0.0.3
+oauth2client==4.1.3
+oauthlib==3.1.0
+requests-oauthlib==1.3.0
+protobuf==3.20.3
+
+# Legacy Google / HTTP transitive pins kept because app.py and config.py still
+# carry the original SatGPT GEE integration.
+cachetools==3.1.1
+certifi==2026.2.25
+chardet==4.0.0
+crcmod==1.7
+future==0.18.2
+idna==2.10
+pyasn1==0.4.8
+pyasn1-modules==0.2.8
+pytz==2021.1
+rsa==3.4.2
+six==1.16.0
+uritemplate==3.0.1
+urllib3==1.26.6
+
+# Reporting / console helpers
+reportlab==4.0.6
+backports.functools-lru-cache==1.6.4
+blessed==1.18.1
+blessings==1.7
+wcwidth==0.2.5
+>>>>>>> experiment/layeManagement_develop
