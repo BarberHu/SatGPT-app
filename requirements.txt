@@ -1,3 +1,6 @@
+<<<<<<< codex/layeManagement-user-changes
+-r agent/requirements.txt
+=======
 # SatGPT unified Python dependencies
 # Runtime baseline: Python 3.12.10 on Windows x64.
 #
@@ -77,3 +80,4 @@ backports.functools-lru-cache==1.6.4
 blessed==1.18.1
 blessings==1.7
 wcwidth==0.2.5
+>>>>>>> experiment/layeManagement_develop

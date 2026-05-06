@@ -233,11 +233,6 @@ function AgentChatInput({
       store_key,
     }));
 
-    if (!validMentions.length) {
-      setSendError('This test flow requires an explicit @spatial scope in every message. Select one from the dropdown first.');
-      return;
-    }
-
     const payload = appendMentionContext(text, validMentions);
     logAgentDiagnostic('chat', 'send_message', {
       textLength: text.length,
@@ -309,7 +304,7 @@ function AgentChatInput({
               aria-hidden="true"
             >
               {text ? renderHighlightedText(text, mentions) : (
-                <span className="agent-chat-placeholder">Describe the event, then use @ to select a spatial scope.</span>
+                <span className="agent-chat-placeholder">Ask about a flood event. Use @ only when selecting a spatial scope.</span>
               )}
             </div>
             <textarea

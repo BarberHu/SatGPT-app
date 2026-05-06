@@ -45,12 +45,10 @@ def _bootstrap_env(project_root: Path) -> None:
     if not dotenv_values:
         return
     values = dotenv_values(env_path)
-    desired_project = values.get("GEE_PROJECT_ID") or values.get("PROJECT_ID")
+    desired_project = values.get("GEE_PROJECT_ID")
     if desired_project and not os.getenv("GEE_PROJECT_ID"):
         os.environ["GEE_PROJECT_ID"] = desired_project
-    if desired_project and not os.getenv("PROJECT_ID"):
-        os.environ["PROJECT_ID"] = desired_project
-    for key in ["GOOGLE_APPLICATION_CREDENTIALS", "EE_PRIVATE_KEY_FILE", "EE_ACCOUNT"]:
+    for key in ["GOOGLE_APPLICATION_CREDENTIALS"]:
         if values.get(key) and not os.getenv(key):
             os.environ[key] = values[key]
 
@@ -109,14 +107,9 @@ class GEETileService:
         if os.getenv("GEE_PROJECT_ID"):
             self.project_id = os.getenv("GEE_PROJECT_ID")
             self.project_id_source = "env:GEE_PROJECT_ID"
-        elif os.getenv("PROJECT_ID"):
-            self.project_id = os.getenv("PROJECT_ID")
-            self.project_id_source = "env:PROJECT_ID"
         else:
             self.project_id = None
         self.credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        self.legacy_private_key_path = os.getenv("EE_PRIVATE_KEY_FILE")
-        self.ee_account = os.getenv("EE_ACCOUNT")
         self.proxy = TileProxyServer.get_instance()
         self.initialized = False
         self.init_error: Optional[str] = None
@@ -124,8 +117,8 @@ class GEETileService:
             "mode": "uninitialized",
             "project_id": self.project_id,
             "project_id_source": self.project_id_source,
-            "account": self.ee_account,
-            "credentials_path": self.credentials_path or self.legacy_private_key_path,
+            "account": None,
+            "credentials_path": self.credentials_path,
             "tile_proxy_base_url": self.proxy.base_url,
         }
 
@@ -168,17 +161,15 @@ class GEETileService:
                 "mode": "failed",
                 "project_id": self.project_id,
                 "project_id_source": self.project_id_source,
-                "account": self.ee_account,
-                "credentials_path": self.credentials_path or self.legacy_private_key_path,
+                "account": None,
+                "credentials_path": self.credentials_path,
                 "tile_proxy_base_url": self.proxy.base_url,
                 "error": str(exc),
             }
 
     def _resolve_credentials_path(self) -> Optional[Path]:
-        for raw_path in [self.legacy_private_key_path, self.credentials_path]:
-            if not raw_path:
-                continue
-            path = Path(raw_path)
+        if self.credentials_path:
+            path = Path(self.credentials_path)
             if path.is_absolute() and path.exists():
                 return path
             candidate = (self.project_root / path).resolve()
@@ -189,12 +180,10 @@ class GEETileService:
         return None
 
     def _resolve_service_account_email(self, credential_file: Path) -> str:
-        if self.ee_account:
-            return self.ee_account
         payload = json.loads(credential_file.read_text(encoding="utf-8"))
         email = payload.get("client_email")
         if not email:
-            raise ValueError("Service account JSON 缺少 client_email，请设置 EE_ACCOUNT。")
+            raise ValueError("Service account JSON is missing client_email.")
         return email
 
     def _resolve_service_account_project_id(self, credential_file: Path) -> Optional[str]:

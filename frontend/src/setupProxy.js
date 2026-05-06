@@ -1,33 +1,23 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
-  const agentTarget =
-    process.env.REACT_APP_AGENT_API_URL || 'http://localhost:8000';
-  const runtimeTarget =
-    process.env.REACT_APP_COPILOTKIT_PROXY_TARGET || 'http://localhost:5000';
+  const publicHost = process.env.SATGPT_PUBLIC_HOST || 'localhost';
+  const agentPort = process.env.AGENT_PORT || '8000';
+  const runtimePort = process.env.RUNTIME_PORT || '5000';
+  const agentTarget = `http://${publicHost}:${agentPort}`;
+  const runtimeTarget = `http://${publicHost}:${runtimePort}`;
 
-  // Proxy legacy routes to FastAPI for backward compatibility.
+  // Proxy FloodAgent API requests to FastAPI.
   app.use(
-    [
-      '/get_default',
-      '/get_historical_map',
-      '/get_unsupervised_map',
-      '/get_flood_hotspot_map',
-      '/get_water_regime_change_map',
-      '/chatGPT',
-      '/get_script',
-      '/get_pdf',
-      '/flask-health-check',
-    ],
+    '/api',
     createProxyMiddleware({
       target: agentTarget,
       changeOrigin: true,
     })
   );
 
-  // Proxy FloodAgent API requests to FastAPI.
   app.use(
-    '/api',
+    ['/health', '/agent'],
     createProxyMiddleware({
       target: agentTarget,
       changeOrigin: true,

@@ -1,9 +1,15 @@
-# 🌊 SatGPT - Flood Analysis Platform
+# SatGPT - Flood Analysis Platform
 
-An intelligent flood event analysis platform integrating AI-powered chatbot, satellite remote sensing imagery, and interactive mapping capabilities.
+SatGPT is a flood event analysis platform that combines a React map UI, a CopilotKit runtime, a FastAPI backend, LangGraph, Google Earth Engine, and OpenAI/Tavily integrations.
 
-> **Forked from [sas-unescap/SatGPT-app](https://github.com/sas-unescap/SatGPT-app)** and extended with LangGraph AI Agent, CopilotKit integration, and advanced flood detection.
+## Architecture
 
+<<<<<<< codex/layeManagement-user-changes
+```text
+React Frontend :3000
+  |-- /api, /health, /agent --> FastAPI Agent :8000
+  `-- /copilotkit ---------> CopilotKit Runtime :5000 --> FastAPI Agent :8000/agent
+=======
 ## 🎬 Demo
 
 https://github.com/user-attachments/assets/87be7cf0-fb08-4b6c-b1f1-3ef6008f5eb5
@@ -39,119 +45,93 @@ SatGPT-app/
 ├── templates/             # HTML templates
 ├── start_all.bat          # Compatibility wrapper to scripts/windows/start_windows.bat
 └── scripts/               # Windows setup/start scripts
+>>>>>>> experiment/layeManagement_develop
 ```
 
-## 🚀 Quick Start
+## Project Structure
 
-### Prerequisites
+```text
+agent/                 FastAPI + LangGraph backend
+frontend/              React frontend
+runtime/               CopilotKit runtime
+scripts/windows/       Windows setup/start scripts
+start_all.bat          Root wrapper for scripts/windows/start_windows.bat
+requirements.txt       Root pointer to agent/requirements.txt
+```
 
-- Node.js ≥ 18
-- Python ≥ 3.10
-- API Keys: OpenAI, Tavily, Mapbox, GEE Service Account
+## Requirements
 
-### Installation
-
+<<<<<<< codex/layeManagement-user-changes
+- Python 3.12.10
+- Node.js 22.16.0
+- npm from Node.js 22.16.0
+- OpenAI API key
+- Tavily API key
+- Google Earth Engine credentials
+- Mapbox access token
+=======
 ```bash
 # 1. Python environment
 python -m venv flood-venv
 .\flood-venv\Scripts\activate        # Windows
 pip install -r requirements.txt
+>>>>>>> experiment/layeManagement_develop
 
-# 2. Frontend dependencies
-cd frontend && npm install && cd ..
+## Setup
 
-# 3. Runtime dependencies
-cd runtime && npm install && cd ..
+```powershell
+.\scripts\windows\setup_windows.bat
 ```
 
-### Configuration
+The setup script creates `flood-venv`, installs the FastAPI backend dependencies, installs frontend/runtime npm dependencies, creates `.env` from `.env.example` when missing, and syncs public frontend variables into `frontend\.env.local`.
 
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and fill in your credentials:
+Fill in `.env` after setup:
 
 ```env
 OPENAI_API_KEY=your-openai-key
 TAVILY_API_KEY=your-tavily-key
-GOOGLE_APPLICATION_CREDENTIALS=./your-service-account.json
+GOOGLE_APPLICATION_CREDENTIALS=.\your-service-account.json
 GEE_PROJECT_ID=your-gcp-project
 REACT_APP_MAPBOX_ACCESS_KEY=your-mapbox-token
 ```
 
-`.env.example` is the version-controlled template.
-Your local `.env` is the actual runtime configuration file.
-When you use the Windows scripts, public frontend variables are synced from
-the root `.env` into `frontend/.env.local` automatically.
-Agent / Runtime / Frontend ports are also configured from the root `.env`.
-For LAN access, prefer leaving `REACT_APP_AGENT_API_URL` blank and using the
-same-origin React proxy instead of hard-coding `localhost`.
+## Start
 
-### Start Services
-
-```bash
-# Preferred Windows entrypoint
-.\scripts\windows\start_windows.bat
-
-# Compatibility alias
+```powershell
 .\start_all.bat
-
-# Or start individually:
-# Terminal 1: FastAPI Agent (port 8000)
-cd agent && python server.py
-
-# Terminal 2: CopilotKit Runtime (port 5000)
-cd runtime && npm run dev
-
-# Terminal 3: React Frontend (port 3000)
-cd frontend && npm start
 ```
 
-Open http://localhost:3000
+This starts:
 
-If startup reports a port conflict, stop the printed PID first or change the
-matching value in the repository root `.env` (`FRONTEND_PORT`, `RUNTIME_PORT`,
-or `AGENT_PORT`) and rerun the Windows start script. The Agent mode request path
-is `React frontend -> CopilotKit runtime -> FastAPI agent`, so a stale or stuck
-runtime process on `RUNTIME_PORT` can make the frontend and agent look started
-while chat requests still fail.
+```text
+FastAPI Agent:      http://localhost:8000
+CopilotKit Runtime: http://localhost:5000
+React Frontend:     http://localhost:3000
+```
 
-## 🎯 Usage
+Open http://localhost:3000.
 
-1. Open the app and switch to **"Agent"** mode
-2. Enter a flood query, e.g., *"Analyze the 2024 Chiang Mai flood event"*
-3. Confirm the AI-extracted date information
-4. View satellite imagery and flood detection results on the map
-5. Download the analysis report
-
-## 📡 API Endpoints
+## API
 
 | Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/copilotkit` | POST | CopilotKit agent entry |
+| --- | --- | --- |
+| `/health` | GET | FastAPI health check |
+| `/agent` | POST | AG-UI agent endpoint |
+| `/api/maps/default` | GET | Default water map |
+| `/api/maps/historical` | POST | Historical flood data |
+| `/api/maps/flood-hotspot` | POST | Flood hotspot data |
+| `/api/maps/unsupervised` | POST | Unsupervised classification |
+| `/api/chat` | POST | Ask-mode chat |
+| `/api/scripts/gee` | POST | Generate GEE script |
+| `/api/scripts/pdf` | GET | Download generated script PDF |
 | `/api/flood-images` | POST | Get Sentinel flood imagery |
 | `/api/flood-impact` | POST | Get impact assessment |
 | `/api/gee-status` | GET | GEE service status |
-| `/api/geocode` | GET | Geocode location |
+| `/api/location-search` | POST | Search and resolve locations |
 
-## 🔧 Architecture
+## Troubleshooting
 
-```
-React Frontend (3000) → CopilotKit Runtime (5000) → FastAPI Agent (8000)
-                                                         ├── LangGraph Agent
-                                                         ├── GEE Service
-                                                         └── Tavily Search
-```
+If startup reports a port conflict, stop the printed PID first or change `FRONTEND_PORT`, `RUNTIME_PORT`, or `AGENT_PORT` in the repository root `.env`.
 
-## 📄 License
+If GEE reports `initialized=false`, check `GOOGLE_APPLICATION_CREDENTIALS` and `GEE_PROJECT_ID` in `.env`.
 
-MIT License
-
-## 👤 Author
-
-**Wang Yang**
-
----
-
-*Built with React, CopilotKit, LangGraph, Google Earth Engine, and Mapbox*
