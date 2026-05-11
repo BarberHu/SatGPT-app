@@ -37,28 +37,14 @@ if errorlevel 1 (
     goto :Fail
 )
 
-<<<<<<< codex/layeManagement-user-changes
 set /p "PYTHON_VERSION_OUTPUT="<"%PYTHON_VERSION_FILE%"
 if /I not "%PYTHON_VERSION_OUTPUT%"=="Python %REQUIRED_PYTHON_VERSION%" (
     set "ERROR_MESSAGE=Expected Python %REQUIRED_PYTHON_VERSION%, but found: %PYTHON_VERSION_OUTPUT%"
     set "FIX_MESSAGE=Make sure py -3.12 points to Python %REQUIRED_PYTHON_VERSION%."
     goto :Fail
-=======
-if not exist "%VENV_DIR%\Scripts\python.exe" (
-    echo [1/6] Creating Python virtual environment...
-    if "%DRY_RUN%"=="1" (
-        echo DRY-RUN: python -m venv "%VENV_DIR%"
-    ) else (
-        python -m venv "%VENV_DIR%"
-        if errorlevel 1 exit /b 1
-    )
-) else (
-    echo [1/6] Reusing existing virtual environment: "%VENV_DIR%"
->>>>>>> experiment/layeManagement_develop
 )
 echo OK: %PYTHON_VERSION_OUTPUT%
 
-<<<<<<< codex/layeManagement-user-changes
 echo.
 echo [2/7] Checking Node.js and npm...
 where node >nul 2>&1
@@ -66,14 +52,6 @@ if errorlevel 1 (
     set "ERROR_MESSAGE=node was not found in PATH."
     set "FIX_MESSAGE=Install Node.js %REQUIRED_NODE_VERSION% or put it before other node.exe entries in PATH."
     goto :Fail
-=======
-echo [2/6] Upgrading pip...
-if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: "%PYTHON_EXE%" -m pip install --upgrade pip
-) else (
-    "%PYTHON_EXE%" -m pip install --upgrade pip
-    if errorlevel 1 exit /b 1
->>>>>>> experiment/layeManagement_develop
 )
 
 node --version > "%NODE_VERSION_FILE%" 2>&1
@@ -84,20 +62,11 @@ if errorlevel 1 (
     goto :Fail
 )
 
-<<<<<<< codex/layeManagement-user-changes
 set /p "NODE_VERSION_OUTPUT="<"%NODE_VERSION_FILE%"
 if /I not "%NODE_VERSION_OUTPUT%"=="%REQUIRED_NODE_VERSION%" (
     set "ERROR_MESSAGE=Expected Node.js %REQUIRED_NODE_VERSION%, but found: %NODE_VERSION_OUTPUT%"
     set "FIX_MESSAGE=Install Node.js %REQUIRED_NODE_VERSION% or adjust PATH order."
     goto :Fail
-=======
-echo [4/6] Installing Python dependencies...
-if "%DRY_RUN%"=="1" (
-    echo DRY-RUN: "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\requirements.txt"
-) else (
-    "%PYTHON_EXE%" -m pip install -r "%ROOT_DIR%\requirements.txt"
-    if errorlevel 1 exit /b 1
->>>>>>> experiment/layeManagement_develop
 )
 echo OK: Node.js %NODE_VERSION_OUTPUT%
 
