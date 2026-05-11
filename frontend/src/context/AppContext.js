@@ -64,7 +64,6 @@ const defaultAgentRasterLayerVisibility = {
   lclu: false,
   populationDensity: false,
   soilTexture: false,
-  healthCareAccess: false,
 };
 
 const defaultAgentLayerOrder = [
@@ -77,7 +76,6 @@ const defaultAgentLayerOrder = [
   'agent-raster-populationDensity',
   'agent-raster-lclu',
   'agent-raster-soilTexture',
-  'agent-raster-healthCareAccess',
 ];
 
 const resolveCurrentBusinessScopeAoi = (records = [], selectedAoi = null) => {

@@ -35,6 +35,7 @@ build/
 # Sensitive files
 # =====================
 .env
+.env.past
 .env.local
 .env.*.local
 *.pem
