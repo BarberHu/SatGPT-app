@@ -34,6 +34,8 @@ function Get-EnvValue {
 
 $values = [ordered]@{
     SATGPT_PUBLIC_HOST = Get-EnvValue -Names @("SATGPT_PUBLIC_HOST") -Default "localhost"
+    SATGPT_SERVICE_HOST = Get-EnvValue -Names @("SATGPT_SERVICE_HOST") -Default "127.0.0.1"
+    SATGPT_HTTP_PROXY = Get-EnvValue -Names @("SATGPT_HTTP_PROXY", "HTTP_PROXY", "HTTPS_PROXY") -Default ""
     AGENT_HOST = Get-EnvValue -Names @("AGENT_HOST") -Default "0.0.0.0"
     AGENT_PORT = Get-EnvValue -Names @("AGENT_PORT") -Default "8000"
     AGENT_DEBUG = Get-EnvValue -Names @("AGENT_DEBUG") -Default "True"
