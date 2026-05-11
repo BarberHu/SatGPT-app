@@ -83,8 +83,8 @@ if errorlevel 1 (
 if not "%SATGPT_HTTP_PROXY%"=="" (
     set "HTTP_PROXY=%SATGPT_HTTP_PROXY%"
     set "HTTPS_PROXY=%SATGPT_HTTP_PROXY%"
-    set "NO_PROXY=localhost,127.0.0.1,::1,%SATGPT_PUBLIC_HOST%"
-    set "no_proxy=localhost,127.0.0.1,::1,%SATGPT_PUBLIC_HOST%"
+    set "NO_PROXY=localhost,127.0.0.1,::1,%SATGPT_SERVICE_HOST%,%SATGPT_PUBLIC_HOST%"
+    set "no_proxy=localhost,127.0.0.1,::1,%SATGPT_SERVICE_HOST%,%SATGPT_PUBLIC_HOST%"
     echo Proxy: %SATGPT_HTTP_PROXY%
 )
 echo Agent port: %AGENT_PORT%

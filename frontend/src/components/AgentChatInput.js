@@ -233,14 +233,15 @@ function AgentChatInput({
       store_key,
     }));
 
-    const payload = appendMentionContext(text, validMentions);
+    const draftText = text;
+    const draftMentions = mentions;
+    const payload = appendMentionContext(draftText, validMentions);
     logAgentDiagnostic('chat', 'send_message', {
-      textLength: text.length,
+      textLength: draftText.length,
       mentionCount: validMentions.length,
       chatReady,
       inProgress,
     });
-    await onSend(payload);
     setText('');
     setMentions([]);
     setActiveMentionQuery(null);
@@ -253,6 +254,14 @@ function AgentChatInput({
       textareaRef.current.style.height = 'auto';
       textareaRef.current.focus();
     });
+
+    try {
+      await onSend(payload);
+    } catch (error) {
+      setText(draftText);
+      setMentions(draftMentions);
+      setSendError(error?.message || 'Failed to send message.');
+    }
   };
 
   const handleKeyDown = async (event) => {
