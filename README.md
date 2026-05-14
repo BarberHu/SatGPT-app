@@ -2,6 +2,10 @@
 
 SatGPT is a flood event analysis platform that combines a React map UI, a CopilotKit runtime, a FastAPI backend, LangGraph, Google Earth Engine, and OpenAI/Tavily integrations.
 
+## Demo
+
+https://github.com/user-attachments/assets/61a1a09f-c380-4bd8-9f7d-e1dfb38748d1
+
 ## Architecture
 
 ```text
