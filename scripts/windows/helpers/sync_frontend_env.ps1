@@ -36,8 +36,6 @@ function Get-EnvValue {
 $frontendHost = Get-EnvValue -Names @("FRONTEND_HOST") -Default "0.0.0.0"
 $frontendPort = Get-EnvValue -Names @("FRONTEND_PORT") -Default "3000"
 
-$defaultCopilotkitUrl = "/copilotkit"
-
 $content = @(
     "# Auto-generated from the repository root .env",
     "# Edit the root .env, then rerun scripts\windows\start_windows.bat",
@@ -45,8 +43,8 @@ $content = @(
     "PORT=${frontendPort}",
     "GENERATE_SOURCEMAP=$(Get-EnvValue -Names @('GENERATE_SOURCEMAP') -Default 'false')",
     "REACT_APP_MAPBOX_ACCESS_KEY=$(Get-EnvValue -Names @('REACT_APP_MAPBOX_ACCESS_KEY'))",
-    "REACT_APP_API_URL=$(Get-EnvValue -Names @('REACT_APP_API_URL'))",
-    "REACT_APP_COPILOTKIT_URL=$(Get-EnvValue -Names @('REACT_APP_COPILOTKIT_URL') -Default $defaultCopilotkitUrl)"
+    "REACT_APP_API_URL=",
+    "REACT_APP_COPILOTKIT_URL=/copilotkit"
 )
 
 [System.IO.File]::WriteAllLines(
