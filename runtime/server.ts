@@ -24,18 +24,19 @@ const FRONTEND_PORT = process.env.FRONTEND_PORT || "3000";
 const PUBLIC_HOST = process.env.SATGPT_PUBLIC_HOST || "localhost";
 
 function getAllowedCorsOrigins(): string[] {
-  const configured = (process.env.SATGPT_CORS_ORIGINS || "").trim();
-  if (configured) {
-    return configured
-      .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean);
-  }
-
   const origins = new Set([
     `http://localhost:${FRONTEND_PORT}`,
     `http://127.0.0.1:${FRONTEND_PORT}`,
   ]);
+
+  const configured = (process.env.SATGPT_CORS_ORIGINS || "").trim();
+  if (configured) {
+    configured
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+      .forEach((origin) => origins.add(origin));
+  }
 
   if (!["localhost", "127.0.0.1", "0.0.0.0"].includes(PUBLIC_HOST)) {
     origins.add(`http://${PUBLIC_HOST}:${FRONTEND_PORT}`);
@@ -65,7 +66,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Python LangGraph 后端地址（FastAPI）。
 const AGENT_PORT = process.env.AGENT_PORT || "8000";
-const AGENT_URL = process.env.AGENT_URL || `http://${PUBLIC_HOST}:${AGENT_PORT}`;
+const AGENT_URL = process.env.AGENT_URL || `http://localhost:${AGENT_PORT}`;
 
 // CopilotKit 需要的空服务适配器。
 const serviceAdapter = new EmptyAdapter();
