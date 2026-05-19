@@ -333,7 +333,9 @@ def _normalize_intent(raw_intent: Dict[str, Any], message_content: Optional[str]
         if not intent["has_spatial_scope_mention"] and "@spatial scope" not in missing:
             missing.append("@spatial scope")
         if missing:
-            intent["should_use_search"] = bool(has_ambiguous_year_event)
+            intent["should_use_search"] = bool(
+                has_ambiguous_year_event or intent["has_spatial_scope_mention"]
+            )
             intent["should_append_json"] = False
             intent["should_start_workflow"] = False
         else:
@@ -787,7 +789,7 @@ tools = [search_flood_event]
 # ============== 节点定义 ==============
 
 # 定义节点路由类型
-NodeType = Literal["intent_node", "chat_node", "tool_node", "extraction_node", "pre_confirmation_node", "confirmation_node", "processing_node", "__end__"]
+NodeType = Literal["intent_node", "chat_node", "tool_node", "extraction_node", "pre_confirmation_node", "confirmation_node", "__end__"]
 
 
 async def entry_node(
@@ -859,19 +861,22 @@ async def chat_node(
 ) -> Command[NodeType]:
     model = _get_model()
     current_stage = state.get('stage', 'initial')
+    continuing_workflow_autofill = current_stage == "awaiting_workflow_event_confirmation"
     latest_user_message = _get_latest_user_message_content(state.get("messages", []))
     intent = _normalize_intent(state.get("intent") or {}, latest_user_message)
     intent_type = intent.get("intent_type", "event_discovery")
     missing_requirements = ", ".join(intent.get("missing_requirements") or []) or "none"
 
     fe_tools = state.get("copilotkit", {}).get("actions", [])
-    can_use_search_tools = bool(intent.get("should_use_search"))
+    can_use_search_tools = bool(intent.get("should_use_search")) and not continuing_workflow_autofill
     model_with_tools = model.bind_tools([*fe_tools, *tools]) if can_use_search_tools else model
 
-    if intent.get("requests_inundation_extraction") and not intent.get("should_start_workflow"):
+    if continuing_workflow_autofill:
+        mode = "workflow_autofill"
+    elif intent.get("requests_inundation_extraction") and not intent.get("should_start_workflow"):
         mode = "inundation_missing"
     elif intent.get("requests_workflow") and not intent.get("should_start_workflow"):
-        mode = "workflow_missing"
+        mode = "workflow_autofill" if intent.get("has_spatial_scope_mention") else "workflow_missing"
     elif intent.get("should_start_workflow"):
         mode = "workflow_ready"
     elif intent.get("is_specific_flood_event"):
@@ -879,12 +884,28 @@ async def chat_node(
     else:
         mode = "event_discovery"
 
+    can_autofill_workflow = bool(
+        continuing_workflow_autofill
+        or (
+            intent.get("requests_workflow")
+            and intent.get("has_spatial_scope_mention")
+            and not intent.get("should_start_workflow")
+        )
+    )
     search_rule = "candidate_search" if intent.get("should_use_search") and "specific flood event" in missing_requirements else ("allowed" if intent.get("should_use_search") else "forbidden")
-    json_rule = "append_required" if intent.get("should_start_workflow") else "forbidden"
+    if intent.get("should_start_workflow"):
+        json_rule = "append_required"
+    elif can_autofill_workflow:
+        json_rule = "append_if_confident"
+    else:
+        json_rule = "forbidden"
     workflow_instruction = (
         f"Mode={mode}; Missing={missing_requirements}; Search={search_rule}; JSON={json_rule}. "
-        "Workflow starts only with a specific event and explicit @ spatial scope. "
+        "Workflow execution starts only after specific event details and explicit @ spatial scope are confirmed. "
         "When JSON=append_required, end the response with one fenced ```json block containing event, event_description, location, pre_date, peek_date, and after_date. "
+        "When JSON=append_if_confident, use conversation memory, event aliases, or search results to propose the most likely concrete flood event; append the same JSON only if dates are reasonably confident, and phrase it as a candidate for user confirmation. "
+        "If the user confirms a previously proposed candidate event or date range, append the JSON for that candidate so the formal confirmation step can start. "
+        "If no confident candidate can be identified, do not append JSON; ask the user for the event time or candidate event name. "
         "If only a year is provided, explain ambiguity and ask for month/date or a candidate choice. "
         "If @ is missing for workflow, ask for @ spatial scope. Keep the answer concise."
     )
@@ -958,9 +979,18 @@ async def extraction_node(
     
     user_confirmed = state.get('user_confirmed', False)
     current_stage = state.get('stage', 'initial')
+    continuing_workflow_autofill = current_stage == "awaiting_workflow_event_confirmation"
     latest_user_message = _get_latest_user_message_content(messages)
     intent = _normalize_intent(state.get("intent") or {}, latest_user_message)
-    analysis_workflow_requested = bool(intent.get("should_start_workflow"))
+    analysis_workflow_requested = bool(
+        intent.get("should_start_workflow")
+        or continuing_workflow_autofill
+        or (
+            intent.get("requests_workflow")
+            and intent.get("has_spatial_scope_mention")
+            and has_complete_info
+        )
+    )
     
     # 如果有完整信息且未确认，进入确认节点
     if has_complete_info and analysis_workflow_requested and not user_confirmed and current_stage != "completed":
@@ -978,6 +1008,20 @@ async def extraction_node(
         )
     
     # 普通响应，结束流程
+    if intent.get("requests_workflow") and intent.get("has_spatial_scope_mention") and not has_complete_info and current_stage == "initial":
+        return Command(
+            goto="__end__",
+            update={
+                "event": event,
+                "event_description": event_description,
+                "location": location,
+                "pre_date": pre_date,
+                "peek_date": peek_date,
+                "after_date": after_date,
+                "stage": "awaiting_workflow_event_confirmation",
+            }
+        )
+
     return Command(
         goto="__end__",
         update={
@@ -1109,10 +1153,17 @@ async def confirmation_node(
     
     # 用户确认，更新数据并进入处理节点
     print("[INFO] User confirmed event details")
-    
+    mapping_message = AIMessage(
+        content=(
+            "Confirmed. Starting flood mapping with the selected event, dates, AOI, "
+            "and recommended layers."
+        )
+    )
+
     return Command(
-        goto="processing_node",
+        goto="__end__",
         update={
+            "messages": mapping_message,
             "event": confirmed_data.get("event", event),
             "event_description": confirmed_data.get("event_description", event_description),
             "location": confirmed_data.get("location", location),
@@ -1128,8 +1179,9 @@ async def confirmation_node(
             "mentioned_layer_refs": confirmed_data.get("mentioned_layer_refs", mentioned_layer_refs),
             "mentioned_aoi": confirmed_data.get("mentioned_aoi", mentioned_aoi),
             "mentioned_aoi_source": confirmed_data.get("mentioned_aoi_source", mentioned_aoi_source),
-            "stage": "confirmed",
+            "stage": "completed",
             "user_confirmed": True,
+            "is_valid_flood_query": True,
         }
     )
 
@@ -1313,7 +1365,6 @@ workflow.add_node("tool_node", ToolNode(tools=tools)) # 工具执行
 workflow.add_node("extraction_node", extraction_node) # 信息提取
 workflow.add_node("pre_confirmation_node", pre_confirmation_node)
 workflow.add_node("confirmation_node", confirmation_node)  # 用户确认 (HITL)
-workflow.add_node("processing_node", processing_node) # 地理编码 + 报告生成
 # workflow.add_node("__end__", lambda state, config: None)
 
 # 设置入口点
