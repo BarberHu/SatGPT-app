@@ -148,16 +148,16 @@ if https_proxy:
 
 
 def _get_allowed_cors_origins() -> list[str]:
+    configured = os.getenv("SATGPT_CORS_ORIGINS", "").strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
     frontend_port = os.getenv("FRONTEND_PORT", "3000")
     public_host = os.getenv("SATGPT_PUBLIC_HOST", "localhost").strip() or "localhost"
     origins = {
         f"http://localhost:{frontend_port}",
         f"http://127.0.0.1:{frontend_port}",
     }
-
-    configured = os.getenv("SATGPT_CORS_ORIGINS", "").strip()
-    if configured:
-        origins.update(origin.strip() for origin in configured.split(",") if origin.strip())
 
     if public_host not in {"localhost", "127.0.0.1", "0.0.0.0"}:
         origins.add(f"http://{public_host}:{frontend_port}")

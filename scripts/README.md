@@ -19,22 +19,6 @@
   - Start CopilotKit runtime on `5000`.
   - Start React frontend on `3000`.
 
-- `scripts\windows\generate_qrcode.ps1`
-  - Generate a PNG QR code from a URL.
-  - Uses a public QR code generation endpoint and saves the result locally.
-  - Example:
-
-    ```powershell
-    .\scripts\windows\generate_qrcode.bat `
-      -Url "https://bit.ly/SatGPT_UI_Test" `
-      -OutFile "outputs\satgpt_ui_test_qrcode.png"
-    ```
-
-  - Optional parameters:
-    - `-Size 1024` for image size in pixels.
-    - `-Margin 20` for QR code margin.
-  - The `.bat` wrapper runs the PowerShell script with a local execution-policy bypass, so you do not need to change the system-wide PowerShell policy.
-
 ## Port conflicts
 
 The local development chain is:
@@ -68,16 +52,6 @@ When proxy is enabled, local service-to-service calls should bypass the proxy:
 `set NO_PROXY=localhost,127.0.0.1,::1`
 
 `start_windows.bat` now sets this automatically.
-
-## Localhost fallback
-
-For same-machine development, use localhost URLs even if your LAN IP changes:
-
-- `http://localhost:3000` for the React frontend
-- `http://localhost:5000` for the CopilotKit runtime
-- `http://localhost:8000` for the FastAPI agent
-
-`SATGPT_PUBLIC_HOST` is only needed when sharing the app from another device on the network. Local service-to-service calls use localhost directly, so a stale LAN IP in `SATGPT_PUBLIC_HOST` will not break localhost access.
 
 ## Manual startup note
 
