@@ -85,6 +85,56 @@ export const renderRecommendedLayer = async (params) => {
   }
 };
 
+export const getAgentRasterDownloadUrl = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/agent-raster-download`, params);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to prepare agent raster download:', error);
+    throw normalizeAgentApiError(error, 'Failed to prepare raster download.');
+  }
+};
+
+export const downloadAgentRasterFile = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/agent-raster-download-file`, params, {
+      responseType: 'blob',
+    });
+    return {
+      blob: response.data,
+      filename: getFilenameFromDisposition(response.headers?.['content-disposition']),
+      scale: response.headers?.['x-satgpt-raster-scale'] || null,
+    };
+  } catch (error) {
+    console.error('Failed to download agent raster file:', error);
+    throw await normalizeAgentDownloadError(error, 'Failed to download raster file.');
+  }
+};
+
+const getFilenameFromDisposition = (contentDisposition) => {
+  const match = String(contentDisposition || '').match(/filename="?([^"]+)"?/i);
+  return match?.[1] || null;
+};
+
+const normalizeAgentDownloadError = async (error, fallbackMessage) => {
+  let detail = null;
+  const blob = error?.response?.data;
+  if (blob instanceof Blob) {
+    try {
+      const text = await blob.text();
+      detail = JSON.parse(text)?.detail || text;
+    } catch (parseError) {
+      detail = null;
+    }
+  }
+
+  const normalized = new Error(detail || error?.message || fallbackMessage);
+  normalized.cause = error;
+  normalized.status = error?.response?.status || null;
+  normalized.payload = error?.response?.data || null;
+  return normalized;
+};
+
 export const searchLocationCandidates = async (params) => {
   try {
     const response = await axios.post(`${AGENT_API_BASE}/api/location-search`, params);
@@ -143,7 +193,9 @@ const agentApi = {
   getFloodImages,
   getFloodImpact,
   refreshFloodConfirmation,
+  downloadAgentRasterFile,
   renderRecommendedLayer,
+  getAgentRasterDownloadUrl,
   searchLocationCandidates,
   syncBusinessLayers,
   resolveBusinessLayers,

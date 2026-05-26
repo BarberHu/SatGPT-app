@@ -1,9 +1,12 @@
 import json
 import os
+import re
 import threading
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 import ee
 import openai
@@ -287,6 +290,128 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     attach_map_id(content, "PopulationDensity", population_density.getMapId())
     attach_map_id(content, "SoilTexture", soil_texture.getMapId())
     return content
+
+
+def _safe_download_name(value: Any, fallback: str = "aoi") -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    return cleaned[:48] or fallback
+
+
+def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
+    supplementary_catalog = get_basic_layer_catalog()["supplementary"]
+    layer_configs = {
+        "lclu": {
+            "title": "Land Cover and Land Use",
+            "filename": "land_cover_land_use",
+            "scale": 10,
+            "image_builder": lambda region: ee.ImageCollection(
+                supplementary_catalog["landcover"]["dataset"]
+            ).first().clip(region),
+        },
+        "populationDensity": {
+            "title": "Population Density",
+            "filename": "population_density",
+            "scale": 1000,
+            "image_builder": lambda region: ee.Image(
+                supplementary_catalog["populationDensity"]["dataset"]
+            ).clip(region),
+        },
+        "soilTexture": {
+            "title": "Soil Texture",
+            "filename": "soil_texture",
+            "scale": 250,
+            "image_builder": lambda region: ee.Image(
+                supplementary_catalog["soilTexture"]["dataset"]
+            ).select(supplementary_catalog["soilTexture"]["band"]).clip(region),
+        },
+    }
+
+    config = layer_configs.get(layer_key)
+    if not config:
+        raise ValueError(f"Unsupported agent raster layer: {layer_key}")
+
+    return config
+
+
+def _build_agent_raster_download_image(layer_key: str, region: ee.Geometry) -> tuple[ee.Image, Dict[str, Any]]:
+    config = _get_agent_raster_download_config(layer_key)
+    return config["image_builder"](region), config
+
+
+def _get_agent_raster_download_payload(payload: Dict[str, Any], scale: Optional[int] = None) -> Dict[str, Any]:
+    layer_key = payload.get("layer_key") or payload.get("layerKey")
+    if not layer_key:
+        raise ValueError("Missing layer_key.")
+
+    aoi = parse_aoi_from_payload(payload)
+    region = aoi_to_ee_geometry(aoi)
+    image, config = _build_agent_raster_download_image(str(layer_key), region)
+    scope_name = _safe_download_name(aoi.get("label") or aoi.get("source"), "aoi")
+    filename_base = f"satgpt_{config['filename']}_{scope_name}"
+    effective_scale = scale or config["scale"]
+    download_url = image.getDownloadURL({
+        "name": filename_base,
+        "scale": effective_scale,
+        "region": region,
+        "format": "GEO_TIFF",
+        "filePerBand": False,
+    })
+
+    return {
+        "success": True,
+        "data": {
+            "download_url": download_url,
+            "filename": f"{filename_base}.tif",
+            "format": "GeoTIFF",
+            "layer_key": layer_key,
+            "title": config["title"],
+            "scale": effective_scale,
+        },
+    }
+
+
+def get_agent_raster_download_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _get_agent_raster_download_payload(payload)
+
+
+def _agent_raster_download_scales(layer_key: str, base_scale: int) -> list[int]:
+    if layer_key == "lclu":
+        return [base_scale, 20, 30, 50, 100]
+    if layer_key == "soilTexture":
+        return [base_scale, 500, 1000]
+    return [base_scale]
+
+
+def get_agent_raster_download_file(payload: Dict[str, Any]):
+    layer_key = str(payload.get("layer_key") or payload.get("layerKey") or "")
+    if not layer_key:
+        raise ValueError("Missing layer_key.")
+
+    config = _get_agent_raster_download_config(layer_key)
+    last_error = None
+    for scale in _agent_raster_download_scales(layer_key, config["scale"]):
+        try:
+            download_payload = _get_agent_raster_download_payload(payload, scale=scale)
+            data = download_payload.get("data") or {}
+            download_url = data.get("download_url")
+            filename = data.get("filename") or "satgpt_aoi_raster.tif"
+            if not download_url:
+                raise ValueError("Raster download URL was not returned.")
+
+            with urlopen(download_url, timeout=120) as response:
+                return response.read(), filename, scale
+        except HTTPError as error:
+            error_text = error.read().decode("utf-8", errors="replace")
+            last_error = error_text or str(error)
+            if "Total request size" not in last_error:
+                break
+        except Exception as error:
+            last_error = str(error)
+            if "Total request size" not in last_error:
+                break
+
+    raise RuntimeError(last_error or "Raster download failed.")
 
 
 def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:

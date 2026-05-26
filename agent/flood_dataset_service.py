@@ -16,7 +16,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from experiments.water_asset_agent.catalog import AssetRecord, WaterAssetCatalogBuilder  # noqa: E402
+from experiments.water_asset_agent.catalog import (  # noqa: E402
+    OFFICIAL_WATER_TAG_URL,
+    AssetRecord,
+    WaterAssetCatalogBuilder,
+)
 from experiments.water_asset_agent.tile_service import GEETileService  # noqa: E402
 
 
@@ -252,6 +256,26 @@ def _relevance_score(asset: AssetRecord) -> int:
     return score
 
 
+def _build_catalog_source_meta(asset: AssetRecord) -> Dict[str, Any]:
+    return {
+        "asset_id": asset.asset_id,
+        "title": asset.title,
+        "summary": asset.summary,
+        "asset_type": asset.asset_type,
+        "themes": list(asset.themes or []),
+        "temporal_type": asset.temporal_type,
+        "spatial_scope": asset.spatial_scope,
+        "constraints": list(asset.constraints or []),
+        "band_metadata": deepcopy(asset.band_metadata or []),
+        "default_map_view": deepcopy(asset.default_map_view or {}),
+        "official_url": asset.official_url,
+        "catalog_source_label": "Google Earth Engine Water datasets",
+        "catalog_source_url": OFFICIAL_WATER_TAG_URL,
+        "has_official_example_code": bool(asset.official_example_code),
+        "has_official_recipe": bool(asset.official_example_vis),
+    }
+
+
 def _build_asset_descriptor(asset: AssetRecord, score: int, registry_entry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     layer_id = _hash_to_layer_id(asset.asset_id)
     ui_profile = _build_ui_profile(asset, registry_entry or {})
@@ -266,6 +290,7 @@ def _build_asset_descriptor(asset: AssetRecord, score: int, registry_entry: Opti
         "has_official_example_code": bool(asset.official_example_code),
         "has_official_recipe": bool(asset.official_example_vis),
         "official_url": asset.official_url,
+        "source_meta": _build_catalog_source_meta(asset),
         "legend_spec": deepcopy(asset.legend_spec),
         "default_selected": False,
         "layer_family": "catalog",
@@ -651,13 +676,7 @@ class FloodDatasetRenderer:
             "vis_recipe": vis_recipe,
             "legend": legend,
             "source_meta": {
-                "asset_id": asset.asset_id,
-                "title": asset.title,
-                "summary": asset.summary,
-                "asset_type": asset.asset_type,
-                "themes": asset.themes,
-                "temporal_type": asset.temporal_type,
-                "spatial_scope": asset.spatial_scope,
+                **_build_catalog_source_meta(asset),
                 "legend_spec": deepcopy(asset.legend_spec),
             },
             "official_url": asset.official_url,

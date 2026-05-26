@@ -985,8 +985,9 @@ p.error {
 }
 
 .water--agent .mapboxgl-ctrl-top-right {
+  top: 84px;
   right: 440px;
-  transition: right 0.22s ease;
+  transition: top 0.22s ease, right 0.22s ease;
 }
 
 .water--agent.water--agent-sidebar-collapsed .mapboxgl-ctrl-top-right {
