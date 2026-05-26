@@ -10,8 +10,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
-import LocationScopePicker from './LocationScopePicker';
-import { getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
+import { downloadAgentRasterFile, getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
 import { buildAoiFromAgentState, buildEarthEngineGeometryExpression } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 import {
@@ -20,6 +19,7 @@ import {
   sortCatalogLayers,
 } from '../utils/catalogLayers';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
+import SOURCE_REFERENCES from '../config/agentLayerSourceReferences';
 import {
   createReactProfilerHandler,
   startAgentDiagnosticSpan,
@@ -204,12 +204,32 @@ const CORE_LAYER_LEGENDS = {
   },
 };
 
+const FIELD_LABELS = {
+  asset_id: 'Asset ID',
+  asset_type: 'Asset type',
+  cacheable: 'Cacheable',
+  default_selected: 'Default visible',
+  location_scope: 'Location scope',
+  product_group: 'Product group',
+  recommendable: 'Recommendable',
+  reducer: 'Reducer',
+  requires_aoi: 'Requires AOI',
+  requires_date_range: 'Requires dates',
+  select_bands: 'Selected bands',
+  spatial_scope: 'Spatial scope',
+  supports_tile: 'Supports tile',
+  temporal_type: 'Temporal type',
+};
+
 const AGENT_RASTER_LAYER_CONFIG = [
   {
     key: 'populationDensity',
     orderId: 'agent-raster-populationDensity',
     title: 'Population Density',
-    infoText: 'WorldPop gridded population density for rapid exposure context.',
+    infoText: 'CIESIN GPWv4.11 population density for rapid exposure context.',
+    dataset: SOURCE_REFERENCES.populationDensity.datasetId,
+    method: 'AOI clipped raster overlay',
+    sourceRef: SOURCE_REFERENCES.populationDensity,
     legend: CORE_LAYER_LEGENDS.population_density,
   },
   {
@@ -217,6 +237,9 @@ const AGENT_RASTER_LAYER_CONFIG = [
     orderId: 'agent-raster-lclu',
     title: 'LCLU',
     infoText: 'ESA WorldCover land cover classification clipped to the selected AOI.',
+    dataset: SOURCE_REFERENCES.lclu.datasetId,
+    method: 'Categorical land-cover raster clipped to AOI',
+    sourceRef: SOURCE_REFERENCES.lclu,
     legend: CORE_LAYER_LEGENDS.lclu_raster,
   },
   {
@@ -224,6 +247,9 @@ const AGENT_RASTER_LAYER_CONFIG = [
     orderId: 'agent-raster-soilTexture',
     title: 'Soil Texture',
     infoText: 'Soil texture class layer for infiltration and runoff context.',
+    dataset: SOURCE_REFERENCES.soilTexture.datasetId,
+    method: 'Soil class raster clipped to AOI',
+    sourceRef: SOURCE_REFERENCES.soilTexture,
     legend: CORE_LAYER_LEGENDS.soil_texture,
   },
 ];
@@ -393,100 +419,330 @@ function LayerManagerLegend({ legendModel }) {
   );
 }
 
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const titleCaseKey = (key) => String(key || '')
+  .replace(/[_-]+/g, ' ')
+  .replace(/\b\w/g, (char) => char.toUpperCase());
 
-function InlineInfoTooltip({ text, details }) {
-  const [visible, setVisible] = useState(false);
-  const [popoverStyle, setPopoverStyle] = useState({
-    top: 0,
-    left: 0,
-    width: 280,
-    '--tooltip-arrow-left': '24px',
-  });
-  const triggerRef = useRef(null);
-  const tooltipDetails = useMemo(
-    () => (Array.isArray(details)
-      ? details.filter((detail) => detail?.label && detail?.value)
-      : []),
-    [details]
+const formatInfoValue = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No';
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => formatInfoValue(entry))
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, entryValue]) => {
+        const formatted = formatInfoValue(entryValue);
+        return formatted ? `${FIELD_LABELS[key] || titleCaseKey(key)}: ${formatted}` : null;
+      })
+      .filter(Boolean)
+      .join('; ');
+  }
+
+  return String(value);
+};
+
+const normalizeInfoRows = (rows = []) => (Array.isArray(rows) ? rows : [])
+  .map((row) => {
+    const value = formatInfoValue(row?.value);
+    if (!row?.label || !value) {
+      return null;
+    }
+    return { label: row.label, value };
+  })
+  .filter(Boolean);
+
+const objectRows = (source = {}, keys = []) => keys
+  .map((key) => ({
+    label: FIELD_LABELS[key] || titleCaseKey(key),
+    value: source?.[key],
+  }))
+  .filter((row) => formatInfoValue(row.value));
+
+const trimEarthEngineTitle = (title) => String(title || '')
+  .replace(/\s*\|\s*Earth Engine Data Catalog\s*\|\s*Google for Developers\s*$/i, '')
+  .trim();
+
+const mergeCatalogSourceMeta = (layer, descriptor) => ({
+  ...(layer?.source_meta || {}),
+  ...(descriptor?.source_meta || {}),
+});
+
+const formatMapView = (view) => {
+  if (!view || typeof view !== 'object') {
+    return null;
+  }
+
+  const lon = Number(view.lon);
+  const lat = Number(view.lat);
+  const zoom = Number(view.zoom);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    return null;
+  }
+
+  return `lon ${lon.toFixed(3)}, lat ${lat.toFixed(3)}${Number.isFinite(zoom) ? `, zoom ${zoom}` : ''}`;
+};
+
+const buildBandMetadataRows = (bandMetadata = [], selectedBands = []) => {
+  if (!Array.isArray(bandMetadata) || !bandMetadata.length) {
+    return [];
+  }
+
+  const selected = new Set((Array.isArray(selectedBands) ? selectedBands : [selectedBands]).filter(Boolean));
+  const prioritized = selected.size
+    ? [
+      ...bandMetadata.filter((band) => selected.has(band?.name)),
+      ...bandMetadata.filter((band) => !selected.has(band?.name)),
+    ]
+    : bandMetadata;
+
+  return prioritized.slice(0, 8).map((band) => {
+    const parts = [
+      band?.description,
+      band?.pixel_size ? `pixel ${band.pixel_size}` : null,
+      band?.unit ? `unit ${band.unit}` : null,
+      Number.isFinite(Number(band?.min)) && Number.isFinite(Number(band?.max))
+        ? `range ${band.min}-${band.max}`
+        : null,
+    ].filter(Boolean);
+
+    return {
+      label: band?.name || 'Band',
+      value: parts.join(' | '),
+    };
+  }).filter((row) => row.label && row.value);
+};
+
+const formatRenderMode = (mode) => {
+  const normalized = String(mode || '').replace(/_/g, ' ');
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : null;
+};
+
+const buildLayerInfoPanelModel = (item) => {
+  const summary = item.infoText || item.detailText || null;
+  const sections = Array.isArray(item.infoSections) ? item.infoSections.filter(Boolean) : [];
+  const warnings = (Array.isArray(item.infoWarnings) ? item.infoWarnings : [])
+    .map(formatInfoValue)
+    .filter(Boolean);
+  const links = (Array.isArray(item.infoLinks) ? item.infoLinks : [])
+    .filter((link) => link?.href && link?.label);
+  const actions = (Array.isArray(item.infoActions) ? item.infoActions : [])
+    .filter((action) => action?.label && typeof action?.onClick === 'function');
+
+  return {
+    kicker: item.infoKicker || item.badge || item.status || 'Layer',
+    title: item.infoTitle || item.title,
+    meta: item.infoMeta || null,
+    summary,
+    rows: normalizeInfoRows(item.infoDetails),
+    sections,
+    warnings,
+    links,
+    actions,
+    legend: item.legend || null,
+  };
+};
+
+function LayerInfoPanel({ item }) {
+  const panel = buildLayerInfoPanelModel(item);
+
+  return (
+    <div className="layer-info-card">
+      <div className="layer-info-card-header">
+        <div className="layer-info-card-kicker">{panel.kicker}</div>
+        <div className="layer-info-card-title">{panel.title}</div>
+        {panel.meta ? (
+          <div className="layer-info-card-meta">{panel.meta}</div>
+        ) : null}
+      </div>
+
+      {panel.summary ? (
+        <div className="layer-info-card-summary">{panel.summary}</div>
+      ) : null}
+
+      {panel.rows.length ? (
+        <div className="layer-info-card-table">
+          {panel.rows.map((row) => (
+            <div className="layer-info-card-row" key={`${row.label}-${row.value}`}>
+              <span className="layer-info-card-key">{row.label}</span>
+              <span className="layer-info-card-value">{row.value}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {panel.legend ? (
+        <div className="layer-info-card-section">
+          <div className="layer-info-card-section-title">Legend</div>
+          <LayerManagerLegend legendModel={panel.legend} />
+        </div>
+      ) : null}
+
+      {panel.sections.map((section) => {
+        const rows = normalizeInfoRows(section.rows);
+        if (!rows.length && !section.text) {
+          return null;
+        }
+        return (
+          <div className="layer-info-card-section" key={section.title}>
+            <div className="layer-info-card-section-title">{section.title}</div>
+            {section.text ? (
+              <div className="layer-info-card-section-text">{section.text}</div>
+            ) : null}
+            {rows.length ? (
+              <div className="layer-info-card-mini-table">
+                {rows.map((row) => (
+                  <div className="layer-info-card-row compact" key={`${section.title}-${row.label}-${row.value}`}>
+                    <span className="layer-info-card-key">{row.label}</span>
+                    <span className="layer-info-card-value">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+
+      {panel.warnings.length ? (
+        <div className="layer-info-card-warning">
+          <span className="layer-info-card-warning-label">Cautions</span>
+          {panel.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+
+      {panel.links.length || panel.actions.length ? (
+        <div className="layer-info-card-actions">
+          {panel.actions.map((action) => (
+            <div className="layer-info-card-action-wrap" key={action.key || action.label}>
+              <button
+                type="button"
+                className={`layer-info-card-link layer-info-card-action ${action.status ? `is-${action.status}` : ''}`}
+                onClick={action.onClick}
+                disabled={Boolean(action.disabled)}
+                title={action.title}
+              >
+                {action.status === 'preparing' ? (
+                  <i className="fa fa-spinner fa-spin" aria-hidden="true" />
+                ) : action.status === 'success' ? (
+                  <i className="fa fa-check" aria-hidden="true" />
+                ) : action.status === 'error' ? (
+                  <i className="fa fa-exclamation-triangle" aria-hidden="true" />
+                ) : (
+                  <i className="fa fa-download" aria-hidden="true" />
+                )}
+                <span>{action.label}</span>
+              </button>
+              {action.message ? (
+                <div className={`layer-info-card-action-message ${action.status ? `is-${action.status}` : ''}`}>
+                  {action.message}
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {panel.links.map((link) => (
+            <a
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              key={`${link.label}-${link.href}`}
+              className="layer-info-card-link"
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
+}
 
-  const updatePopoverPosition = useCallback(() => {
-    if (!triggerRef.current) {
-      return;
-    }
+function InlineInfoTooltip({ item }) {
+  const [visible, setVisible] = useState(false);
+  const panel = useMemo(() => buildLayerInfoPanelModel(item), [item]);
 
-    const rect = triggerRef.current.getBoundingClientRect();
-    const viewportPadding = 10;
-    const width = Math.min(280, Math.max(220, window.innerWidth - (viewportPadding * 2)));
-    const estimatedHeight = tooltipDetails.length > 2 || String(text || '').length > 72 ? 180 : 138;
-    const left = clamp(
-      rect.left - 18,
-      viewportPadding,
-      Math.max(viewportPadding, window.innerWidth - width - viewportPadding)
-    );
-    let top = rect.bottom + 10;
+  const openPanel = useCallback((event) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    setVisible(true);
+  }, []);
 
-    if (top + estimatedHeight > window.innerHeight - viewportPadding) {
-      top = Math.max(viewportPadding, rect.top - estimatedHeight - 10);
-    }
-
-    const arrowLeft = clamp(rect.left + (rect.width / 2) - left, 16, width - 16);
-    setPopoverStyle({
-      top,
-      left,
-      width,
-      '--tooltip-arrow-left': `${arrowLeft}px`,
-    });
-  }, [text, tooltipDetails]);
+  const closePanel = useCallback((event) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    setVisible(false);
+  }, []);
 
   useEffect(() => {
     if (!visible) {
       return undefined;
     }
 
-    updatePopoverPosition();
-    const handleReposition = () => updatePopoverPosition();
-    window.addEventListener('resize', handleReposition);
-    window.addEventListener('scroll', handleReposition, true);
-    return () => {
-      window.removeEventListener('resize', handleReposition);
-      window.removeEventListener('scroll', handleReposition, true);
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setVisible(false);
+      }
     };
-  }, [visible, updatePopoverPosition]);
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [visible]);
+
+  const handleTriggerKeyDown = useCallback((event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      openPanel(event);
+    }
+  }, [openPanel]);
 
   const popoverContent = visible ? createPortal(
-    <span
-      className="layer-manager-item-tooltip-popover"
-      role="tooltip"
-      style={popoverStyle}
+    <div
+      className="layer-info-modal-backdrop"
+      role="presentation"
+      onMouseDown={closePanel}
     >
-      <span className="layer-manager-tooltip-title">{text}</span>
-      {tooltipDetails.length > 0 ? (
-        <span className="layer-manager-tooltip-details">
-          {tooltipDetails.map((detail) => (
-            <span className="layer-manager-tooltip-row" key={`${detail.label}-${detail.value}`}>
-              <span className="layer-manager-tooltip-key">{detail.label}</span>
-              <span className="layer-manager-tooltip-value">{detail.value}</span>
-            </span>
-          ))}
-        </span>
-      ) : null}
-    </span>,
+      <div
+        className="layer-info-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Layer information: ${panel.title}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="layer-info-modal-close"
+          aria-label="Close layer information"
+          onClick={closePanel}
+        >
+          x
+        </button>
+        <LayerInfoPanel item={item} />
+      </div>
+    </div>,
     document.body
   ) : null;
 
   return (
     <span className="layer-manager-item-info-wrap">
       <span
-        ref={triggerRef}
         className="layer-manager-item-info"
-        aria-label={text}
+        aria-label={`Layer information: ${panel.title}`}
+        role="button"
         tabIndex={0}
-        onMouseEnter={() => setVisible(true)}
-        onMouseLeave={() => setVisible(false)}
-        onFocus={() => setVisible(true)}
-        onBlur={() => setVisible(false)}
+        onClick={openPanel}
+        onKeyDown={handleTriggerKeyDown}
       >
         !
       </span>
@@ -496,16 +752,12 @@ function InlineInfoTooltip({ text, details }) {
 }
 
 function LayerManagerItemCopy({ item }) {
-  const tooltipDetails = Array.isArray(item.infoDetails)
-    ? item.infoDetails.filter((detail) => detail?.label && detail?.value)
-    : [];
-
   return (
     <div className="layer-manager-item-copy">
       <div className="layer-manager-item-head">
         <span className="layer-manager-item-title">{item.title}</span>
         {item.infoText ? (
-          <InlineInfoTooltip text={item.infoText} details={tooltipDetails} />
+          <InlineInfoTooltip item={item} />
         ) : null}
       </div>
       <LayerManagerLegend legendModel={item.legend} />
@@ -523,6 +775,17 @@ function downloadGEECode(code, eventName) {
   const link = document.createElement('a');
   link.href = url;
   link.download = `${(eventName || 'flood_analysis').replace(/\s+/g, '_')}_GEE_${new Date().toISOString().split('T')[0]}.js`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function downloadBlobFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || `satgpt_aoi_raster_${new Date().toISOString().split('T')[0]}.tif`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -1095,6 +1358,7 @@ function AgentPanel() {
 
   const [draggedLayerId, setDraggedLayerId] = useState(null);
   const [dragOverState, setDragOverState] = useState({ groupKey: null, targetLayerId: null, position: 'before' });
+  const [rasterDownloadState, setRasterDownloadState] = useState({});
 
   const { state } = useCoAgent({
     name: "flood_agent",
@@ -1262,6 +1526,55 @@ function AgentPanel() {
   );
   const analysisDisplayEnabled = hasResolvedAnalysisContext && analysisScopeMatchesSelection;
   const effectiveAoi = analysisDisplayEnabled ? agentDerivedAoi : null;
+  const handleAgentRasterDownload = useCallback(async ({ layerKey, title }) => {
+    if (!selectedAOI) {
+      setWarning('Please select an AOI before downloading raster data.');
+      return;
+    }
+
+    setRasterDownloadState((previous) => ({
+      ...previous,
+      [layerKey]: {
+        status: 'preparing',
+        message: 'Preparing AOI GeoTIFF...',
+      },
+    }));
+
+    try {
+      setWarning('');
+      const response = await downloadAgentRasterFile({
+        layer_key: layerKey,
+        aoi: selectedAOI,
+      });
+      if (!response?.blob) {
+        throw new Error('Raster file was not returned.');
+      }
+
+      downloadBlobFile(response.blob, response.filename);
+      setRasterDownloadState((previous) => ({
+        ...previous,
+        [layerKey]: {
+          status: 'success',
+          message: response.scale ? `Download started at ${response.scale}m resolution.` : 'Download started.',
+        },
+      }));
+      trackUxEvent('download_agent_raster', {
+        layerKey,
+        title,
+        scope: selectedAOI?.label || null,
+      });
+    } catch (error) {
+      const message = error?.message || 'Raster download failed.';
+      setRasterDownloadState((previous) => ({
+        ...previous,
+        [layerKey]: {
+          status: 'error',
+          message,
+        },
+      }));
+      setWarning(message);
+    }
+  }, [selectedAOI, setWarning]);
   const fallbackGeeCode = useMemo(() => buildFallbackAgentGEECode({
     eventName: currentEvent,
     preDate: currentPreDate,
@@ -1486,6 +1799,7 @@ function AgentPanel() {
       key: 'imagery',
       label: 'Imagery',
       items: ['sentinel2', 'sentinel1'].map((type) => {
+          const sourceRef = type === 'sentinel2' ? SOURCE_REFERENCES.sentinel2 : SOURCE_REFERENCES.sentinel1;
           const periodSlug = agentSelectedPeriod.replace('_date', '');
           const orderId = `agent-${type === 'sentinel2' ? 's2' : 's1'}-${periodSlug}`;
           const descriptor = agentImagery?.[agentSelectedPeriod]?.[type] || null;
@@ -1506,15 +1820,49 @@ function AgentPanel() {
             defaultOrder: type === 'sentinel2' ? 0 : 1,
             draggable: true,
             title: type === 'sentinel2' ? 'Optical Imagery' : 'SAR Imagery',
+            infoKicker: 'Base imagery',
+            infoMeta: `${sourceRef.datasetId}${descriptor?.date ? ` / ${descriptor.date}` : ''}`,
             infoText: type === 'sentinel2'
               ? 'Optical base imagery for visual flood context'
               : 'SAR base imagery for cloud-resistant flood context',
             infoDetails: [
-              { label: 'Source', value: type === 'sentinel2' ? 'Sentinel-2 RGB' : 'Sentinel-1 GRD' },
+              { label: 'Source', value: sourceRef.producer },
+              { label: 'Dataset ID', value: sourceRef.datasetId },
               { label: 'Period', value: selectedPeriodMeta.label },
               { label: 'Date', value: descriptor?.date },
-              { label: 'Resolution', value: descriptor?.resolution ? `${descriptor.resolution}m` : null },
+              { label: 'Resolution', value: descriptor?.resolution ? `${descriptor.resolution}m` : sourceRef.resolution },
+              { label: 'Content date', value: sourceRef.contentDate },
+              { label: 'License', value: sourceRef.license },
               { label: 'Status', value: isAvailable ? (visible ? 'Visible' : 'Ready') : 'Unavailable' },
+            ],
+            infoSections: [
+              {
+                title: 'Function',
+                text: type === 'sentinel2'
+                  ? 'True-color optical context for visual interpretation of water, vegetation, built-up area, and cloud cover.'
+                  : 'Radar context for flood analysis when clouds reduce optical visibility.',
+              },
+              {
+                title: 'Overview',
+                text: sourceRef.overview,
+              },
+              {
+                title: 'Use in workflow',
+                rows: [
+                  { label: 'Period', value: selectedPeriodMeta.label },
+                  { label: 'Role', value: 'Visual evidence layer' },
+                ],
+              },
+              {
+                title: 'Citation',
+                text: sourceRef.citation,
+              },
+            ],
+            infoWarnings: type === 'sentinel2'
+              ? [sourceRef.cautions]
+              : [sourceRef.cautions],
+            infoLinks: [
+              { label: 'Official catalog', href: sourceRef.officialUrl },
             ],
             legend: CORE_LAYER_LEGENDS[type],
             checked: Boolean(visible && agentShowBaseImagery && isAvailable),
@@ -1559,12 +1907,46 @@ function AgentPanel() {
       defaultOrder: 0,
       draggable: true,
       title: 'Flood Detection',
+      infoKicker: 'Analysis layer',
+      infoMeta: `${currentPreDate || 'pre-date'} -> ${currentPeekDate || 'peak-date'}`,
       infoText: LAYER_META.flood_detection.description,
       infoDetails: [
         { label: 'Source', value: LAYER_META.flood_detection.source },
+        { label: 'Auxiliary source', value: SOURCE_REFERENCES.jrcGsw.datasetId },
         { label: 'Method', value: LAYER_META.flood_detection.method },
         { label: 'Resolution', value: LAYER_META.flood_detection.resolution },
+        { label: 'Content date', value: `${SOURCE_REFERENCES.sentinel1.contentDate}; ${SOURCE_REFERENCES.jrcGsw.contentDate}` },
+        { label: 'License', value: `${SOURCE_REFERENCES.sentinel1.license}; JRC: ${SOURCE_REFERENCES.jrcGsw.license}` },
         { label: 'Status', value: floodDetectionLoading ? 'Loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'Visible' : 'Pending') : (floodDetectionAvailable ? 'Ready' : 'Pending')) },
+      ],
+      infoSections: [
+        {
+          title: 'Function',
+          text: 'Highlights newly inundated pixels by comparing pre-flood and peak SAR observations.',
+        },
+        {
+          title: 'Overview',
+          text: 'SatGPT computes this as a derived analysis layer, not as an off-the-shelf flood product. Sentinel-1 GRD provides cloud-resistant SAR backscatter before and during the flood window; JRC Global Surface Water helps mask or contextualize permanent water.',
+        },
+        {
+          title: 'Inputs',
+          rows: [
+            { label: 'Pre-flood date', value: currentPreDate },
+            { label: 'Peak date', value: currentPeekDate },
+            { label: 'Auxiliary', value: LAYER_META.flood_detection.auxiliary },
+            { label: 'SAR catalog', value: SOURCE_REFERENCES.sentinel1.datasetId },
+            { label: 'Water catalog', value: SOURCE_REFERENCES.jrcGsw.datasetId },
+          ],
+        },
+        {
+          title: 'Citation',
+          text: `${SOURCE_REFERENCES.sentinel1.citation} ${SOURCE_REFERENCES.jrcGsw.citation}`,
+        },
+      ],
+      infoWarnings: ['Threshold-based flood detection is sensitive to date choice, AOI quality, permanent water masking, and SAR noise.'],
+      infoLinks: [
+        { label: 'Sentinel-1 catalog', href: SOURCE_REFERENCES.sentinel1.officialUrl },
+        { label: 'JRC water catalog', href: SOURCE_REFERENCES.jrcGsw.officialUrl },
       ],
       legend: CORE_LAYER_LEGENDS.flood_detection,
       checked: Boolean(agentShowFloodDetection && floodDetectionAvailable),
@@ -1596,6 +1978,8 @@ function AgentPanel() {
       const hasScope = Boolean(selectedAOI);
       const hasTile = Boolean(descriptor?.tileUrl);
       const loading = Boolean(visible && hasScope && agentRasterLoading && !hasTile);
+      const downloadState = rasterDownloadState[layer.key] || null;
+      const isDownloading = downloadState?.status === 'preparing';
 
       return {
         id: `raster-${layer.key}`,
@@ -1603,11 +1987,65 @@ function AgentPanel() {
         defaultOrder: 10 + index,
         draggable: true,
         title: layer.title,
+        infoKicker: 'Context raster',
+        infoMeta: layer.sourceRef.datasetId,
         infoText: layer.infoText,
         infoDetails: [
-          { label: 'Source', value: hasScope ? 'Ask raster service' : 'Select a vector scope first' },
+          { label: 'Source', value: layer.sourceRef.producer },
+          { label: 'Dataset ID', value: layer.sourceRef.datasetId },
+          { label: 'Method', value: layer.method },
+          { label: 'Resolution', value: layer.sourceRef.resolution },
+          { label: 'Content date', value: layer.sourceRef.contentDate },
+          { label: 'License', value: layer.sourceRef.license },
           { label: 'Scope', value: selectedAOI?.label || 'No active scope' },
           { label: 'Status', value: !hasScope ? 'Unavailable' : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : (hasTile ? 'Ready' : 'Pending'))) },
+        ],
+        infoSections: [
+          {
+            title: 'Function',
+            text: layer.sourceRef.overview,
+          },
+          {
+            title: 'Source facts',
+            rows: [
+              { label: 'Producer', value: layer.sourceRef.producer },
+              { label: 'Dataset ID', value: layer.sourceRef.datasetId },
+              { label: 'Content date', value: layer.sourceRef.contentDate },
+              { label: 'License', value: layer.sourceRef.license },
+            ],
+          },
+          {
+            title: 'Use in workflow',
+            rows: [
+              { label: 'Requires scope', value: true },
+              { label: 'Active AOI', value: selectedAOI?.label },
+              { label: 'Layer role', value: 'Context for interpreting flood exposure and environment' },
+            ],
+          },
+          {
+            title: 'Citation',
+            text: layer.sourceRef.citation,
+          },
+        ],
+        infoWarnings: [layer.sourceRef.cautions],
+        infoLinks: [
+          { label: 'Official catalog', href: layer.sourceRef.officialUrl },
+          { label: 'DOI', href: layer.sourceRef.doi },
+        ],
+        infoActions: [
+          {
+            key: `download-${layer.key}`,
+            label: isDownloading ? 'Preparing GeoTIFF...' : 'Download AOI GeoTIFF',
+            onClick: () => handleAgentRasterDownload({ layerKey: layer.key, title: layer.title }),
+            disabled: isDownloading || !(hasScope && hasTile),
+            status: downloadState?.status,
+            message: downloadState?.message,
+            title: isDownloading
+              ? 'Preparing the clipped raster file'
+              : hasScope && hasTile
+                ? 'Download the clipped raster for the current AOI'
+              : 'Available after this raster layer is loaded for an AOI',
+          },
         ],
         legend: layer.legend,
         checked: visible,
@@ -1639,6 +2077,11 @@ function AgentPanel() {
 
     const recommendedItems = confirmedRecommendedCatalogLayers.map((layer, index) => {
       const descriptor = agentRecommendedLayerData?.[layer.id] || null;
+      const sourceMeta = mergeCatalogSourceMeta(layer, descriptor);
+      const sourceTitle = trimEarthEngineTitle(sourceMeta.title) || layer.title;
+      const sourceSummary = sourceMeta.summary || layer.summary;
+      const selectedBands = layer.render_profile?.bands || sourceMeta?.legend_spec?.bands;
+      const bandRows = buildBandMetadataRows(sourceMeta.band_metadata, selectedBands);
       const visible = Boolean(agentRecommendedLayerVisibility?.[layer.id]);
       const loading = Boolean(visible && agentLayerLoading?.[layer.id]);
       const hasTile = Boolean(descriptor?.tile_url);
@@ -1649,12 +2092,70 @@ function AgentPanel() {
         defaultOrder: 100 + index,
         draggable: true,
         title: layer.title,
-        infoText: layer.summary || layer.ui_profile?.group_label || 'Recommended catalog layer',
+        infoKicker: layer.ui_profile?.group_label || 'Recommended dataset',
+        infoMeta: sourceMeta.asset_id || layer.asset_id,
+        infoText: sourceSummary || layer.ui_profile?.group_label || 'Recommended catalog layer',
         infoDetails: [
           { label: 'Group', value: layer.ui_profile?.group_label || layer.product_group },
-          { label: 'Source', value: descriptor?.source_meta?.title || layer.source_meta?.title },
+          { label: 'Source', value: sourceTitle },
+          { label: 'Asset ID', value: sourceMeta.asset_id || layer.asset_id },
+          { label: 'Asset type', value: sourceMeta.asset_type || layer.asset_type },
+          { label: 'Temporal', value: sourceMeta.temporal_type || layer.temporal_type },
+          { label: 'Coverage', value: sourceMeta.spatial_scope || layer.spatial_scope },
           { label: 'Status', value: !analysisDisplayEnabled ? 'Unavailable' : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')) },
         ],
+        infoSections: [
+          {
+            title: 'Overview',
+            text: sourceSummary,
+          },
+          {
+            title: 'GEE catalog source',
+            rows: [
+              { label: 'Source list', value: sourceMeta.catalog_source_label },
+              { label: 'Asset type', value: sourceMeta.asset_type || layer.asset_type },
+              { label: 'Temporal type', value: sourceMeta.temporal_type || layer.temporal_type },
+              { label: 'Spatial scope', value: sourceMeta.spatial_scope || layer.spatial_scope },
+              { label: 'Themes', value: sourceMeta.themes || layer.themes },
+              { label: 'Constraints', value: sourceMeta.constraints },
+              { label: 'Default map view', value: formatMapView(sourceMeta.default_map_view) },
+              { label: 'Official recipe', value: sourceMeta.has_official_recipe ?? layer.has_official_recipe },
+              { label: 'Example code', value: sourceMeta.has_official_example_code ?? layer.has_official_example_code },
+            ],
+          },
+          bandRows.length ? {
+            title: 'Band metadata',
+            rows: bandRows,
+          } : null,
+          {
+            title: 'Selection',
+            rows: [
+              ...objectRows(layer.selection_profile, ['priority', 'default_selected', 'location_scope', 'recommendable']),
+              { label: 'Score', value: layer.score },
+            ],
+          },
+          {
+            title: 'Rendering',
+            rows: [
+              { label: 'Mode', value: formatRenderMode(layer.render_profile?.mode) },
+              { label: 'Bands', value: layer.render_profile?.bands },
+              { label: 'Opacity', value: layer.ui_profile?.default_opacity },
+              { label: 'Palette', value: layer.render_profile?.palette },
+            ],
+          },
+          {
+            title: 'Execution',
+            rows: objectRows(layer.execution_profile, ['requires_aoi', 'requires_date_range', 'select_bands', 'reducer', 'supports_tile', 'cacheable']),
+          },
+        ],
+        infoWarnings: [
+          visible && !hasTile ? 'Layer is selected but tile rendering has not completed yet.' : null,
+          !analysisDisplayEnabled ? 'Confirm event dates and AOI before rendering this dataset.' : null,
+        ],
+        infoLinks: [
+          { label: 'Official dataset page', href: sourceMeta.official_url || layer.official_url || descriptor?.official_url },
+          { label: 'GEE water catalog source', href: sourceMeta.catalog_source_url },
+        ].filter((link) => link.href),
         legend: buildCatalogLegendModel(descriptor || layer, layer.title),
         checked: visible,
         disabled: !analysisDisplayEnabled,
@@ -1705,32 +2206,50 @@ function AgentPanel() {
     imageryGroup.items = orderLayerManagerItems(imageryGroup.items);
     groups.push(imageryGroup);
 
-    if (businessLayers?.length) {
-      groups.push({
-        key: 'scopes',
-        label: 'Vector Layers',
-        items: businessLayers.map((layer) => {
-          const isVisible = layer.is_visible !== false;
-          return {
-            id: `scope-${layer.id}`,
-            title: layer.label,
-            detailText: scopeSourceLabel(layer.source),
-            checked: isVisible,
-            disabled: false,
-            loading: false,
-            checkboxState: 'ready',
-            status: isVisible ? 'Visible' : 'Hidden',
-            tone: isVisible ? 'ready' : 'off',
-            actionLabel: 'Delete',
-            onToggle: () => toggleBusinessLayerVisibility(layer.id),
-            onSelect: () => activateBusinessLayerRecord(layer.id),
-            onAction: () => deleteBusinessLayer(layer.id),
-          };
-        }),
-      });
-    }
+    groups.push({
+      key: 'scopes',
+      label: 'Vector Layers',
+      items: (businessLayers || []).map((layer) => {
+        const isVisible = layer.is_visible !== false;
+        return {
+          id: `scope-${layer.id}`,
+          title: layer.label,
+          detailText: scopeSourceLabel(layer.source),
+          infoKicker: 'Vector layer',
+          infoMeta: layer.source || 'business layer',
+          infoText: 'User-managed vector scope used to constrain flood analysis and map rendering.',
+          infoDetails: [
+            { label: 'Source', value: scopeSourceLabel(layer.source) },
+            { label: 'Status', value: isVisible ? 'Visible' : 'Hidden' },
+            { label: 'Active', value: layer.is_active },
+          ],
+          infoSections: [
+            {
+              title: 'Use in workflow',
+              rows: [
+                { label: 'Role', value: 'AOI / business scope' },
+                { label: 'Can constrain analysis', value: true },
+                { label: 'Created', value: layer.created_at },
+                { label: 'Updated', value: layer.updated_at },
+              ],
+            },
+          ],
+          legend: CORE_LAYER_LEGENDS.vector_scope,
+          checked: isVisible,
+          disabled: false,
+          loading: false,
+          checkboxState: 'ready',
+          status: isVisible ? 'Visible' : 'Hidden',
+          tone: isVisible ? 'ready' : 'off',
+          actionLabel: 'Delete',
+          onToggle: () => toggleBusinessLayerVisibility(layer.id),
+          onSelect: () => activateBusinessLayerRecord(layer.id),
+          onAction: () => deleteBusinessLayer(layer.id),
+        };
+      }),
+    });
 
-    return groups.filter((group) => group.items.length > 0);
+    return groups;
   }, [
     agentImageryLoading,
     agentImagery,
@@ -1744,11 +2263,15 @@ function AgentPanel() {
     analysisDisplayEnabled,
     businessLayers,
     confirmedRecommendedCatalogLayers,
+    currentPeekDate,
+    currentPreDate,
     layerData,
     orderLayerManagerItems,
+    rasterDownloadState,
     scopeSourceLabel,
     agentSelectedPeriod,
     agentShowFloodDetection,
+    handleAgentRasterDownload,
     selectedPeriodMeta.label,
     selectedAOI,
     activateBusinessLayerRecord,
@@ -2200,7 +2723,6 @@ function AgentPanel() {
                 <section className="layer-manager-group" key={group.key}>
                   <div className="layer-manager-group-header">
                     <span className="layer-manager-group-title">{group.label}</span>
-                    <span className="layer-manager-group-count">{group.items.length}</span>
                   </div>
                   <div className="layer-manager-items">
                     {group.items.map((item) => {
@@ -2276,7 +2798,6 @@ function AgentPanel() {
                 </section>
               ))}
             </div>
-            <LocationScopePicker embedded />
           </div>
         </section>
 

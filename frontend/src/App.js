@@ -8,6 +8,7 @@ import Legends from './components/Legends';
 import Modals from './components/Modals';
 import Spinner from './components/Spinner';
 import AgentWorkspaceSidebar from './components/AgentWorkspaceSidebar';
+import LocationScopePicker from './components/LocationScopePicker';
 import { useAppContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
 import {
@@ -89,10 +90,23 @@ function App() {
         <Profiler id="AgentWorkspaceSidebar" onRender={sidebarProfiler}>
           <AgentWorkspaceSidebar />
         </Profiler>
+        <AgentLocationSearchDock />
         <Modals />
         <Spinner />
       </div>
     </CopilotKit>
+  );
+}
+
+function AgentLocationSearchDock() {
+  const { appMode } = useAppContext();
+
+  if (appMode !== 'agent') return null;
+
+  return (
+    <div className="agent-location-search-dock">
+      <LocationScopePicker embedded showInlineNote={false} />
+    </div>
   );
 }
 

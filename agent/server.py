@@ -6,12 +6,13 @@ import os
 import logging
 import time
 import warnings
+from io import BytesIO
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from pydantic.warnings import UnsupportedFieldAttributeWarning
 import uvicorn
@@ -30,6 +31,8 @@ from flood_aoi import search_location_candidates
 from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
 from flood_api_services import (
     build_script_pdf,
+    get_agent_raster_download_file,
+    get_agent_raster_download_payload,
     get_agent_raster_layers_payload,
     get_chatgpt_response,
     get_code_response,
@@ -378,6 +381,38 @@ async def get_agent_raster_layers(request: Request):
     _ensure_gee_ready()
     try:
         return get_agent_raster_layers_payload(await _get_request_payload(request))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/agent-raster-download")
+async def get_agent_raster_download(request: Request):
+    _ensure_gee_ready()
+    try:
+        return get_agent_raster_download_payload(await _get_request_payload(request))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/agent-raster-download-file")
+async def download_agent_raster_file(request: Request):
+    _ensure_gee_ready()
+    try:
+        content, filename, scale = get_agent_raster_download_file(await _get_request_payload(request))
+        safe_filename = filename.replace('"', "")
+        return StreamingResponse(
+            BytesIO(content),
+            media_type="image/tiff",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_filename}"',
+                "Content-Length": str(len(content)),
+                "X-SatGPT-Raster-Scale": str(scale),
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

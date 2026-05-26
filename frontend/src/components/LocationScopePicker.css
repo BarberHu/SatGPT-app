@@ -36,6 +36,26 @@
   backdrop-filter: none;
 }
 
+.agent-location-search-dock {
+  position: absolute;
+  top: 12px;
+  right: 444px;
+  z-index: 7;
+  width: min(380px, calc(100vw - 780px));
+  min-width: 320px;
+  padding: 10px 12px;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.water--agent-sidebar-collapsed .agent-location-search-dock {
+  right: 80px;
+  width: min(420px, calc(100vw - 428px));
+}
+
 .location-scope-picker-inline-note {
   color: #27272a;
   font-size: 13px;
@@ -280,4 +300,25 @@
   .location-scope-picker-actions {
     flex-direction: column-reverse;
   }
+}
+
+@media (max-width: 1180px) and (min-width: 901px) {
+  .agent-location-search-dock {
+    left: 352px;
+    right: 444px;
+    width: auto;
+    min-width: 0;
+  }
+
+}
+
+@media (max-width: 900px) {
+  .agent-location-search-dock,
+  .water--agent-sidebar-collapsed .agent-location-search-dock {
+    right: 12px;
+    left: 12px;
+    width: auto;
+    min-width: 0;
+  }
+
 }

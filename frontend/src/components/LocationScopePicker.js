@@ -89,7 +89,12 @@ function getFitPadding(dialogHeight, dialogWidth) {
   };
 }
 
-export default function LocationScopePicker({ isOpen = true, onClose, embedded = false }) {
+export default function LocationScopePicker({
+  isOpen = true,
+  onClose,
+  embedded = false,
+  showInlineNote = true,
+}) {
   const {
     mapInstance,
     selectedAOI,
@@ -305,11 +310,11 @@ export default function LocationScopePicker({ isOpen = true, onClose, embedded =
             <i className="fa fa-times" aria-hidden="true" />
           </button>
         </div>
-      ) : (
+      ) : showInlineNote ? (
         <div className="location-scope-picker-inline-note">
           Search a place name, preview the boundary on the map, then add it to Vector Layers.
         </div>
-      )}
+      ) : null}
 
       <div className="location-scope-picker-search">
         <input
