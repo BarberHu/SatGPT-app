@@ -31,6 +31,13 @@ from prompts import SYSTEM_PROMPT, FLOOD_REPORT_TEMPLATE, REPORT_GENERATION_PROM
 from gee_code_generator import generate_flood_gee_code
 from flood_aoi import aoi_to_geo_fields
 from flood_dataset_service import build_confirmation_context
+from hydrafloods_service import (
+    create_flood_extent_map,
+    create_sar_change_detection_map,
+    create_surface_water_map,
+    generate_example_code as generate_hydrafloods_example_code,
+    list_hydrafloods_capabilities as list_hydrafloods_service_capabilities,
+)
 from mention_context import resolve_mention_context
 from project_env import load_project_env
 
@@ -253,6 +260,18 @@ def _has_explicit_spatial_mention(content: Optional[str]) -> bool:
 def _has_spatial_scope_mention(content: Optional[str]) -> bool:
     text = str(content or "")
     return _has_explicit_spatial_mention(text) or bool(re.search(r"@[\w\u4e00-\u9fff-]+", text))
+
+
+_HYDRAFLOODS_HINT_PATTERN = re.compile(
+    r"\b(?:hydra[\s_-]*floods?|hydrofloods?|water\s+mapping|surface\s+water|"
+    r"flood\s+extent|inundation|sar\s+change|change\s+detection|edge\s*otsu|"
+    r"bmax\s*otsu|kmeans\s+extent)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_hydrafloods_tool_request(content: Optional[str]) -> bool:
+    return bool(_HYDRAFLOODS_HINT_PATTERN.search(str(content or "")))
 
 
 def _default_intent(message_content: Optional[str]) -> Dict[str, Any]:
@@ -783,7 +802,157 @@ def search_flood_event(query: str) -> str:
 
 
 # 工具列表
-tools = [search_flood_event]
+@tool
+def list_hydrafloods_capabilities() -> dict:
+    """
+    List the HYDRAFloods SDK capabilities exposed through SatGPT.
+
+    Use this when the user asks what hydra-floods/hydrofloods can do, which
+    datasets or algorithms are supported, or how it is integrated.
+    """
+    return list_hydrafloods_service_capabilities()
+
+
+@tool
+def hydrafloods_surface_water_map(
+    start_date: str,
+    end_date: str,
+    aoi: Optional[Dict[str, Any]] = None,
+    bounds: Optional[Dict[str, float]] = None,
+    dataset: str = "sentinel1",
+    algorithm: str = "edge_otsu",
+    band: Optional[str] = None,
+    initial_threshold: Optional[float] = None,
+) -> dict:
+    """
+    Run HYDRAFloods water mapping and return an Earth Engine tile URL.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format.
+        end_date: End date in YYYY-MM-DD format.
+        aoi: Optional SatGPT AOI object with geojson or bounds.
+        bounds: Optional bounds object with west, south, east, north.
+        dataset: sentinel1, sentinel2, landsat8, or landsat7.
+        algorithm: edge_otsu, bmax_otsu, or kmeans_extent.
+        band: Optional band/index. Defaults to VV for Sentinel-1 or mndwi for optical data.
+        initial_threshold: Optional initial threshold for HYDRAFloods thresholding.
+    """
+    try:
+        return create_surface_water_map(
+            aoi=aoi,
+            bounds=bounds,
+            start_date=start_date,
+            end_date=end_date,
+            dataset=dataset,
+            algorithm=algorithm,
+            band=band,
+            initial_threshold=initial_threshold,
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@tool
+def hydrafloods_flood_extent_map(
+    start_date: str,
+    end_date: str,
+    aoi: Optional[Dict[str, Any]] = None,
+    bounds: Optional[Dict[str, float]] = None,
+    dataset: str = "sentinel1",
+    algorithm: str = "edge_otsu",
+    reference: str = "seasonal",
+    permanent_threshold: int = 75,
+    band: Optional[str] = None,
+    initial_threshold: Optional[float] = None,
+) -> dict:
+    """
+    Run HYDRAFloods flood extent extraction and return an Earth Engine tile URL.
+
+    Use this for natural-language requests such as "map inundation", "extract
+    flood extent", or "use hydra-floods to detect flooding" when an AOI and
+    event date range are available.
+    """
+    try:
+        return create_flood_extent_map(
+            aoi=aoi,
+            bounds=bounds,
+            start_date=start_date,
+            end_date=end_date,
+            dataset=dataset,
+            algorithm=algorithm,
+            reference=reference,
+            permanent_threshold=permanent_threshold,
+            band=band,
+            initial_threshold=initial_threshold,
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@tool
+def hydrafloods_sar_change_detection(
+    pre_start_date: str,
+    pre_end_date: str,
+    post_start_date: str,
+    post_end_date: str,
+    aoi: Optional[Dict[str, Any]] = None,
+    bounds: Optional[Dict[str, float]] = None,
+    band: str = "VV",
+    segmentation: Optional[str] = "edgeotsu",
+) -> dict:
+    """
+    Run HYDRAFloods SAR log-amplitude-ratio change detection.
+
+    Use this for Sentinel-1 before/after flood change detection requests.
+    Requires a pre-flood date range, post/peak-flood date range, and AOI or bounds.
+    """
+    try:
+        return create_sar_change_detection_map(
+            aoi=aoi,
+            bounds=bounds,
+            pre_start_date=pre_start_date,
+            pre_end_date=pre_end_date,
+            post_start_date=post_start_date,
+            post_end_date=post_end_date,
+            band=band,
+            segmentation=segmentation,
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@tool
+def hydrafloods_generate_example_code(
+    task: str = "flood_extent",
+    start_date: str = "2019-10-05",
+    end_date: str = "2019-10-06",
+    bounds: Optional[Dict[str, float]] = None,
+) -> dict:
+    """
+    Generate runnable Python example code that calls the HYDRAFloods SDK.
+
+    Use this when the user asks for code, examples, or implementation guidance
+    instead of directly executing the analysis.
+    """
+    try:
+        return generate_hydrafloods_example_code(
+            task=task,
+            start_date=start_date,
+            end_date=end_date,
+            bounds=bounds,
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+hydrafloods_tools = [
+    list_hydrafloods_capabilities,
+    hydrafloods_surface_water_map,
+    hydrafloods_flood_extent_map,
+    hydrafloods_sar_change_detection,
+    hydrafloods_generate_example_code,
+]
+tools = [search_flood_event, *hydrafloods_tools]
 
 
 # ============== 节点定义 ==============
@@ -866,10 +1035,19 @@ async def chat_node(
     intent = _normalize_intent(state.get("intent") or {}, latest_user_message)
     intent_type = intent.get("intent_type", "event_discovery")
     missing_requirements = ", ".join(intent.get("missing_requirements") or []) or "none"
+    current_aoi = state.get("confirmed_aoi") or state.get("resolved_aoi")
+    current_bounds = state.get("bounds")
+    hydrafloods_requested = _is_hydrafloods_tool_request(latest_user_message)
 
     fe_tools = state.get("copilotkit", {}).get("actions", [])
     can_use_search_tools = bool(intent.get("should_use_search")) and not continuing_workflow_autofill
-    model_with_tools = model.bind_tools([*fe_tools, *tools]) if can_use_search_tools else model
+    enabled_backend_tools = []
+    if can_use_search_tools:
+        enabled_backend_tools.append(search_flood_event)
+    if hydrafloods_requested or intent.get("requests_inundation_extraction"):
+        enabled_backend_tools.extend(hydrafloods_tools)
+    model_tools = [*fe_tools, *enabled_backend_tools]
+    model_with_tools = model.bind_tools(model_tools) if model_tools else model
 
     if continuing_workflow_autofill:
         mode = "workflow_autofill"
@@ -909,13 +1087,24 @@ async def chat_node(
         "If only a year is provided, explain ambiguity and ask for month/date or a candidate choice. "
         "If @ is missing for workflow, ask for @ spatial scope. Keep the answer concise."
     )
+    hydrafloods_instruction = (
+        "HYDRAFloods tool use: When the user asks for hydra-floods/hydrofloods, surface-water mapping, "
+        "flood extent, inundation extraction, Edge Otsu, Bmax Otsu, k-means extent, or SAR change detection, "
+        "use the hydrafloods_* tools when date ranges and AOI/bounds are available. Prefer confirmed_aoi, "
+        "then resolved_aoi, then bounds from current state. If the user asks for code or an example, use "
+        "hydrafloods_generate_example_code. If AOI or dates are missing, ask only for the missing fields."
+    )
 
     system_message = SystemMessage(
         content=f"""{SYSTEM_PROMPT}
 
 [Current Stage]: {current_stage}
 [Classified Intent]: {intent_type}
+[Current AOI Available]: {bool(current_aoi)}
+[Current AOI]: {json.dumps(current_aoi, ensure_ascii=False)[:2500] if current_aoi else "none"}
+[Current Bounds]: {json.dumps(current_bounds, ensure_ascii=False) if current_bounds else "none"}
 {workflow_instruction}
+{hydrafloods_instruction}
 """
     )
 

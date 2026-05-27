@@ -25,18 +25,55 @@ start_all.bat          Root wrapper for scripts/windows/start_windows.bat
 requirements.txt       Root pointer to agent/requirements.txt
 ```
 
-## Requirements
+## Prerequisites
 
 - Python 3.12.10
 - Node.js 22.16.0
 - npm from Node.js 22.16.0
-- OpenAI API key
-- Tavily API key
-- Google Earth Engine credentials
-- Mapbox access token
+- Any of the following package managers:
+  - npm (default)
+  - pnpm
+  - yarn
+  - bun
+- OpenAI API key (for the LangGraph agent)
+- Tavily API key (for the Web information retrival)
+- Google Earth Engine credentials (GEE service account credentials)
+- Mapbox access token (for the base Map)
 
-## Setup
+## Getting Started
 
+1. Install dependencies using your preferred package 
+
+```
+# Using npm (default)
+npm install
+
+# Using pnpm
+pnpm install
+
+# Using yarn
+yarn install
+
+# Using bun
+bun install
+```
+2. Install Python dependencies for the LangGraph agent:
+
+```
+# Using npm (default)
+npm run install:agent
+
+# Using pnpm
+pnpm install:agent
+
+# Using yarn
+yarn install:agent
+
+# Using bun
+bun run install:agent
+```
+
+manager:
 ```powershell
 .\scripts\windows\setup_windows.bat
 ```
