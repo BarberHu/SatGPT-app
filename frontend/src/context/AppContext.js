@@ -61,6 +61,8 @@ const defaultAgentBaseImageryVisibility = {
 };
 
 const defaultAgentRasterLayerVisibility = {
+  singleInundationEvent: false,
+  inundationHotspot: false,
   lclu: false,
   populationDensity: false,
   soilTexture: false,
@@ -73,6 +75,8 @@ const defaultAgentLayerOrder = [
   'agent-s1-peek',
   'agent-s2-after',
   'agent-s1-after',
+  'agent-raster-singleInundationEvent',
+  'agent-raster-inundationHotspot',
   'agent-raster-populationDensity',
   'agent-raster-lclu',
   'agent-raster-soilTexture',
@@ -161,6 +165,8 @@ export const AppProvider = ({ children }) => {
   
   // Map Layer Data (EE responses)
   const [layerData, setLayerData] = useState({
+    singleInundationEvent: null,
+    inundationHotspot: null,
     water: null,
     flood: null,
     lclu: null,
@@ -490,6 +496,8 @@ export const AppProvider = ({ children }) => {
     setIsResultVisible(true);
     setWarning('');
     setLayerData({
+      singleInundationEvent: null,
+      inundationHotspot: null,
       water: null,
       flood: null,
       lclu: null,
@@ -682,7 +690,30 @@ export const AppProvider = ({ children }) => {
   
   // Update layer data from API response
   const updateLayerData = useCallback((data) => {
-    setLayerData({
+    setLayerData(normalizeLayerData(data));
+  }, []);
+
+  const mergeLayerData = useCallback((data) => {
+    setLayerData((previous) => ({
+      ...previous,
+      ...normalizeLayerData(data),
+    }));
+  }, []);
+
+  function normalizeLayerData(data = {}) {
+    return {
+      singleInundationEvent: data.eeMapURLSingleInundationEvent ? {
+        mapId: data.eeMapIdSingleInundationEvent,
+        token: data.eeTokenSingleInundationEvent,
+        tileUrl: data.eeMapURLSingleInundationEvent,
+        meta: data.singleInundationEventMeta || null,
+      } : null,
+      inundationHotspot: data.eeMapURLInundationHotspot ? {
+        mapId: data.eeMapIdInundationHotspot,
+        token: data.eeTokenInundationHotspot,
+        tileUrl: data.eeMapURLInundationHotspot,
+        meta: data.inundationHotspotMeta || null,
+      } : null,
       water: data.eeMapURLWater ? { 
         mapId: data.eeMapIdWater, 
         token: data.eeTokenWater, 
@@ -713,8 +744,8 @@ export const AppProvider = ({ children }) => {
         token: data.eeTokenHealthCareAccess, 
         tileUrl: data.eeMapURLHealthCareAccess 
       } : null,
-    });
-  }, []);
+    };
+  }
 
   const cancelDraftAoi = useCallback(() => {
     setDraftAOI(null);
@@ -857,6 +888,7 @@ export const AppProvider = ({ children }) => {
     // Map Layer Data
     layerData,
     updateLayerData,
+    mergeLayerData,
     resetAskSession,
     
     // GEE Code

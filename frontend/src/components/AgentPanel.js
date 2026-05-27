@@ -11,7 +11,8 @@ import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import { downloadAgentRasterFile, getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
-import { buildAoiFromAgentState, buildEarthEngineGeometryExpression } from '../utils/aoi';
+import { getAgentRasterLayers } from '../services/api';
+import { buildAoiFromAgentState, buildAskMapRequestParams, buildEarthEngineGeometryExpression } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
 import {
   buildCatalogLegendModel,
@@ -222,6 +223,40 @@ const FIELD_LABELS = {
 };
 
 const AGENT_RASTER_LAYER_CONFIG = [
+  {
+    key: 'singleInundationEvent',
+    orderId: 'agent-raster-singleInundationEvent',
+    title: 'Single Inundation Event',
+    infoText: 'JRC Global Surface Water yearly history clipped to the selected AOI for a single analysis time window.',
+    dataset: SOURCE_REFERENCES.jrcGswYearlyHistory.datasetId,
+    method: 'JRC YearlyHistory permanent water and seasonal inundation classes',
+    sourceRef: SOURCE_REFERENCES.jrcGswYearlyHistory,
+    legend: {
+      type: 'classes',
+      label: 'Water classification',
+      items: [
+        { value: 'Permanent water', color: '#00008B' },
+        { value: 'Inundated area', color: '#FD0303' },
+      ],
+    },
+  },
+  {
+    key: 'inundationHotspot',
+    orderId: 'agent-raster-inundationHotspot',
+    title: 'Inundation Hotspot',
+    infoText: 'Long-term inundation frequency from JRC yearly water history, excluding mapped permanent water.',
+    dataset: SOURCE_REFERENCES.jrcGswYearlyHistory.datasetId,
+    method: 'Flood frequency over configurable historical duration',
+    sourceRef: SOURCE_REFERENCES.jrcGswYearlyHistory,
+    legend: {
+      type: 'palette',
+      label: 'Inundation hotspot frequency',
+      min: '10%',
+      max: '80%',
+      palette: ['#ffa9bb', '#ff8f9e', '#ff6171', '#ff3b50', '#ff084a'],
+    },
+    hasDurationControl: true,
+  },
   {
     key: 'populationDensity',
     orderId: 'agent-raster-populationDensity',
@@ -764,6 +799,44 @@ function LayerManagerItemCopy({ item }) {
       {item.detailText ? (
         <div className="layer-manager-item-detail">{item.detailText}</div>
       ) : null}
+      {item.durationControl ? (
+        <LayerDurationControl control={item.durationControl} />
+      ) : null}
+    </div>
+  );
+}
+
+function LayerDurationControl({ control }) {
+  if (!control) {
+    return null;
+  }
+
+  const percent = ((control.value - control.min) / (control.max - control.min)) * 100;
+
+  return (
+    <div className="layer-manager-duration-control" onClick={(event) => event.stopPropagation()}>
+      <div className="layer-manager-duration-label">
+        {control.label}
+        <span>{control.valueLabel}</span>
+      </div>
+      <div className="layer-manager-duration-range-wrap">
+        <input
+          type="range"
+          className="layer-manager-duration-range"
+          min={control.min}
+          max={control.max}
+          step={control.step || 1}
+          value={control.value}
+          disabled={control.disabled}
+          onChange={(event) => control.onChange(Number(event.target.value))}
+          style={{ '--duration-progress': `${percent}%` }}
+        />
+      </div>
+      <div className="layer-manager-duration-ticks">
+        {(control.ticks || []).map((tick) => (
+          <span key={tick}>{tick}</span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1343,11 +1416,13 @@ function AgentPanel() {
     agentRasterLayerVisibility,
     setAgentRasterLayerVisibility,
     agentRasterLoading,
+    setAgentRasterLoading,
     agentLayerOrder,
     setAgentLayerOrder,
     agentLayerLoading,
     setAgentLayerLoading,
     setAgentTileError,
+    mergeLayerData,
     mapInstance,
     businessLayers,
     selectedAOI,
@@ -1359,6 +1434,7 @@ function AgentPanel() {
   const [draggedLayerId, setDraggedLayerId] = useState(null);
   const [dragOverState, setDragOverState] = useState({ groupKey: null, targetLayerId: null, position: 'before' });
   const [rasterDownloadState, setRasterDownloadState] = useState({});
+  const [hotspotDuration, setHotspotDuration] = useState(5);
 
   const { state } = useCoAgent({
     name: "flood_agent",
@@ -1526,7 +1602,58 @@ function AgentPanel() {
   );
   const analysisDisplayEnabled = hasResolvedAnalysisContext && analysisScopeMatchesSelection;
   const effectiveAoi = analysisDisplayEnabled ? agentDerivedAoi : null;
-  const handleAgentRasterDownload = useCallback(async ({ layerKey, title }) => {
+  const buildAgentRasterRequestParams = useCallback((layerKey, overrides = {}) => {
+    if (!selectedAOI) {
+      return null;
+    }
+
+    const baseParams = buildAskMapRequestParams(selectedAOI, {
+      time_start: currentPreDate || '2010-01-01',
+      time_end: currentAfterDate || currentPeekDate || '2024-12-31',
+      cloud_mask: 'true',
+      climatology: 'false',
+      month_from: '1',
+      month_to: '12',
+      ...overrides,
+    });
+
+    if (layerKey === 'inundationHotspot') {
+      baseParams.year_from = overrides.year_from || 1988;
+      baseParams.year_count = overrides.year_count || hotspotDuration;
+    }
+
+    return baseParams;
+  }, [currentAfterDate, currentPeekDate, currentPreDate, hotspotDuration, selectedAOI]);
+
+  const fetchAgentRasterLayer = useCallback(async (layerKey, overrides = {}) => {
+    const params = buildAgentRasterRequestParams(layerKey, overrides);
+    if (!params) {
+      setWarning('Please select an AOI before loading raster data.');
+      return;
+    }
+
+    setAgentRasterLoading(true);
+    setAgentLayerLoading((previous) => ({ ...previous, [`raster-${layerKey}`]: true }));
+    try {
+      const result = await getAgentRasterLayers(params);
+      mergeLayerData(result);
+      setWarning('');
+    } catch (error) {
+      const message = error?.message || 'Raster layer request failed.';
+      setWarning(message);
+    } finally {
+      setAgentRasterLoading(false);
+      setAgentLayerLoading((previous) => ({ ...previous, [`raster-${layerKey}`]: false }));
+    }
+  }, [
+    buildAgentRasterRequestParams,
+    mergeLayerData,
+    setAgentLayerLoading,
+    setAgentRasterLoading,
+    setWarning,
+  ]);
+
+  const handleAgentRasterDownload = useCallback(async ({ layerKey, title, requestParams = null }) => {
     if (!selectedAOI) {
       setWarning('Please select an AOI before downloading raster data.');
       return;
@@ -1545,6 +1672,7 @@ function AgentPanel() {
       const response = await downloadAgentRasterFile({
         layer_key: layerKey,
         aoi: selectedAOI,
+        ...(requestParams || {}),
       });
       if (!response?.blob) {
         throw new Error('Raster file was not returned.');
@@ -1977,9 +2105,23 @@ function AgentPanel() {
       const visible = Boolean(agentRasterLayerVisibility?.[layer.key]);
       const hasScope = Boolean(selectedAOI);
       const hasTile = Boolean(descriptor?.tileUrl);
-      const loading = Boolean(visible && hasScope && agentRasterLoading && !hasTile);
+      const loading = Boolean(
+        hasScope
+        && (
+          agentLayerLoading?.[`raster-${layer.key}`]
+          || (visible && agentRasterLoading && !hasTile)
+        )
+      );
       const downloadState = rasterDownloadState[layer.key] || null;
       const isDownloading = downloadState?.status === 'preparing';
+      const requestParams = buildAgentRasterRequestParams(layer.key);
+      const durationMeta = layer.key === 'inundationHotspot'
+        ? {
+          yearFrom: requestParams?.year_from || 1988,
+          yearCount: requestParams?.year_count || hotspotDuration,
+          yearTo: (requestParams?.year_from || 1988) + (requestParams?.year_count || hotspotDuration),
+        }
+        : null;
 
       return {
         id: `raster-${layer.key}`,
@@ -1998,6 +2140,8 @@ function AgentPanel() {
           { label: 'Content date', value: layer.sourceRef.contentDate },
           { label: 'License', value: layer.sourceRef.license },
           { label: 'Scope', value: selectedAOI?.label || 'No active scope' },
+          { label: 'Date window', value: layer.key === 'singleInundationEvent' ? `${requestParams?.time_start || '2010-01-01'} to ${requestParams?.time_end || '2024-12-31'}` : null },
+          { label: 'Hotspot duration', value: durationMeta ? `${durationMeta.yearFrom}-${durationMeta.yearTo} (${durationMeta.yearCount} years)` : null },
           { label: 'Status', value: !hasScope ? 'Unavailable' : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : (hasTile ? 'Ready' : 'Pending'))) },
         ],
         infoSections: [
@@ -2019,7 +2163,12 @@ function AgentPanel() {
             rows: [
               { label: 'Requires scope', value: true },
               { label: 'Active AOI', value: selectedAOI?.label },
-              { label: 'Layer role', value: 'Context for interpreting flood exposure and environment' },
+              { label: 'Layer role', value: layer.key === 'singleInundationEvent'
+                ? 'Historical single-window inundation evidence'
+                : layer.key === 'inundationHotspot'
+                  ? 'Long-term inundation hotspot context'
+                  : 'Context for interpreting flood exposure and environment' },
+              { label: 'Duration', value: durationMeta ? `${durationMeta.yearCount} years` : null },
             ],
           },
           {
@@ -2036,7 +2185,7 @@ function AgentPanel() {
           {
             key: `download-${layer.key}`,
             label: isDownloading ? 'Preparing GeoTIFF...' : 'Download AOI GeoTIFF',
-            onClick: () => handleAgentRasterDownload({ layerKey: layer.key, title: layer.title }),
+            onClick: () => handleAgentRasterDownload({ layerKey: layer.key, title: layer.title, requestParams }),
             disabled: isDownloading || !(hasScope && hasTile),
             status: downloadState?.status,
             message: downloadState?.message,
@@ -2048,6 +2197,22 @@ function AgentPanel() {
           },
         ],
         legend: layer.legend,
+        durationControl: layer.hasDurationControl ? {
+          label: 'Hotspot duration',
+          value: hotspotDuration,
+          valueLabel: `${durationMeta?.yearFrom || 1988}-${durationMeta?.yearTo || 1988 + hotspotDuration}`,
+          min: 5,
+          max: 25,
+          step: 1,
+          ticks: [5, 10, 15, 20, 25],
+          disabled: !hasScope || loading,
+          onChange: (nextValue) => {
+            setHotspotDuration(nextValue);
+            if (agentRasterLayerVisibility?.inundationHotspot) {
+              fetchAgentRasterLayer('inundationHotspot', { year_count: nextValue });
+            }
+          },
+        } : null,
         checked: visible,
         disabled: !hasScope,
         loading,
@@ -2070,6 +2235,8 @@ function AgentPanel() {
           if (!nextVisible) {
             removeMapLayerFromMap(layer.orderId);
             window.requestAnimationFrame(() => removeMapLayerFromMap(layer.orderId));
+          } else if (!hasTile) {
+            fetchAgentRasterLayer(layer.key);
           }
         },
       };
@@ -2271,7 +2438,10 @@ function AgentPanel() {
     scopeSourceLabel,
     agentSelectedPeriod,
     agentShowFloodDetection,
+    buildAgentRasterRequestParams,
     handleAgentRasterDownload,
+    fetchAgentRasterLayer,
+    hotspotDuration,
     selectedPeriodMeta.label,
     selectedAOI,
     activateBusinessLayerRecord,
@@ -2283,6 +2453,7 @@ function AgentPanel() {
     setAgentSelectedType,
     setAgentShowBaseImagery,
     setAgentShowFloodDetection,
+    setHotspotDuration,
     toggleBusinessLayerVisibility,
   ]);
   useEffect(() => {

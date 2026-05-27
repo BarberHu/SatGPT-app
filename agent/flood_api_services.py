@@ -196,46 +196,10 @@ def get_unsupervised_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)
-    basic_layer_catalog = get_basic_layer_catalog()
-    historical_catalog = basic_layer_catalog["historical"]
-    supplementary_catalog = basic_layer_catalog["supplementary"]
-
-    time_start = str(payload.get("time_start"))
-    time_end = str(payload.get("time_end"))
-    start_year = int(time_start.split("-")[0])
-    end_year = int(time_end.split("-")[0])
-
-    jrc_surface_water = (
-        ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
-        .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
-        .map(
-            lambda image: image.select(historical_catalog["water"]["band"]).eq(
-                historical_catalog["water"]["matchValue"]
-            )
-        )
-        .sum()
-        .clip(region)
+    jrc_surface_water, jrc_surface_flood, jrc_surface_water_visual, jrc_surface_flood_visual = (
+        _build_single_inundation_images(payload, region)
     )
-    jrc_surface_water = jrc_surface_water.updateMask(jrc_surface_water.gt(0))
-    jrc_surface_water = visualize_image(
-        jrc_surface_water, historical_catalog["water"]["visualization"]
-    )
-
-    jrc_surface_flood = (
-        ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
-        .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
-        .map(
-            lambda image: image.select(historical_catalog["flood"]["band"]).eq(
-                historical_catalog["flood"]["matchValue"]
-            )
-        )
-        .sum()
-        .clip(region)
-    )
-    jrc_surface_flood = jrc_surface_flood.updateMask(jrc_surface_flood.gt(0))
-    jrc_surface_flood = visualize_image(
-        jrc_surface_flood, historical_catalog["flood"]["visualization"]
-    )
+    supplementary_catalog = get_basic_layer_catalog()["supplementary"]
 
     lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
     population_density = ee.Image(
@@ -258,8 +222,8 @@ def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     content: Dict[str, Any] = {}
-    attach_map_id(content, "Flood", jrc_surface_flood.getMapId())
-    attach_map_id(content, "Water", jrc_surface_water.getMapId())
+    attach_map_id(content, "Flood", jrc_surface_flood_visual.getMapId())
+    attach_map_id(content, "Water", jrc_surface_water_visual.getMapId())
     attach_map_id(content, "LCLU", lclu.getMapId())
     attach_map_id(content, "PopulationDensity", population_density.getMapId())
     attach_map_id(content, "SoilTexture", soil_texture.getMapId())
@@ -267,10 +231,84 @@ def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return content
 
 
+def _build_single_inundation_images(payload: Dict[str, Any], region: ee.Geometry) -> tuple[ee.Image, ee.Image, ee.Image, ee.Image]:
+    basic_layer_catalog = get_basic_layer_catalog()
+    historical_catalog = basic_layer_catalog["historical"]
+
+    time_start = str(payload.get("time_start") or "2010-01-01")
+    time_end = str(payload.get("time_end") or "2024-12-31")
+    start_year = int(time_start.split("-")[0])
+    end_year = int(time_end.split("-")[0])
+
+    jrc_surface_water = (
+        ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
+        .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
+        .map(
+            lambda image: image.select(historical_catalog["water"]["band"]).eq(
+                historical_catalog["water"]["matchValue"]
+            )
+        )
+        .sum()
+        .clip(region)
+    )
+    jrc_surface_water = jrc_surface_water.updateMask(jrc_surface_water.gt(0))
+    jrc_surface_water_visual = visualize_image(
+        jrc_surface_water, historical_catalog["water"]["visualization"]
+    )
+
+    jrc_surface_flood = (
+        ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
+        .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
+        .map(
+            lambda image: image.select(historical_catalog["flood"]["band"]).eq(
+                historical_catalog["flood"]["matchValue"]
+            )
+        )
+        .sum()
+        .clip(region)
+    )
+    jrc_surface_flood = jrc_surface_flood.updateMask(jrc_surface_flood.gt(0))
+    jrc_surface_flood_visual = visualize_image(
+        jrc_surface_flood, historical_catalog["flood"]["visualization"]
+    )
+
+    return jrc_surface_water, jrc_surface_flood, jrc_surface_water_visual, jrc_surface_flood_visual
+
+
+def _blend_visual_layers(*images: ee.Image) -> ee.Image:
+    image_list = [image for image in images if image is not None]
+    if not image_list:
+        raise ValueError("At least one visual layer is required.")
+    blended = image_list[0]
+    for image in image_list[1:]:
+        blended = blended.blend(image)
+    return blended
+
+
+def _visualize_single_inundation(water: ee.Image, flood: ee.Image) -> ee.Image:
+    classified = (
+        water.unmask(0)
+        .where(flood.unmask(0).gt(0), 2)
+        .rename("inundation_class")
+        .selfMask()
+    )
+    return classified.visualize(
+        min=1,
+        max=2,
+        palette=["#00008B", "#FD0303"],
+    )
+
+
+def _visualize_hotspot(permanent_water_visual: ee.Image, flood_frequency_visual: ee.Image) -> ee.Image:
+    return _blend_visual_layers(permanent_water_visual, flood_frequency_visual)
+
+
 def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
+    water, flood, _water_visual, _flood_visual = _build_single_inundation_images(payload, region)
+    hotspot_water, hotspot_frequency, hotspot_water_visual, hotspot_visual = _build_flood_hotspot_images(payload, region)
 
     lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
     population_density = ee.Image(
@@ -286,9 +324,20 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         soil_texture, supplementary_catalog["soilTexture"]["visualization"]
     )
     content: Dict[str, Any] = {}
+    attach_map_id(content, "SingleInundationEvent", _visualize_single_inundation(water, flood).getMapId())
+    attach_map_id(content, "InundationHotspot", _visualize_hotspot(hotspot_water_visual, hotspot_visual).getMapId())
     attach_map_id(content, "LCLU", lclu.getMapId())
     attach_map_id(content, "PopulationDensity", population_density.getMapId())
     attach_map_id(content, "SoilTexture", soil_texture.getMapId())
+    content["singleInundationEventMeta"] = {
+        "time_start": str(payload.get("time_start") or "2010-01-01"),
+        "time_end": str(payload.get("time_end") or "2024-12-31"),
+    }
+    content["inundationHotspotMeta"] = {
+        "year_from": int(payload.get("year_from") or 1988),
+        "year_count": int(payload.get("year_count") or 5),
+        "year_to": int(payload.get("year_from") or 1988) + int(payload.get("year_count") or 5),
+    }
     return content
 
 
@@ -301,11 +350,23 @@ def _safe_download_name(value: Any, fallback: str = "aoi") -> str:
 def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
     layer_configs = {
+        "singleInundationEvent": {
+            "title": "Single Inundation Event",
+            "filename": "single_inundation_event",
+            "scale": 30,
+            "image_builder": _build_single_inundation_download_image,
+        },
+        "inundationHotspot": {
+            "title": "Inundation Hotspot",
+            "filename": "inundation_hotspot",
+            "scale": 30,
+            "image_builder": _build_inundation_hotspot_download_image,
+        },
         "lclu": {
             "title": "Land Cover and Land Use",
             "filename": "land_cover_land_use",
             "scale": 10,
-            "image_builder": lambda region: ee.ImageCollection(
+            "image_builder": lambda region, payload: ee.ImageCollection(
                 supplementary_catalog["landcover"]["dataset"]
             ).first().clip(region),
         },
@@ -313,7 +374,7 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
             "title": "Population Density",
             "filename": "population_density",
             "scale": 1000,
-            "image_builder": lambda region: ee.Image(
+            "image_builder": lambda region, payload: ee.Image(
                 supplementary_catalog["populationDensity"]["dataset"]
             ).clip(region),
         },
@@ -321,7 +382,7 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
             "title": "Soil Texture",
             "filename": "soil_texture",
             "scale": 250,
-            "image_builder": lambda region: ee.Image(
+            "image_builder": lambda region, payload: ee.Image(
                 supplementary_catalog["soilTexture"]["dataset"]
             ).select(supplementary_catalog["soilTexture"]["band"]).clip(region),
         },
@@ -334,9 +395,25 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
     return config
 
 
-def _build_agent_raster_download_image(layer_key: str, region: ee.Geometry) -> tuple[ee.Image, Dict[str, Any]]:
+def _build_single_inundation_download_image(region: ee.Geometry, payload: Dict[str, Any]) -> ee.Image:
+    water, flood, _water_visual, _flood_visual = _build_single_inundation_images(payload, region)
+    return ee.Image.cat([
+        water.unmask(0).rename("permanent_water"),
+        flood.unmask(0).rename("inundation_event"),
+    ]).toFloat().clip(region)
+
+
+def _build_inundation_hotspot_download_image(region: ee.Geometry, payload: Dict[str, Any]) -> ee.Image:
+    water, flood_frequency, _water_visual, _flood_visual = _build_flood_hotspot_images(payload, region)
+    return ee.Image.cat([
+        water.unmask(0).rename("permanent_water"),
+        flood_frequency.unmask(0).rename("flood_frequency"),
+    ]).toFloat().clip(region)
+
+
+def _build_agent_raster_download_image(layer_key: str, region: ee.Geometry, payload: Dict[str, Any]) -> tuple[ee.Image, Dict[str, Any]]:
     config = _get_agent_raster_download_config(layer_key)
-    return config["image_builder"](region), config
+    return config["image_builder"](region, payload), config
 
 
 def _get_agent_raster_download_payload(payload: Dict[str, Any], scale: Optional[int] = None) -> Dict[str, Any]:
@@ -346,7 +423,7 @@ def _get_agent_raster_download_payload(payload: Dict[str, Any], scale: Optional[
 
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)
-    image, config = _build_agent_raster_download_image(str(layer_key), region)
+    image, config = _build_agent_raster_download_image(str(layer_key), region, payload)
     scope_name = _safe_download_name(aoi.get("label") or aoi.get("source"), "aoi")
     filename_base = f"satgpt_{config['filename']}_{scope_name}"
     effective_scale = scale or config["scale"]
@@ -376,6 +453,8 @@ def get_agent_raster_download_payload(payload: Dict[str, Any]) -> Dict[str, Any]
 
 
 def _agent_raster_download_scales(layer_key: str, base_scale: int) -> list[int]:
+    if layer_key in {"singleInundationEvent", "inundationHotspot"}:
+        return [base_scale, 60, 100, 250]
     if layer_key == "lclu":
         return [base_scale, 20, 30, 50, 100]
     if layer_key == "soilTexture":
@@ -417,11 +496,46 @@ def get_agent_raster_download_file(payload: Dict[str, Any]):
 def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)
+    permanent_water_layer, flood_frequency_map, permanent_water_visual, flood_visual = (
+        _build_flood_hotspot_images(payload, region)
+    )
+    supplementary_catalog = get_basic_layer_catalog()["supplementary"]
+
+    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
+    population_density = ee.Image(
+        supplementary_catalog["populationDensity"]["dataset"]
+    ).clip(region)
+    population_density = visualize_image(
+        population_density, supplementary_catalog["populationDensity"]["visualization"]
+    )
+    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
+        supplementary_catalog["soilTexture"]["band"]
+    )
+    soil_texture = visualize_image(
+        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
+    )
+    healthcare_access = ee.Image(
+        supplementary_catalog["healthCareAccess"]["dataset"]
+    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
+    healthcare_access = visualize_image(
+        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
+    )
+
+    content: Dict[str, Any] = {}
+    attach_map_id(content, "Flood", flood_visual.getMapId())
+    attach_map_id(content, "Water", permanent_water_visual.getMapId())
+    attach_map_id(content, "LCLU", lclu.getMapId())
+    attach_map_id(content, "PopulationDensity", population_density.getMapId())
+    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
+    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+    return content
+
+
+def _build_flood_hotspot_images(payload: Dict[str, Any], region: ee.Geometry) -> tuple[ee.Image, ee.Image, ee.Image, ee.Image]:
     basic_layer_catalog = get_basic_layer_catalog()
     hotspot_catalog = basic_layer_catalog["hotspot"]
-    supplementary_catalog = basic_layer_catalog["supplementary"]
-    year_from = int(payload.get("year_from"))
-    year_count = int(payload.get("year_count"))
+    year_from = int(payload.get("year_from") or 1988)
+    year_count = int(payload.get("year_count") or 5)
     year_to = year_from + year_count
 
     water_esa2 = ee.ImageCollection(hotspot_catalog["worldCoverPrimaryWater"]["dataset"]).first().eq(
@@ -452,41 +566,14 @@ def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     flood_frequency_map = flood_frequency.where(permanent_water_layer.eq(1), 0).selfMask().clip(region)
     flood_frequency_map = flood_frequency_map.where(flood_frequency_map.gt(0.9), 0.90)
 
-    permanent_water_layer = visualize_image(
+    permanent_water_visual = visualize_image(
         permanent_water_layer.select("waterClass"), hotspot_catalog["water"]["visualization"]
     )
-    flood_layer = visualize_image(
+    flood_visual = visualize_image(
         flood_frequency_map.select("waterClass"), hotspot_catalog["floodFrequency"]["visualization"]
     )
 
-    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-    population_density = ee.Image(
-        supplementary_catalog["populationDensity"]["dataset"]
-    ).clip(region)
-    population_density = visualize_image(
-        population_density, supplementary_catalog["populationDensity"]["visualization"]
-    )
-    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
-        supplementary_catalog["soilTexture"]["band"]
-    )
-    soil_texture = visualize_image(
-        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
-    )
-    healthcare_access = ee.Image(
-        supplementary_catalog["healthCareAccess"]["dataset"]
-    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
-    healthcare_access = visualize_image(
-        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
-    )
-
-    content: Dict[str, Any] = {}
-    attach_map_id(content, "Flood", flood_layer.getMapId())
-    attach_map_id(content, "Water", permanent_water_layer.getMapId())
-    attach_map_id(content, "LCLU", lclu.getMapId())
-    attach_map_id(content, "PopulationDensity", population_density.getMapId())
-    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
-    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
-    return content
+    return permanent_water_layer, flood_frequency_map, permanent_water_visual, flood_visual
 
 
 def get_water_regime_change_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
