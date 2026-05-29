@@ -1,10 +1,13 @@
 import hashlib
 import json
+import re
 import sys
 import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 import ee
 
@@ -31,6 +34,7 @@ EXCLUDED_THEMES = {"ocean"}
 REGIONAL_ALLOWLIST = ("usgs/wbd", "wwf/hydroatlas", "wwf/hydrosheds")
 RECOMMENDED_RENDER_CACHE_TTL_SECONDS = 15 * 60
 RECOMMENDED_RENDER_CACHE_MAX_ENTRIES = 128
+MAX_RECOMMENDED_CATALOG_LAYERS = 9
 PRODUCT_GROUP_LABELS = {
     "flood_event_classification": "Flood Classification",
     "flood_event_archive": "Flood Archive",
@@ -345,7 +349,7 @@ def recommend_flood_layers(
     ranked_assets.sort(key=lambda item: (-item[0], item[1].title.lower()))
     catalog_descriptors = [
         _build_asset_descriptor(asset, score, entry)
-        for score, asset, entry in ranked_assets[:6]
+        for score, asset, entry in ranked_assets[:MAX_RECOMMENDED_CATALOG_LAYERS]
     ]
 
     default_selected_ids = [item["id"] for item in descriptors if item.get("default_selected")]
@@ -509,6 +513,40 @@ def _aoi_to_region(aoi: Dict[str, Any]) -> ee.Geometry:
     if not bounds:
         raise ValueError("AOI geometry is required to render a layer")
     return ee.Geometry.Rectangle([bounds["west"], bounds["south"], bounds["east"], bounds["north"]])
+
+
+def _safe_download_name(value: Any, fallback: str = "layer") -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    return cleaned[:64] or fallback
+
+
+def _download_scale_for_asset(asset: AssetRecord) -> int:
+    asset_id = (asset.asset_id or "").lower()
+    if "global_flood_db" in asset_id or "modis" in asset_id:
+        return 250
+    if "worldpop" in asset_id:
+        return 100
+    return 30
+
+
+def _download_scale_candidates(base_scale: int) -> List[int]:
+    candidates = [base_scale, 50, 100, 250, 500, 1000]
+    deduped: List[int] = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
+
+
+def _burn_region_mask_for_download(image: ee.Image, region: ee.Geometry, nodata: int | float) -> ee.Image:
+    region_mask = ee.Image.constant(1).clip(region).mask()
+    return image.updateMask(region_mask).unmask(nodata).clip(region.bounds())
+
+
+def _read_download_url(url: str) -> bytes:
+    with urlopen(url, timeout=120) as response:
+        return response.read()
 
 
 def _build_legend(vis_recipe: Dict[str, Any], fallback: str) -> Dict[str, Any]:
@@ -726,6 +764,128 @@ class FloodDatasetRenderer:
             "source_meta": {"asset_id": layer_id, "title": payload.get("name") or layer_key},
             "official_url": None,
         }
+
+    def _build_flood_detection_download_image(
+        self,
+        *,
+        region: ee.Geometry,
+        pre_date: Optional[str],
+        peek_date: Optional[str],
+    ) -> ee.Image:
+        if not gee_service.initialized:
+            raise RuntimeError("GEE service not initialized")
+        if not pre_date or not peek_date:
+            raise ValueError("Flood Detection download requires pre_date and peek_date.")
+
+        pre_image = gee_service._get_sar_composite(pre_date, region, 15, search_direction="before")
+        peek_image = gee_service._get_sar_composite(peek_date, region, 15, search_direction="after")
+        if pre_image is None or peek_image is None:
+            raise ValueError("Insufficient Sentinel-1 imagery for Flood Detection download.")
+
+        change_index = peek_image.select("VV").subtract(pre_image.select("VV")).rename("change")
+        flood_by_change = gee_service._otsu_change_detection(change_index, region)
+        peek_water = gee_service._otsu_water_detection(peek_image, region)
+        permanent_water = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").clip(region).select("occurrence").gte(95)
+        flood_area = flood_by_change.Or(peek_water).And(permanent_water.Not())
+        return flood_area.rename("flood_detection").toByte()
+
+    def _download_catalog_vector_geojson(
+        self,
+        *,
+        asset: AssetRecord,
+        region: ee.Geometry,
+    ) -> bytes:
+        collection = ee.FeatureCollection(asset.asset_id).filterBounds(region)
+        clipped = collection.map(lambda feature: feature.intersection(region, ee.ErrorMargin(1)))
+        payload = clipped.getInfo()
+        return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    def _download_image_with_fallbacks(
+        self,
+        *,
+        image: ee.Image,
+        region: ee.Geometry,
+        filename_base: str,
+        base_scale: int,
+        nodata: int | float,
+    ) -> tuple[bytes, int]:
+        masked_image = _burn_region_mask_for_download(image, region, nodata)
+        last_error: Optional[str] = None
+        for scale in _download_scale_candidates(base_scale):
+            try:
+                download_url = masked_image.getDownloadURL({
+                    "name": filename_base,
+                    "scale": scale,
+                    "region": region.bounds(),
+                    "format": "GEO_TIFF",
+                    "filePerBand": False,
+                })
+                return _read_download_url(download_url), scale
+            except HTTPError as error:
+                last_error = error.read().decode("utf-8", errors="replace") or str(error)
+            except Exception as error:
+                last_error = str(error)
+        raise RuntimeError(last_error or "Layer download failed.")
+
+    def download_layer_file(
+        self,
+        *,
+        layer_id: str,
+        recommended_layers: Sequence[Dict[str, Any]],
+        confirmed_aoi: Dict[str, Any],
+        pre_date: Optional[str],
+        peek_date: Optional[str],
+        after_date: Optional[str],
+    ) -> tuple[bytes, str, str, Optional[int], str]:
+        region = _aoi_to_region(confirmed_aoi)
+        scope_name = _safe_download_name(confirmed_aoi.get("label") or confirmed_aoi.get("source"), "aoi")
+
+        if layer_id == "core:flood_detection":
+            image = self._build_flood_detection_download_image(
+                region=region,
+                pre_date=pre_date,
+                peek_date=peek_date,
+            )
+            filename_base = f"satgpt_flood_detection_{scope_name}"
+            content, scale = self._download_image_with_fallbacks(
+                image=image,
+                region=region,
+                filename_base=filename_base,
+                base_scale=30,
+                nodata=255,
+            )
+            return content, f"{filename_base}.tif", "image/tiff", scale, "raster"
+
+        requested_layer = _get_requested_layer_descriptor(layer_id, recommended_layers)
+        asset = _get_catalog_asset_by_layer_id(layer_id, recommended_layers)
+        if not asset:
+            raise ValueError(f"Unknown recommended layer: {layer_id}")
+
+        title_name = _safe_download_name((requested_layer or {}).get("title") or asset.title, "recommended_layer")
+        filename_base = f"satgpt_{title_name}_{scope_name}"
+
+        if asset.asset_type == "FeatureCollection":
+            content = self._download_catalog_vector_geojson(asset=asset, region=region)
+            return content, f"{filename_base}.geojson", "application/geo+json", None, "vector"
+
+        self.tile_service.initialize()
+        if not self.tile_service.initialized:
+            raise RuntimeError(self.tile_service.init_error or "Earth Engine initialization failed")
+
+        image, _, _ = self.tile_service._prepare_image(
+            asset,
+            region,
+            pre_date or peek_date,
+            after_date or peek_date,
+        )
+        content, scale = self._download_image_with_fallbacks(
+            image=image.toFloat(),
+            region=region,
+            filename_base=filename_base,
+            base_scale=_download_scale_for_asset(asset),
+            nodata=-9999,
+        )
+        return content, f"{filename_base}.tif", "image/tiff", scale, "raster"
 
     def render_layer(
         self,

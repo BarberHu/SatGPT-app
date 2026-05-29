@@ -420,6 +420,7 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
             "title": "Land Cover and Land Use",
             "filename": "land_cover_land_use",
             "scale": 10,
+            "nodata": 0,
             "image_builder": lambda region, payload: ee.ImageCollection(
                 supplementary_catalog["landcover"]["dataset"]
             ).first().clip(region),
@@ -428,6 +429,7 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
             "title": "Population Density",
             "filename": "population_density",
             "scale": 1000,
+            "nodata": -9999,
             "image_builder": lambda region, payload: ee.Image(
                 supplementary_catalog["populationDensity"]["dataset"]
             ).clip(region),
@@ -436,6 +438,7 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
             "title": "Soil Texture",
             "filename": "soil_texture",
             "scale": 250,
+            "nodata": -9999,
             "image_builder": lambda region, payload: ee.Image(
                 supplementary_catalog["soilTexture"]["dataset"]
             ).select(supplementary_catalog["soilTexture"]["band"]).clip(region),
@@ -470,6 +473,11 @@ def _build_agent_raster_download_image(layer_key: str, region: ee.Geometry, payl
     return config["image_builder"](region, payload), config
 
 
+def _burn_region_mask_for_download(image: ee.Image, region: ee.Geometry, nodata: int | float) -> ee.Image:
+    region_mask = ee.Image.constant(1).clip(region).mask()
+    return image.updateMask(region_mask).unmask(nodata).clip(region.bounds())
+
+
 def _get_agent_raster_download_payload(payload: Dict[str, Any], scale: Optional[int] = None) -> Dict[str, Any]:
     layer_key = payload.get("layer_key") or payload.get("layerKey")
     if not layer_key:
@@ -478,13 +486,15 @@ def _get_agent_raster_download_payload(payload: Dict[str, Any], scale: Optional[
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)
     image, config = _build_agent_raster_download_image(str(layer_key), region, payload)
+    nodata = config.get("nodata", 0)
+    image = _burn_region_mask_for_download(image, region, nodata)
     scope_name = _safe_download_name(aoi.get("label") or aoi.get("source"), "aoi")
     filename_base = f"satgpt_{config['filename']}_{scope_name}"
     effective_scale = scale or config["scale"]
     download_url = image.getDownloadURL({
         "name": filename_base,
         "scale": effective_scale,
-        "region": region,
+        "region": region.bounds(),
         "format": "GEO_TIFF",
         "filePerBand": False,
     })

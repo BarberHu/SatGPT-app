@@ -111,6 +111,23 @@ export const downloadAgentRasterFile = async (params) => {
   }
 };
 
+export const downloadRecommendedLayerFile = async (params) => {
+  try {
+    const response = await axios.post(`${AGENT_API_BASE}/api/recommended-layer-download-file`, params, {
+      responseType: 'blob',
+    });
+    return {
+      blob: response.data,
+      filename: getFilenameFromDisposition(response.headers?.['content-disposition']),
+      scale: response.headers?.['x-satgpt-raster-scale'] || null,
+      kind: response.headers?.['x-satgpt-download-kind'] || null,
+    };
+  } catch (error) {
+    console.error('Failed to download recommended layer file:', error);
+    throw await normalizeAgentDownloadError(error, 'Failed to download layer file.');
+  }
+};
+
 const getFilenameFromDisposition = (contentDisposition) => {
   const match = String(contentDisposition || '').match(/filename="?([^"]+)"?/i);
   return match?.[1] || null;
@@ -194,6 +211,7 @@ const agentApi = {
   getFloodImpact,
   refreshFloodConfirmation,
   downloadAgentRasterFile,
+  downloadRecommendedLayerFile,
   renderRecommendedLayer,
   getAgentRasterDownloadUrl,
   searchLocationCandidates,

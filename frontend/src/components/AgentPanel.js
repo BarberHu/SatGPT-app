@@ -10,7 +10,13 @@ import { createPortal, flushSync } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
-import { downloadAgentRasterFile, getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
+import {
+  downloadAgentRasterFile,
+  downloadRecommendedLayerFile,
+  getFloodImages,
+  getFloodImpact,
+  renderRecommendedLayer,
+} from '../services/agentApi';
 import { getAgentRasterLayers } from '../services/api';
 import { buildAoiFromAgentState, buildAskMapRequestParams, buildEarthEngineGeometryExpression } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
@@ -1445,6 +1451,7 @@ function AgentPanel() {
   const impactRequestKeyRef = useRef(null);
   const pendingRecommendedLayerRequestsRef = useRef(new Set());
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
+  const rasterDownloadResetTimersRef = useRef({});
   const hasCoAgentState = Boolean(state);
   const rawState = hasCoAgentState ? state : floodAgentState;
   const rawEvent = rawState?.event || null;
@@ -1558,6 +1565,13 @@ function AgentPanel() {
     agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
   }, [agentRecommendedLayerData]);
 
+  useEffect(() => () => {
+    Object.values(rasterDownloadResetTimersRef.current).forEach((timerId) => {
+      window.clearTimeout(timerId);
+    });
+    rasterDownloadResetTimersRef.current = {};
+  }, []);
+
   const currentConfirmedAoi = currentState?.confirmed_aoi || null;
   const currentResolvedAoi = currentState?.resolved_aoi || null;
   const currentLocation = currentState?.location || null;
@@ -1654,12 +1668,53 @@ function AgentPanel() {
     setWarning,
   ]);
 
+  const selectedAoiDownloadSignature = useMemo(() => buildAoiSignature(selectedAOI), [selectedAOI]);
+  const effectiveAoiDownloadSignature = useMemo(() => buildAoiSignature(effectiveAoi), [effectiveAoi]);
+  const clearRasterDownloadResetTimer = useCallback((layerKey) => {
+    const timerId = rasterDownloadResetTimersRef.current[layerKey];
+    if (timerId) {
+      window.clearTimeout(timerId);
+      delete rasterDownloadResetTimersRef.current[layerKey];
+    }
+  }, []);
+
+  const scheduleRasterDownloadStateReset = useCallback((layerKey) => {
+    clearRasterDownloadResetTimer(layerKey);
+    rasterDownloadResetTimersRef.current[layerKey] = window.setTimeout(() => {
+      setRasterDownloadState((previous) => {
+        if (previous[layerKey]?.status !== 'success') {
+          return previous;
+        }
+
+        const next = { ...previous };
+        delete next[layerKey];
+        return next;
+      });
+      delete rasterDownloadResetTimersRef.current[layerKey];
+    }, 2500);
+  }, [clearRasterDownloadResetTimer]);
+
+  useEffect(() => {
+    Object.values(rasterDownloadResetTimersRef.current).forEach((timerId) => {
+      window.clearTimeout(timerId);
+    });
+    rasterDownloadResetTimersRef.current = {};
+    setRasterDownloadState({});
+  }, [
+    currentAfterDate,
+    currentPeekDate,
+    currentPreDate,
+    effectiveAoiDownloadSignature,
+    selectedAoiDownloadSignature,
+  ]);
+
   const handleAgentRasterDownload = useCallback(async ({ layerKey, title, requestParams = null }) => {
     if (!selectedAOI) {
       setWarning('Please select an AOI before downloading raster data.');
       return;
     }
 
+    clearRasterDownloadResetTimer(layerKey);
     setRasterDownloadState((previous) => ({
       ...previous,
       [layerKey]: {
@@ -1687,12 +1742,14 @@ function AgentPanel() {
           message: response.scale ? `Download started at ${response.scale}m resolution.` : 'Download started.',
         },
       }));
+      scheduleRasterDownloadStateReset(layerKey);
       trackUxEvent('download_agent_raster', {
         layerKey,
         title,
         scope: selectedAOI?.label || null,
       });
     } catch (error) {
+      clearRasterDownloadResetTimer(layerKey);
       const message = error?.message || 'Raster download failed.';
       setRasterDownloadState((previous) => ({
         ...previous,
@@ -1703,7 +1760,81 @@ function AgentPanel() {
       }));
       setWarning(message);
     }
-  }, [selectedAOI, setWarning]);
+  }, [
+    clearRasterDownloadResetTimer,
+    scheduleRasterDownloadStateReset,
+    selectedAOI,
+    setWarning,
+  ]);
+
+  const handleRecommendedLayerDownload = useCallback(async ({ layerId, title }) => {
+    if (!effectiveAoi) {
+      setWarning('Confirm an event AOI before downloading this layer.');
+      return;
+    }
+
+    clearRasterDownloadResetTimer(layerId);
+    setRasterDownloadState((previous) => ({
+      ...previous,
+      [layerId]: {
+        status: 'preparing',
+        message: 'Preparing AOI file...',
+      },
+    }));
+
+    try {
+      setWarning('');
+      const response = await downloadRecommendedLayerFile({
+        layer_id: layerId,
+        recommended_layers: currentRecommendedLayers,
+        confirmed_aoi: effectiveAoi,
+        pre_date: currentPreDate,
+        peek_date: currentPeekDate,
+        after_date: currentAfterDate,
+      });
+      if (!response?.blob) {
+        throw new Error('Layer file was not returned.');
+      }
+
+      downloadBlobFile(response.blob, response.filename);
+      const successMessage = response.kind === 'vector'
+        ? 'Download started as GeoJSON.'
+        : (response.scale ? `Download started at ${response.scale}m resolution.` : 'Download started.');
+      setRasterDownloadState((previous) => ({
+        ...previous,
+        [layerId]: {
+          status: 'success',
+          message: successMessage,
+        },
+      }));
+      scheduleRasterDownloadStateReset(layerId);
+      trackUxEvent('download_recommended_layer', {
+        layerId,
+        title,
+        scope: effectiveAoi?.label || null,
+      });
+    } catch (error) {
+      clearRasterDownloadResetTimer(layerId);
+      const message = error?.message || 'Layer download failed.';
+      setRasterDownloadState((previous) => ({
+        ...previous,
+        [layerId]: {
+          status: 'error',
+          message,
+        },
+      }));
+      setWarning(message);
+    }
+  }, [
+    clearRasterDownloadResetTimer,
+    currentAfterDate,
+    currentPeekDate,
+    currentPreDate,
+    currentRecommendedLayers,
+    effectiveAoi,
+    scheduleRasterDownloadStateReset,
+    setWarning,
+  ]);
   const fallbackGeeCode = useMemo(() => buildFallbackAgentGEECode({
     eventName: currentEvent,
     preDate: currentPreDate,
@@ -2030,6 +2161,8 @@ function AgentPanel() {
     const floodDetectionDescriptor = agentImagery?.flood_detection || null;
     const floodDetectionAvailable = Boolean(floodDetectionDescriptor?.tile_url);
     const floodDetectionLoading = Boolean(agentShowFloodDetection && agentLayerLoading?.['flood-detection']);
+    const floodDetectionDownloadState = rasterDownloadState['core:flood_detection'] || null;
+    const floodDetectionDownloading = floodDetectionDownloadState?.status === 'preparing';
     const floodDetectionItem = analysisDisplayEnabled ? [{
       id: 'core-flood-detection',
       orderId: 'agent-flood-detection',
@@ -2076,6 +2209,19 @@ function AgentPanel() {
       infoLinks: [
         { label: 'Sentinel-1 catalog', href: SOURCE_REFERENCES.sentinel1.officialUrl },
         { label: 'JRC water catalog', href: SOURCE_REFERENCES.jrcGsw.officialUrl },
+      ],
+      infoActions: [
+        {
+          key: 'download-core-flood-detection',
+          label: floodDetectionDownloading ? 'Preparing GeoTIFF...' : 'Download Flood Mask GeoTIFF',
+          onClick: () => handleRecommendedLayerDownload({ layerId: 'core:flood_detection', title: 'Flood Detection' }),
+          disabled: floodDetectionDownloading || !analysisDisplayEnabled,
+          status: floodDetectionDownloadState?.status,
+          message: floodDetectionDownloadState?.message,
+          title: floodDetectionDownloading
+            ? 'Preparing the flood mask file'
+            : 'Download the derived flood mask for the current AOI',
+        },
       ],
       legend: CORE_LAYER_LEGENDS.flood_detection,
       checked: Boolean(agentShowFloodDetection && floodDetectionAvailable),
@@ -2253,6 +2399,9 @@ function AgentPanel() {
       const visible = Boolean(agentRecommendedLayerVisibility?.[layer.id]);
       const loading = Boolean(visible && agentLayerLoading?.[layer.id]);
       const hasTile = Boolean(descriptor?.tile_url);
+      const downloadState = rasterDownloadState[layer.id] || null;
+      const isDownloading = downloadState?.status === 'preparing';
+      const isVectorDownload = (sourceMeta.asset_type || layer.asset_type) === 'FeatureCollection';
       const orderId = getCatalogMapLayerId(layer.id);
       return {
         id: `recommended-${layer.id}`,
@@ -2324,6 +2473,23 @@ function AgentPanel() {
           { label: 'Official dataset page', href: sourceMeta.official_url || layer.official_url || descriptor?.official_url },
           { label: 'GEE water catalog source', href: sourceMeta.catalog_source_url },
         ].filter((link) => link.href),
+        infoActions: [
+          {
+            key: `download-${layer.id}`,
+            label: isDownloading
+              ? 'Preparing file...'
+              : (isVectorDownload ? 'Download AOI GeoJSON' : 'Download AOI GeoTIFF'),
+            onClick: () => handleRecommendedLayerDownload({ layerId: layer.id, title: layer.title }),
+            disabled: isDownloading || !analysisDisplayEnabled,
+            status: downloadState?.status,
+            message: downloadState?.message,
+            title: isDownloading
+              ? 'Preparing the clipped layer file'
+              : (isVectorDownload
+                ? 'Download vector features clipped to the current AOI'
+                : 'Download the clipped raster for the current AOI'),
+          },
+        ],
         legend: buildCatalogLegendModel(descriptor || layer, layer.title),
         checked: visible,
         disabled: !analysisDisplayEnabled,
@@ -2443,6 +2609,7 @@ function AgentPanel() {
     handleAgentRasterDownload,
     fetchAgentRasterLayer,
     hotspotDuration,
+    handleRecommendedLayerDownload,
     selectedPeriodMeta.label,
     selectedAOI,
     activateBusinessLayerRecord,

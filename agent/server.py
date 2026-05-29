@@ -695,6 +695,34 @@ async def render_recommended_layer(request: RecommendedLayerRenderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/recommended-layer-download-file")
+async def download_recommended_layer_file(request: RecommendedLayerRenderRequest):
+    try:
+        content, filename, media_type, scale, download_kind = renderer.download_layer_file(
+            layer_id=request.layer_id,
+            recommended_layers=request.recommended_layers,
+            confirmed_aoi=request.confirmed_aoi,
+            pre_date=request.pre_date,
+            peek_date=request.peek_date,
+            after_date=request.after_date,
+        )
+        safe_filename = filename.replace('"', "")
+        headers = {
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Content-Length": str(len(content)),
+            "X-SatGPT-Download-Kind": download_kind,
+        }
+        if scale:
+            headers["X-SatGPT-Raster-Scale"] = str(scale)
+        return StreamingResponse(
+            BytesIO(content),
+            media_type=media_type,
+            headers=headers,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/location-search")
 async def search_location(request: LocationSearchRequest):
     try:
