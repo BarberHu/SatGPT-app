@@ -696,55 +696,63 @@ export const AppProvider = ({ children }) => {
   const mergeLayerData = useCallback((data) => {
     setLayerData((previous) => ({
       ...previous,
-      ...normalizeLayerData(data),
+      ...normalizeLayerData(data, { partial: true }),
     }));
   }, []);
 
-  function normalizeLayerData(data = {}) {
-    return {
-      singleInundationEvent: data.eeMapURLSingleInundationEvent ? {
+  function normalizeLayerData(data = {}, options = {}) {
+    const { partial = false } = options;
+    const normalized = {};
+    const setLayer = (key, urlField, layerValue) => {
+      if (!partial || Object.prototype.hasOwnProperty.call(data, urlField)) {
+        normalized[key] = data[urlField] ? layerValue : null;
+      }
+    };
+
+    setLayer('singleInundationEvent', 'eeMapURLSingleInundationEvent', {
         mapId: data.eeMapIdSingleInundationEvent,
         token: data.eeTokenSingleInundationEvent,
         tileUrl: data.eeMapURLSingleInundationEvent,
         meta: data.singleInundationEventMeta || null,
-      } : null,
-      inundationHotspot: data.eeMapURLInundationHotspot ? {
+    });
+    setLayer('inundationHotspot', 'eeMapURLInundationHotspot', {
         mapId: data.eeMapIdInundationHotspot,
         token: data.eeTokenInundationHotspot,
         tileUrl: data.eeMapURLInundationHotspot,
         meta: data.inundationHotspotMeta || null,
-      } : null,
-      water: data.eeMapURLWater ? { 
+    });
+    setLayer('water', 'eeMapURLWater', {
         mapId: data.eeMapIdWater, 
         token: data.eeTokenWater, 
         tileUrl: data.eeMapURLWater 
-      } : null,
-      flood: data.eeMapURLFlood ? { 
+    });
+    setLayer('flood', 'eeMapURLFlood', {
         mapId: data.eeMapIdFlood, 
         token: data.eeTokenFlood, 
         tileUrl: data.eeMapURLFlood 
-      } : null,
-      lclu: data.eeMapURLLCLU ? { 
+    });
+    setLayer('lclu', 'eeMapURLLCLU', {
         mapId: data.eeMapIdLCLU, 
         token: data.eeTokenLCLU, 
         tileUrl: data.eeMapURLLCLU 
-      } : null,
-      populationDensity: data.eeMapURLPopulationDensity ? { 
+    });
+    setLayer('populationDensity', 'eeMapURLPopulationDensity', {
         mapId: data.eeMapIdPopulationDensity, 
         token: data.eeTokenPopulationDensity, 
         tileUrl: data.eeMapURLPopulationDensity 
-      } : null,
-      soilTexture: data.eeMapURLSoilTexture ? { 
+    });
+    setLayer('soilTexture', 'eeMapURLSoilTexture', {
         mapId: data.eeMapIdSoilTexture, 
         token: data.eeTokenSoilTexture, 
         tileUrl: data.eeMapURLSoilTexture 
-      } : null,
-      healthCareAccess: data.eeMapURLHealthCareAccess ? { 
+    });
+    setLayer('healthCareAccess', 'eeMapURLHealthCareAccess', {
         mapId: data.eeMapIdHealthCareAccess, 
         token: data.eeTokenHealthCareAccess, 
         tileUrl: data.eeMapURLHealthCareAccess 
-      } : null,
-    };
+    });
+
+    return normalized;
   }
 
   const cancelDraftAoi = useCallback(() => {

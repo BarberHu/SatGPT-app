@@ -23,6 +23,13 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 LAYER_CATALOG_PATH = ROOT_DIR / "frontend" / "src" / "config" / "layerCatalog.json"
+AGENT_RASTER_LAYER_KEYS = {
+    "singleInundationEvent",
+    "inundationHotspot",
+    "lclu",
+    "populationDensity",
+    "soilTexture",
+}
 
 _LATEST_SCRIPT_LOCK = threading.Lock()
 _LATEST_SCRIPT: Optional[str] = None
@@ -303,41 +310,88 @@ def _visualize_hotspot(permanent_water_visual: ee.Image, flood_frequency_visual:
     return _blend_visual_layers(permanent_water_visual, flood_frequency_visual)
 
 
+def _requested_agent_raster_layer_keys(payload: Dict[str, Any]) -> set[str]:
+    raw_keys = payload.get("layer_keys", payload.get("layerKeys"))
+    if not raw_keys:
+        return set(AGENT_RASTER_LAYER_KEYS)
+
+    if isinstance(raw_keys, str):
+        stripped = raw_keys.strip()
+        if stripped.startswith("["):
+            raw_keys = json.loads(stripped)
+        else:
+            raw_keys = [key.strip() for key in stripped.split(",") if key.strip()]
+
+    if not isinstance(raw_keys, list):
+        raise ValueError("layer_keys must be a list, JSON array string, or comma-separated string.")
+
+    requested_keys = {str(key).strip() for key in raw_keys if str(key).strip()}
+    unsupported_keys = requested_keys - AGENT_RASTER_LAYER_KEYS
+    if unsupported_keys:
+        raise ValueError(f"Unsupported agent raster layer key(s): {', '.join(sorted(unsupported_keys))}")
+    if not requested_keys:
+        raise ValueError("layer_keys must include at least one layer key.")
+    return requested_keys
+
+
 def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    requested_keys = _requested_agent_raster_layer_keys(payload)
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
-    water, flood, _water_visual, _flood_visual = _build_single_inundation_images(payload, region)
-    hotspot_water, hotspot_frequency, hotspot_water_visual, hotspot_visual = _build_flood_hotspot_images(payload, region)
-
-    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-    population_density = ee.Image(
-        supplementary_catalog["populationDensity"]["dataset"]
-    ).clip(region)
-    population_density = visualize_image(
-        population_density, supplementary_catalog["populationDensity"]["visualization"]
-    )
-    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
-        supplementary_catalog["soilTexture"]["band"]
-    )
-    soil_texture = visualize_image(
-        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
-    )
     content: Dict[str, Any] = {}
-    attach_map_id(content, "SingleInundationEvent", _visualize_single_inundation(water, flood).getMapId())
-    attach_map_id(content, "InundationHotspot", _visualize_hotspot(hotspot_water_visual, hotspot_visual).getMapId())
-    attach_map_id(content, "LCLU", lclu.getMapId())
-    attach_map_id(content, "PopulationDensity", population_density.getMapId())
-    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
-    content["singleInundationEventMeta"] = {
-        "time_start": str(payload.get("time_start") or "2010-01-01"),
-        "time_end": str(payload.get("time_end") or "2024-12-31"),
-    }
-    content["inundationHotspotMeta"] = {
-        "year_from": int(payload.get("year_from") or 1988),
-        "year_count": int(payload.get("year_count") or 5),
-        "year_to": int(payload.get("year_from") or 1988) + int(payload.get("year_count") or 5),
-    }
+
+    if "singleInundationEvent" in requested_keys:
+        water, flood, _water_visual, _flood_visual = _build_single_inundation_images(payload, region)
+        attach_map_id(
+            content,
+            "SingleInundationEvent",
+            _visualize_single_inundation(water, flood).getMapId(),
+        )
+        content["singleInundationEventMeta"] = {
+            "time_start": str(payload.get("time_start") or "2010-01-01"),
+            "time_end": str(payload.get("time_end") or "2024-12-31"),
+        }
+
+    if "inundationHotspot" in requested_keys:
+        _hotspot_water, _hotspot_frequency, hotspot_water_visual, hotspot_visual = (
+            _build_flood_hotspot_images(payload, region)
+        )
+        attach_map_id(
+            content,
+            "InundationHotspot",
+            _visualize_hotspot(hotspot_water_visual, hotspot_visual).getMapId(),
+        )
+        year_from = int(payload.get("year_from") or 1988)
+        year_count = int(payload.get("year_count") or 5)
+        content["inundationHotspotMeta"] = {
+            "year_from": year_from,
+            "year_count": year_count,
+            "year_to": year_from + year_count,
+        }
+
+    if "lclu" in requested_keys:
+        lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
+        attach_map_id(content, "LCLU", lclu.getMapId())
+
+    if "populationDensity" in requested_keys:
+        population_density = ee.Image(
+            supplementary_catalog["populationDensity"]["dataset"]
+        ).clip(region)
+        population_density = visualize_image(
+            population_density, supplementary_catalog["populationDensity"]["visualization"]
+        )
+        attach_map_id(content, "PopulationDensity", population_density.getMapId())
+
+    if "soilTexture" in requested_keys:
+        soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
+            supplementary_catalog["soilTexture"]["band"]
+        )
+        soil_texture = visualize_image(
+            soil_texture, supplementary_catalog["soilTexture"]["visualization"]
+        )
+        attach_map_id(content, "SoilTexture", soil_texture.getMapId())
+
     return content
 
 

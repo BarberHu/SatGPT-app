@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { getAgentRasterLayers, getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
+import { getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams } from '../utils/aoi';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 
@@ -50,6 +50,11 @@ export const useMapData = () => {
   const fetchMapData = useCallback(async (aoi) => {
     const currentMode = appModeRef.current;
     if (!aoi || !canAutoloadAoi(currentMode, aoi)) return;
+
+    if (currentMode === 'agent') {
+      return;
+    }
+
     const requestId = ++requestIdRef.current;
 
     console.log('fetchMapData called with AOI:', aoi);
@@ -67,17 +72,13 @@ export const useMapData = () => {
     console.log('API params:', params);
     if (currentMode === 'ask') {
       setIsLoading(true);
-    } else if (currentMode === 'agent') {
-      setAgentRasterLoading(true);
     }
     setWarning('');
 
     try {
       let data;
 
-      if (currentMode === 'agent') {
-        data = await getAgentRasterLayers(params);
-      } else if (dataType === 'historical') {
+      if (dataType === 'historical') {
         data = await getHistoricalMap(params);
       } else {
         // Flood hotspot

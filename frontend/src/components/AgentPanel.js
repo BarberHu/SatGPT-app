@@ -1614,6 +1614,7 @@ function AgentPanel() {
       climatology: 'false',
       month_from: '1',
       month_to: '12',
+      layer_keys: [layerKey],
       ...overrides,
     });
 
