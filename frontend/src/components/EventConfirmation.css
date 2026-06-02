@@ -271,10 +271,21 @@
   background: #eff6ff;
 }
 
+.recommendation-strategy {
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+}
+
 .recommended-layer-summary {
   font-size: 12px;
   color: #475569;
   line-height: 1.45;
+}
+
+.recommended-layer-summary.muted {
+  color: #64748b;
 }
 
 .no-recommendation-copy {

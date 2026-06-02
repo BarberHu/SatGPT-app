@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { useAppContext } from '../context/AppContext';
 import {
+  buildAoiSignature,
   buildAoiFromDrawFeature,
   buildAoiFromDrawFeatures,
   buildAoiFromGridSelection,
@@ -265,6 +266,7 @@ function MapContainer() {
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
   const agentRasterTileUrlRef = useRef({});
   const agentRasterLayerVisibilityRef = useRef(agentRasterLayerVisibility);
+  const selectedAoiSignatureRef = useRef(buildAoiSignature(selectedAOI));
   const appModeRef = useRef(appMode);
   const layerDataRef = useRef(layerData);
   const syncAgentRasterLayersRef = useRef(null);
@@ -272,6 +274,7 @@ function MapContainer() {
   agentLayerOrderRef.current = agentLayerOrder;
   agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
   agentRasterLayerVisibilityRef.current = agentRasterLayerVisibility;
+  selectedAoiSignatureRef.current = buildAoiSignature(selectedAOI);
   appModeRef.current = appMode;
   layerDataRef.current = layerData;
 
@@ -472,6 +475,25 @@ function MapContainer() {
     });
   }, [getExistingLayerBands]);
 
+  const schedulePromoteDrawLayers = useCallback((map, passCount = 3) => {
+    if (!map) return;
+
+    let remainingPasses = passCount;
+    const run = () => {
+      if (mapRef.current !== map || !map.isStyleLoaded()) {
+        return;
+      }
+
+      promoteDrawLayers(map);
+      remainingPasses -= 1;
+      if (remainingPasses > 0) {
+        window.requestAnimationFrame(run);
+      }
+    };
+
+    window.requestAnimationFrame(run);
+  }, [promoteDrawLayers]);
+
   const reconcileLayerOrder = useCallback((map) => {
     if (!map || !map.isStyleLoaded()) return;
 
@@ -580,6 +602,7 @@ function MapContainer() {
     const currentLayerData = layerDataRef.current || {};
     const currentRasterVisibility = agentRasterLayerVisibilityRef.current || {};
     const currentLayerOrder = agentLayerOrderRef.current || [];
+    const currentAoiSignature = selectedAoiSignatureRef.current;
 
     if (currentAppMode === 'agent') {
       removeAskRasterSiblings(map, AGENT_RASTER_LAYER_NAMES);
@@ -599,7 +622,11 @@ function MapContainer() {
     orderedRasterNames.forEach((layerName) => {
       const mapLayerId = `agent-raster-${layerName}`;
       const descriptor = currentAppMode === 'agent' ? currentLayerData?.[layerName] : null;
-      const nextTileUrl = currentRasterVisibility?.[layerName] && descriptor?.tileUrl
+      const descriptorMatchesCurrentAoi = Boolean(
+        descriptor?.aoiSignature
+        && descriptor.aoiSignature === currentAoiSignature
+      );
+      const nextTileUrl = currentRasterVisibility?.[layerName] && descriptorMatchesCurrentAoi && descriptor?.tileUrl
         ? descriptor.tileUrl
         : null;
       const previousTileUrl = agentRasterTileUrlRef.current?.[layerName] || null;
@@ -650,9 +677,11 @@ function MapContainer() {
     });
 
     reconcileLayerOrder(map);
+    promoteDrawLayers(map);
     return true;
   }, [
     getInsertBeforeId,
+    promoteDrawLayers,
     reconcileLayerOrder,
     removeAskRasterSiblings,
   ]);
@@ -812,7 +841,10 @@ function MapContainer() {
 
     const handleStyleData = () => {
       syncAgentRasterLayersRef.current?.(map);
-      window.requestAnimationFrame(() => reconcileLayerOrder(map));
+      window.requestAnimationFrame(() => {
+        reconcileLayerOrder(map);
+        promoteDrawLayers(map);
+      });
     };
     map.on('styledata', handleStyleData);
 
@@ -829,7 +861,7 @@ function MapContainer() {
         mapInitialized.current = false;
       }
     };
-  }, [loadGridLayer, reconcileLayerOrder, setGridClickEnabled, setMapInstance]);
+  }, [loadGridLayer, promoteDrawLayers, reconcileLayerOrder, setGridClickEnabled, setMapInstance]);
 
   const fitAoiBounds = useCallback((aoi, { force = false, padding = 50, duration = 600 } = {}) => {
     const map = mapRef.current;
@@ -999,6 +1031,9 @@ function MapContainer() {
       if (drawingPolygon && gridClickEnabledRef.current) {
         setGridClickEnabled(false);
       }
+      if (drawingPolygon) {
+        schedulePromoteDrawLayers(map);
+      }
     };
 
     const handleCreate = (event) => {
@@ -1112,10 +1147,15 @@ function MapContainer() {
       promoteDrawLayers(map);
     };
 
+    const handleDrawRender = () => {
+      promoteDrawLayers(map);
+    };
+
     map.on('draw.create', handleCreate);
     map.on('draw.update', handleUpdate);
     map.on('draw.delete', handleDelete);
     map.on('draw.modechange', syncDrawModeState);
+    map.on('draw.render', handleDrawRender);
     syncDrawModeState({ mode: draw.getMode?.() || 'simple_select' });
 
     return () => {
@@ -1123,6 +1163,7 @@ function MapContainer() {
       map.off('draw.update', handleUpdate);
       map.off('draw.delete', handleDelete);
       map.off('draw.modechange', syncDrawModeState);
+      map.off('draw.render', handleDrawRender);
     };
   }, [
     appMode,
@@ -1137,6 +1178,7 @@ function MapContainer() {
     setPendingSpatialScopeSave,
     setSelectedAOI,
     setWarning,
+    schedulePromoteDrawLayers,
     syncAgentDrawFeature,
     syncDraftFromFeatures,
   ]);
@@ -1165,7 +1207,7 @@ function MapContainer() {
       setWarning('');
       draw.changeMode('draw_polygon');
       if (map) {
-        window.requestAnimationFrame(() => promoteDrawLayers(map));
+        schedulePromoteDrawLayers(map);
       }
       return;
     }
@@ -1198,10 +1240,10 @@ function MapContainer() {
       }
 
       if (map) {
-        window.requestAnimationFrame(() => promoteDrawLayers(map));
+        schedulePromoteDrawLayers(map);
       }
     }
-  }, [aoiEditorMode, promoteDrawLayers, reconcileLayerOrder, runProgrammaticDrawMutation, setDraftAOI, setWarning]);
+  }, [aoiEditorMode, reconcileLayerOrder, runProgrammaticDrawMutation, schedulePromoteDrawLayers, setDraftAOI, setWarning]);
 
   // Update EE layers when layer data changes
   useEffect(() => {

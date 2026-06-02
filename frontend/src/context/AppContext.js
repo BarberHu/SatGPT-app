@@ -40,6 +40,8 @@ const defaultFloodAgentState = {
   confirmed_aoi: null,
   recommended_layers: [],
   selected_layer_ids: [],
+  recommendation_strategy: null,
+  recommendation_source: null,
   confirmation_version: 0,
   search_sources: null,
   is_valid_flood_query: false,
@@ -693,19 +695,38 @@ export const AppProvider = ({ children }) => {
     setLayerData(normalizeLayerData(data));
   }, []);
 
-  const mergeLayerData = useCallback((data) => {
+  const mergeLayerData = useCallback((data, options = {}) => {
+    const normalized = normalizeLayerData(data, { partial: true, ...options });
     setLayerData((previous) => ({
       ...previous,
-      ...normalizeLayerData(data, { partial: true }),
+      ...normalized,
+    }));
+    return normalized;
+  }, []);
+
+  const setLayerDataEntry = useCallback((layerKey, descriptor) => {
+    if (!layerKey) {
+      return;
+    }
+
+    setLayerData((previous) => ({
+      ...previous,
+      [layerKey]: descriptor || null,
     }));
   }, []);
 
   function normalizeLayerData(data = {}, options = {}) {
-    const { partial = false } = options;
+    const { partial = false, aoiSignature = null, requestKey = null } = options;
     const normalized = {};
     const setLayer = (key, urlField, layerValue) => {
       if (!partial || Object.prototype.hasOwnProperty.call(data, urlField)) {
-        normalized[key] = data[urlField] ? layerValue : null;
+        normalized[key] = data[urlField]
+          ? {
+            ...layerValue,
+            aoiSignature,
+            requestKey,
+          }
+          : null;
       }
     };
 
@@ -897,6 +918,7 @@ export const AppProvider = ({ children }) => {
     layerData,
     updateLayerData,
     mergeLayerData,
+    setLayerDataEntry,
     resetAskSession,
     
     // GEE Code

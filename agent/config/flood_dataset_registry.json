@@ -8,70 +8,41 @@
       "title": "Dynamic Surface Water Extent (Sentinel-1)",
       "summary": "Sentinel-1 based dynamic surface water classification for event-scale flood context.",
       "product_group": "flood_event_classification",
+      "task_roles": ["event_water", "flood_extent_support", "cloud_resilient_mapping"],
+      "when_to_use": "Use for event-window surface-water evidence, especially when clouds may limit optical imagery.",
+      "when_not_to_use": "Do not use as a long-term water-frequency or permanent-water baseline.",
+      "llm_recommendation_hint": "Prioritize this layer when the event needs current inundation context or cloud-resilient water evidence.",
+      "analysis_value": "high",
+      "risk_notes": "Coverage depends on Sentinel-1 acquisition timing inside the event window; class values need careful legend interpretation.",
       "selection_profile": {
         "recommendable": true,
         "priority": 100,
-        "default_selected": false,
+        "default_selected": true,
         "location_scope": "global"
       },
       "render_profile": {
         "mode": "image_collection_reducer",
-        "bands": [
-          "WTR_Water_classification"
-        ],
+        "bands": ["WTR_Water_classification"],
         "min": 0,
         "max": 5,
-        "palette": [
-          "#ffffff",
-          "#0000ff",
-          "#0088ff",
-          "#f2f2f2",
-          "#dfdfdf",
-          "#da00ff"
-        ]
+        "palette": ["#ffffff", "#0000ff", "#0088ff", "#f2f2f2", "#dfdfdf", "#da00ff"]
       },
       "legend_spec": {
         "type": "categorical",
         "label": "Water classification",
         "items": [
-          {
-            "value": 0,
-            "label": "Not water",
-            "color": "#ffffff"
-          },
-          {
-            "value": 1,
-            "label": "Open water",
-            "color": "#0000ff"
-          },
-          {
-            "value": 2,
-            "label": "Partial surface water",
-            "color": "#0088ff"
-          },
-          {
-            "value": 3,
-            "label": "Snow or ice",
-            "color": "#f2f2f2"
-          },
-          {
-            "value": 4,
-            "label": "Cloud or shadow",
-            "color": "#dfdfdf"
-          },
-          {
-            "value": 5,
-            "label": "Ocean masked",
-            "color": "#da00ff"
-          }
+          { "value": 0, "label": "Not water", "color": "#ffffff" },
+          { "value": 1, "label": "Open water", "color": "#0000ff" },
+          { "value": 2, "label": "Partial surface water", "color": "#0088ff" },
+          { "value": 3, "label": "Snow or ice", "color": "#f2f2f2" },
+          { "value": 4, "label": "Cloud or shadow", "color": "#dfdfdf" },
+          { "value": 5, "label": "Ocean masked", "color": "#da00ff" }
         ]
       },
       "execution_profile": {
         "requires_aoi": true,
         "requires_date_range": true,
-        "select_bands": [
-          "WTR_Water_classification"
-        ],
+        "select_bands": ["WTR_Water_classification"],
         "reducer": "max",
         "supports_tile": true,
         "cacheable": true
@@ -83,6 +54,12 @@
       "title": "Dynamic Surface Water Extent (HLS)",
       "summary": "Harmonized Landsat Sentinel-2 dynamic surface water classification for event-scale flood context.",
       "product_group": "flood_event_classification",
+      "task_roles": ["event_water", "optical_water_classification", "flood_extent_support"],
+      "when_to_use": "Use when optical observations are useful for event-window water classification and visual cross-checking.",
+      "when_not_to_use": "Do not prioritize when heavy cloud cover is likely or when radar evidence is more reliable.",
+      "llm_recommendation_hint": "Recommend as an optical companion to Sentinel-1 when cloud risk is acceptable.",
+      "analysis_value": "high",
+      "risk_notes": "Optical water classification can be degraded by cloud, haze, shadow, or sparse clear observations.",
       "selection_profile": {
         "recommendable": true,
         "priority": 96,
@@ -91,114 +68,28 @@
       },
       "render_profile": {
         "mode": "image_collection_reducer",
-        "bands": [
-          "WTR_Water_classification"
-        ],
+        "bands": ["WTR_Water_classification"],
         "min": 0,
         "max": 5,
-        "palette": [
-          "#ffffff",
-          "#0000ff",
-          "#0088ff",
-          "#f2f2f2",
-          "#dfdfdf",
-          "#da00ff"
-        ]
+        "palette": ["#ffffff", "#0000ff", "#0088ff", "#f2f2f2", "#dfdfdf", "#da00ff"]
       },
       "legend_spec": {
         "type": "categorical",
         "label": "Water classification",
         "items": [
-          {
-            "value": 0,
-            "label": "Not water",
-            "color": "#ffffff"
-          },
-          {
-            "value": 1,
-            "label": "Open water",
-            "color": "#0000ff"
-          },
-          {
-            "value": 2,
-            "label": "Partial surface water",
-            "color": "#0088ff"
-          },
-          {
-            "value": 3,
-            "label": "Snow or ice",
-            "color": "#f2f2f2"
-          },
-          {
-            "value": 4,
-            "label": "Cloud or shadow",
-            "color": "#dfdfdf"
-          },
-          {
-            "value": 5,
-            "label": "Ocean masked",
-            "color": "#da00ff"
-          }
+          { "value": 0, "label": "Not water", "color": "#ffffff" },
+          { "value": 1, "label": "Open water", "color": "#0000ff" },
+          { "value": 2, "label": "Partial surface water", "color": "#0088ff" },
+          { "value": 3, "label": "Snow or ice", "color": "#f2f2f2" },
+          { "value": 4, "label": "Cloud or shadow", "color": "#dfdfdf" },
+          { "value": 5, "label": "Ocean masked", "color": "#da00ff" }
         ]
       },
       "execution_profile": {
         "requires_aoi": true,
         "requires_date_range": true,
-        "select_bands": [
-          "WTR_Water_classification"
-        ],
+        "select_bands": ["WTR_Water_classification"],
         "reducer": "mode",
-        "supports_tile": true,
-        "cacheable": true
-      }
-    },
-    {
-      "asset_id": "GLOBAL_FLOOD_DB/MODIS_EVENTS/V1",
-      "enabled": true,
-      "title": "Global Flood Database",
-      "summary": "Historical flood event archive derived from MODIS for global event context and precedent comparison.",
-      "product_group": "flood_event_archive",
-      "selection_profile": {
-        "recommendable": true,
-        "priority": 90,
-        "default_selected": false,
-        "location_scope": "global"
-      },
-      "render_profile": {
-        "mode": "image_collection_reducer",
-        "bands": [
-          "flooded"
-        ],
-        "min": 0,
-        "max": 1,
-        "palette": [
-          "#f8fafc",
-          "#ff4d4f"
-        ]
-      },
-      "legend_spec": {
-        "type": "categorical",
-        "label": "Flood presence",
-        "items": [
-          {
-            "value": 0,
-            "label": "No flood",
-            "color": "#f8fafc"
-          },
-          {
-            "value": 1,
-            "label": "Flooded",
-            "color": "#ff4d4f"
-          }
-        ]
-      },
-      "execution_profile": {
-        "requires_aoi": true,
-        "requires_date_range": true,
-        "select_bands": [
-          "flooded"
-        ],
-        "reducer": "first",
         "supports_tile": true,
         "cacheable": true
       }
@@ -209,52 +100,38 @@
       "title": "JRC Monthly Water History",
       "summary": "Monthly classified water history for contextualizing persistent and transient inundation patterns.",
       "product_group": "surface_water_history",
+      "task_roles": ["historical_water_context", "seasonal_water_reference"],
+      "when_to_use": "Use to compare event water against the normal monthly surface-water pattern.",
+      "when_not_to_use": "Do not use as a direct event flood-detection layer.",
+      "llm_recommendation_hint": "Recommend when the analysis needs to distinguish possible floodwater from typical monthly water presence.",
+      "analysis_value": "medium_high",
+      "risk_notes": "Monthly classification is contextual and may not match the exact event day.",
       "selection_profile": {
         "recommendable": true,
         "priority": 86,
-        "default_selected": false,
+        "default_selected": true,
         "location_scope": "global"
       },
       "render_profile": {
         "mode": "image_collection_reducer",
-        "bands": [
-          "water"
-        ],
+        "bands": ["water"],
         "min": 0,
         "max": 2,
-        "palette": [
-          "#ffffff",
-          "#fffcb8",
-          "#0905ff"
-        ]
+        "palette": ["#ffffff", "#fffcb8", "#0905ff"]
       },
       "legend_spec": {
         "type": "categorical",
         "label": "Monthly water class",
         "items": [
-          {
-            "value": 0,
-            "label": "No data",
-            "color": "#ffffff"
-          },
-          {
-            "value": 1,
-            "label": "Land",
-            "color": "#fffcb8"
-          },
-          {
-            "value": 2,
-            "label": "Water",
-            "color": "#0905ff"
-          }
+          { "value": 0, "label": "No data", "color": "#ffffff" },
+          { "value": 1, "label": "Land", "color": "#fffcb8" },
+          { "value": 2, "label": "Water", "color": "#0905ff" }
         ]
       },
       "execution_profile": {
         "requires_aoi": true,
         "requires_date_range": true,
-        "select_bands": [
-          "water"
-        ],
+        "select_bands": ["water"],
         "reducer": "first",
         "supports_tile": true,
         "cacheable": true
@@ -266,6 +143,12 @@
       "title": "JRC Monthly Water Recurrence",
       "summary": "Monthly recurrence percentage for reading how frequently water appears in the selected month.",
       "product_group": "surface_water_frequency",
+      "task_roles": ["water_frequency_context", "recurrence_baseline"],
+      "when_to_use": "Use to identify where water is commonly present in the same month and avoid over-reading normal seasonal water as floodwater.",
+      "when_not_to_use": "Do not use to claim event-day inundation extent.",
+      "llm_recommendation_hint": "Recommend as a frequency baseline when seasonal water recurrence matters for interpretation.",
+      "analysis_value": "medium",
+      "risk_notes": "Recurrence is a climatological-style context layer, not a direct flood observation.",
       "selection_profile": {
         "recommendable": true,
         "priority": 80,
@@ -274,34 +157,22 @@
       },
       "render_profile": {
         "mode": "image_collection_reducer",
-        "bands": [
-          "monthly_recurrence"
-        ],
+        "bands": ["monthly_recurrence"],
         "min": 0,
         "max": 100,
-        "palette": [
-          "#ffffff",
-          "#ffbbbb",
-          "#0000ff"
-        ]
+        "palette": ["#ffffff", "#ffbbbb", "#0000ff"]
       },
       "legend_spec": {
         "type": "continuous",
         "label": "Monthly recurrence",
-        "palette": [
-          "#ffffff",
-          "#ffbbbb",
-          "#0000ff"
-        ],
+        "palette": ["#ffffff", "#ffbbbb", "#0000ff"],
         "min": 0,
         "max": 100
       },
       "execution_profile": {
         "requires_aoi": true,
         "requires_date_range": true,
-        "select_bands": [
-          "monthly_recurrence"
-        ],
+        "select_bands": ["monthly_recurrence"],
         "reducer": "first",
         "supports_tile": true,
         "cacheable": true
@@ -313,6 +184,12 @@
       "title": "JRC Yearly Water Classification",
       "summary": "Annual water classification for separating permanent water from seasonal water at yearly scale.",
       "product_group": "surface_water_history",
+      "task_roles": ["permanent_water_baseline", "seasonal_water_context"],
+      "when_to_use": "Use to separate permanent or seasonal water background from likely event-driven inundation.",
+      "when_not_to_use": "Do not use as a precise event-date flood mask.",
+      "llm_recommendation_hint": "Recommend when the map needs a stable water baseline for interpreting flood detection results.",
+      "analysis_value": "medium_high",
+      "risk_notes": "Yearly classes are coarser than event timing and should be treated as background context.",
       "selection_profile": {
         "recommendable": true,
         "priority": 78,
@@ -321,87 +198,26 @@
       },
       "render_profile": {
         "mode": "image_collection_reducer",
-        "bands": [
-          "waterClass"
-        ],
+        "bands": ["waterClass"],
         "min": 0,
         "max": 3,
-        "palette": [
-          "#cccccc",
-          "#ffffff",
-          "#99d9ea",
-          "#0000ff"
-        ]
+        "palette": ["#cccccc", "#ffffff", "#99d9ea", "#0000ff"]
       },
       "legend_spec": {
         "type": "categorical",
         "label": "Yearly water class",
         "items": [
-          {
-            "value": 0,
-            "label": "No data",
-            "color": "#cccccc"
-          },
-          {
-            "value": 1,
-            "label": "Land",
-            "color": "#ffffff"
-          },
-          {
-            "value": 2,
-            "label": "Seasonal water",
-            "color": "#99d9ea"
-          },
-          {
-            "value": 3,
-            "label": "Permanent water",
-            "color": "#0000ff"
-          }
+          { "value": 0, "label": "No data", "color": "#cccccc" },
+          { "value": 1, "label": "Land", "color": "#ffffff" },
+          { "value": 2, "label": "Seasonal water", "color": "#99d9ea" },
+          { "value": 3, "label": "Permanent water", "color": "#0000ff" }
         ]
       },
       "execution_profile": {
         "requires_aoi": true,
         "requires_date_range": true,
-        "select_bands": [
-          "waterClass"
-        ],
+        "select_bands": ["waterClass"],
         "reducer": "first",
-        "supports_tile": true,
-        "cacheable": true
-      }
-    },
-    {
-      "asset_id": "USGS/WBD/2017/HUC08",
-      "enabled": true,
-      "title": "USGS HUC08 Subbasins",
-      "summary": "US subbasin boundaries for flood context when the AOI is in the United States.",
-      "product_group": "basin_context",
-      "selection_profile": {
-        "recommendable": true,
-        "priority": 34,
-        "default_selected": false,
-        "location_scope": "us_only"
-      },
-      "render_profile": {
-        "mode": "styled_vector",
-        "style": {
-          "color": "#1d4ed8",
-          "fillColor": "#00000000",
-          "width": 2
-        }
-      },
-      "legend_spec": {
-        "type": "vector",
-        "label": "US subbasin boundary",
-        "style": {
-          "color": "#1d4ed8",
-          "fillColor": "#00000000",
-          "width": 2
-        }
-      },
-      "execution_profile": {
-        "requires_aoi": true,
-        "requires_date_range": false,
         "supports_tile": true,
         "cacheable": true
       }
@@ -412,6 +228,12 @@
       "title": "HydroATLAS Basins L6",
       "summary": "Global basin boundaries for hydrologic context around the confirmed AOI.",
       "product_group": "basin_context",
+      "task_roles": ["basin_context", "hydrologic_interpretation"],
+      "when_to_use": "Use to explain the hydrologic basin context around the selected AOI.",
+      "when_not_to_use": "Do not use as a flood extent or water occurrence layer.",
+      "llm_recommendation_hint": "Recommend when the user needs basin-scale interpretation or upstream/downstream context.",
+      "analysis_value": "medium",
+      "risk_notes": "Basin boundaries support interpretation but do not indicate observed flooding.",
       "selection_profile": {
         "recommendable": true,
         "priority": 30,
@@ -448,6 +270,12 @@
       "title": "Free-Flowing Rivers",
       "summary": "Major free-flowing river network for hydrologic context and basin interpretation.",
       "product_group": "river_context",
+      "task_roles": ["river_context", "hydrologic_interpretation"],
+      "when_to_use": "Use to show river-network context near the AOI and relate flooding to nearby channels.",
+      "when_not_to_use": "Do not use as a water extent or flood-detection layer.",
+      "llm_recommendation_hint": "Recommend when river proximity and drainage interpretation are important.",
+      "analysis_value": "medium",
+      "risk_notes": "River network context may not include all local drainage or urban channels.",
       "selection_profile": {
         "recommendable": true,
         "priority": 22,

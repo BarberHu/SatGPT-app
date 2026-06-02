@@ -829,6 +829,8 @@ async def entry_node(
                 "confirmed_aoi": None,
                 "recommended_layers": [],
                 "selected_layer_ids": [],
+                "recommendation_strategy": None,
+                "recommendation_source": None,
                 "mentioned_layer_refs": [],
                 "mentioned_aoi": None,
                 "mentioned_aoi_source": None,
@@ -1063,6 +1065,8 @@ async def pre_confirmation_node(
             "confirmed_aoi": confirmation_context.get("confirmed_aoi"),
             "recommended_layers": confirmation_context.get("recommended_layers", []),
             "selected_layer_ids": confirmation_context.get("selected_layer_ids", []),
+            "recommendation_strategy": confirmation_context.get("recommendation_strategy"),
+            "recommendation_source": confirmation_context.get("recommendation_source"),
             "confirmation_version": confirmation_context.get("confirmation_version", 1),
             "coordinates": confirmation_context.get("coordinates"),
             "bounds": confirmation_context.get("bounds"),
@@ -1097,6 +1101,8 @@ async def confirmation_node(
     aoi_resolution_meta = state.get("aoi_resolution_meta")
     recommended_layers = state.get("recommended_layers") or []
     selected_layer_ids = state.get("selected_layer_ids") or []
+    recommendation_strategy = state.get("recommendation_strategy")
+    recommendation_source = state.get("recommendation_source")
     confirmed_aoi = state.get("confirmed_aoi") or resolved_aoi
     confirmation_version = state.get("confirmation_version") or 1
     mentioned_layer_refs = state.get("mentioned_layer_refs") or []
@@ -1118,6 +1124,8 @@ async def confirmation_node(
             "aoi_resolution_meta": aoi_resolution_meta,
             "recommended_layers": recommended_layers,
             "selected_layer_ids": selected_layer_ids,
+            "recommendation_strategy": recommendation_strategy,
+            "recommendation_source": recommendation_source,
             "confirmed_aoi": confirmed_aoi,
             "confirmation_version": confirmation_version,
             "mentioned_layer_refs": mentioned_layer_refs,
@@ -1174,6 +1182,8 @@ async def confirmation_node(
             "aoi_resolution_meta": confirmed_data.get("aoi_resolution_meta", aoi_resolution_meta),
             "recommended_layers": confirmed_data.get("recommended_layers", recommended_layers),
             "selected_layer_ids": confirmed_data.get("selected_layer_ids", selected_layer_ids),
+            "recommendation_strategy": confirmed_data.get("recommendation_strategy", recommendation_strategy),
+            "recommendation_source": confirmed_data.get("recommendation_source", recommendation_source),
             "confirmed_aoi": confirmed_data.get("confirmed_aoi", confirmed_aoi),
             "confirmation_version": confirmed_data.get("confirmation_version", confirmation_version),
             "mentioned_layer_refs": confirmed_data.get("mentioned_layer_refs", mentioned_layer_refs),
@@ -1339,6 +1349,8 @@ This flood event has caused certain impacts. Further information collection is n
             "confirmed_aoi": confirmed_aoi,
             "recommended_layers": state.get("recommended_layers") or [],
             "selected_layer_ids": state.get("selected_layer_ids") or [],
+            "recommendation_strategy": state.get("recommendation_strategy"),
+            "recommendation_source": state.get("recommendation_source"),
             "mentioned_layer_refs": state.get("mentioned_layer_refs") or [],
             "mentioned_aoi": state.get("mentioned_aoi"),
             "mentioned_aoi_source": state.get("mentioned_aoi_source"),
