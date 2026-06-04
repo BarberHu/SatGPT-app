@@ -77,11 +77,12 @@
 }
 
 .layer-manager-item {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
-  padding: 10px 8px;
+  padding: 10px 30px 10px 8px;
   border: none;
   border-radius: 12px;
   background: transparent;
@@ -89,7 +90,7 @@
 }
 
 .layer-manager-item:not(.is-disabled) {
-  cursor: grab;
+  cursor: default;
 }
 
 .layer-manager-item:not(.is-disabled):hover {
@@ -97,8 +98,7 @@
 }
 
 .layer-manager-item:not(.is-disabled):active {
-  cursor: grabbing;
-  transform: scale(0.998);
+  cursor: default;
 }
 
 .layer-manager-item.is-hidden {
@@ -130,8 +130,36 @@
   gap: 8px;
 }
 
+.layer-manager-drag-handle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #475569;
+  cursor: grab;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.layer-manager-drag-handle:hover {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
 .layer-manager-drag-handle:active {
   cursor: grabbing;
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+  color: #0f172a;
 }
 
 .layer-manager-item-checkbox-wrap {
@@ -182,6 +210,17 @@
 .layer-manager-checkbox.is-ready:checked {
   background: #2563eb;
   border-color: #2563eb;
+}
+
+.layer-manager-checkbox.is-vector-inactive {
+  border-color: #94a3b8;
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.1);
+}
+
+.layer-manager-checkbox.is-vector-inactive:checked {
+  background: #94a3b8;
+  border-color: #94a3b8;
 }
 
 .layer-manager-checkbox.is-loading {

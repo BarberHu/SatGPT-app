@@ -24,11 +24,13 @@
 }
 
 .location-scope-picker.embedded {
+  --location-scope-command-width: 36px;
+  --location-scope-grid-gap: 6px;
   position: static;
   width: 100%;
   max-height: none;
   padding: 0;
-  gap: 10px;
+  gap: 6px;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -38,22 +40,22 @@
 
 .agent-location-search-dock {
   position: absolute;
-  top: 12px;
-  right: 444px;
+  top: 24px;
+  right: calc(var(--satgpt-agent-sidebar-width, 420px) + var(--satgpt-panel-gap, 12px) + 18px);
   z-index: 7;
-  width: min(380px, calc(100vw - 780px));
-  min-width: 320px;
-  padding: 10px 12px;
-  border: 1px solid rgba(226, 232, 240, 0.94);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
-  backdrop-filter: blur(14px);
+  width: min(var(--satgpt-location-dock-width, 420px), calc(100vw - var(--satgpt-agent-sidebar-width, 420px) - var(--satgpt-left-panel-width, 332px) - 96px));
+  min-width: 300px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .water--agent-sidebar-collapsed .agent-location-search-dock {
-  right: 80px;
-  width: min(420px, calc(100vw - 428px));
+  right: calc(var(--satgpt-agent-sidebar-collapsed-width, 56px) + var(--satgpt-panel-gap, 12px) + 18px);
+  width: min(var(--satgpt-location-dock-width, 420px), calc(100vw - var(--satgpt-left-panel-width, 332px) - var(--satgpt-agent-sidebar-collapsed-width, 56px) - 96px));
 }
 
 .location-scope-picker-inline-note {
@@ -100,7 +102,9 @@
 }
 
 .location-scope-picker.embedded .location-scope-picker-search {
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--location-scope-command-width);
+  gap: var(--location-scope-grid-gap);
 }
 
 .location-scope-picker-input {
@@ -120,10 +124,10 @@
 }
 
 .location-scope-picker.embedded .location-scope-picker-input {
-  height: 40px;
-  padding: 0 12px;
-  font-size: 15px;
-  border-radius: 10px;
+  height: 32px;
+  padding: 0 9px;
+  font-size: 13px;
+  border-radius: 8px;
 }
 
 .location-scope-picker-input:focus {
@@ -145,14 +149,39 @@
 
 .location-scope-picker.embedded .location-scope-picker-search-btn,
 .location-scope-picker.embedded .location-scope-picker-action {
-  height: 40px;
-  border-radius: 10px;
-  font-size: 14px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.location-scope-picker.embedded .location-scope-picker-search-btn {
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+  justify-self: end;
 }
 
 .location-scope-picker-search-btn {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
   color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.location-scope-picker-search-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.42);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: location-scope-search-spin 0.72s linear infinite;
+}
+
+@keyframes location-scope-search-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .location-scope-picker-search-btn:disabled,
@@ -162,9 +191,14 @@
 }
 
 .location-scope-picker-feedback {
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 7px 9px;
+  border-radius: 9px;
   font-size: 12px;
+  line-height: 1.35;
+}
+
+.location-scope-picker.embedded .location-scope-picker-feedback {
+  width: calc(100% - var(--location-scope-command-width) - var(--location-scope-grid-gap));
 }
 
 .location-scope-picker-feedback.error {
@@ -183,7 +217,8 @@
 }
 
 .location-scope-picker.embedded .location-scope-picker-results {
-  max-height: 220px;
+  width: calc(100% - var(--location-scope-command-width) - var(--location-scope-grid-gap));
+  max-height: min(30vh, 168px);
   padding: 0;
 }
 
@@ -192,10 +227,10 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 8px 10px;
+  border-radius: 10px;
   border: 1px solid #e4e4e7;
-  background: #fafafa;
+  background: rgba(250, 250, 250, 0.96);
 }
 
 .location-scope-candidate.previewing {
@@ -218,14 +253,14 @@
 
 .location-scope-candidate-title {
   color: #09090b;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 
 .location-scope-candidate-meta {
   color: #3f3f46;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: lowercase;
 }
 
@@ -254,12 +289,15 @@
 
 .location-scope-picker.embedded .location-scope-picker-actions {
   display: grid;
+  width: calc(100% - var(--location-scope-command-width) - var(--location-scope-grid-gap));
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  justify-content: start;
+  gap: var(--location-scope-grid-gap);
 }
 
 .location-scope-picker.embedded .location-scope-picker-action {
   width: 100%;
+  min-width: 0;
   justify-content: center;
 }
 
@@ -293,6 +331,10 @@
     flex-direction: column;
   }
 
+  .location-scope-picker.embedded .location-scope-picker-search {
+    flex-direction: row;
+  }
+
   .location-scope-candidate {
     grid-template-columns: 1fr;
   }
@@ -304,21 +346,29 @@
 
 @media (max-width: 1180px) and (min-width: 901px) {
   .agent-location-search-dock {
-    left: 352px;
-    right: 444px;
-    width: auto;
+    right: calc(var(--satgpt-agent-sidebar-width, 420px) + var(--satgpt-panel-gap, 12px) + 18px);
+    width: min(var(--satgpt-location-dock-width, 420px), calc(100vw - var(--satgpt-left-panel-width, 332px) - var(--satgpt-agent-sidebar-width, 420px) - 96px));
     min-width: 0;
   }
 
 }
 
-@media (max-width: 900px) {
+@media (max-width: 900px) and (min-width: 641px) {
   .agent-location-search-dock,
   .water--agent-sidebar-collapsed .agent-location-search-dock {
     right: 12px;
-    left: 12px;
-    width: auto;
+    width: min(var(--satgpt-location-dock-width, 420px), calc(100vw - var(--satgpt-left-panel-width, 300px) - 48px));
     min-width: 0;
   }
 
+}
+
+@media (max-width: 640px) {
+  .agent-location-search-dock,
+  .water--agent-sidebar-collapsed .agent-location-search-dock {
+    right: 58px;
+    left: 40px;
+    width: auto;
+    min-width: 0;
+  }
 }

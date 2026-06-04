@@ -3,7 +3,7 @@
   top: 12px;
   right: 12px;
   bottom: 12px;
-  width: min(420px, calc(100vw - 24px));
+  width: min(var(--satgpt-agent-sidebar-width, 420px), calc(100vw - 24px));
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.96);
@@ -17,7 +17,7 @@
 }
 
 .agent-workspace-sidebar.is-collapsed {
-  width: 56px;
+  width: var(--satgpt-agent-sidebar-collapsed-width, 56px);
 }
 
 .agent-workspace-sidebar__header {

@@ -45,6 +45,24 @@ function ControlPanel() {
       .catch((err) => console.error('Error loading countries:', err));
   }, [setCountries]);
 
+  useEffect(() => {
+    if (appMode !== 'agent' || typeof window === 'undefined') return undefined;
+
+    const narrowAgentViewport = window.matchMedia('(max-width: 640px)');
+    const collapseForNarrowAgentViewport = () => {
+      if (narrowAgentViewport.matches) {
+        setIsPanelVisible(false);
+      }
+    };
+
+    collapseForNarrowAgentViewport();
+    narrowAgentViewport.addEventListener?.('change', collapseForNarrowAgentViewport);
+
+    return () => {
+      narrowAgentViewport.removeEventListener?.('change', collapseForNarrowAgentViewport);
+    };
+  }, [appMode, setIsPanelVisible]);
+
   const handleCollapsePanel = () => {
     setIsPanelVisible(false);
   };

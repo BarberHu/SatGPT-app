@@ -161,11 +161,6 @@ const CORE_LAYER_LEGENDS = {
       { value: 'Water', color: '#0064c8' },
     ],
   },
-  vector_scope: {
-    type: 'solid',
-    label: 'Vector AOI boundary',
-    color: '#2563eb',
-  },
   lclu_raster: {
     type: 'classes',
     label: 'ESA WorldCover',
@@ -2562,11 +2557,11 @@ function AgentPanel() {
               ],
             },
           ],
-          legend: CORE_LAYER_LEGENDS.vector_scope,
+          legend: null,
           checked: isVisible,
           disabled: false,
           loading: false,
-          checkboxState: 'ready',
+          checkboxState: layer.is_active ? 'ready' : 'vector-inactive',
           status: isVisible ? 'Visible' : 'Hidden',
           tone: isVisible ? 'ready' : 'off',
           actionLabel: 'Delete',
@@ -3076,9 +3071,6 @@ function AgentPanel() {
                           <div
                             key={item.id}
                             className={`layer-manager-item ${item.checked ? 'is-visible' : 'is-hidden'} ${item.disabled ? 'is-disabled' : ''} ${draggedLayerId === item.orderId ? 'is-dragging' : ''} ${isDragOverTarget && dragOverState.position === 'before' ? 'is-drag-over-before' : ''} ${isDragOverTarget && dragOverState.position === 'after' ? 'is-drag-over-after' : ''}`}
-                            draggable={Boolean(item.draggable)}
-                            onDragStart={item.draggable ? (event) => handleLayerDragStart(event, item.orderId) : undefined}
-                            onDragEnd={item.draggable ? handleLayerDragEnd : undefined}
                             onDragOver={canReceiveDrop ? (event) => handleLayerDragOver(event, group.key, item.orderId) : undefined}
                             onDrop={canReceiveDrop ? (event) => handleLayerDrop(event, group.key, visibleOrderIds, item.orderId) : undefined}
                           >
@@ -3108,6 +3100,20 @@ function AgentPanel() {
                               </div>
                             </div>
                             <div className="layer-manager-item-side">
+                              {item.draggable ? (
+                                <span
+                                  className="layer-manager-drag-handle"
+                                  draggable
+                                  role="button"
+                                  tabIndex={0}
+                                  aria-label={`Drag to reorder ${item.title}`}
+                                  title="Drag to reorder layer"
+                                  onDragStart={(event) => handleLayerDragStart(event, item.orderId)}
+                                  onDragEnd={handleLayerDragEnd}
+                                >
+                                  <i className="fa fa-bars" aria-hidden="true"></i>
+                                </span>
+                              ) : null}
                               {item.badge ? (
                                 <span className="layer-manager-item-badge">{item.badge}</span>
                               ) : null}
