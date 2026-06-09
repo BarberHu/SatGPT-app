@@ -181,205 +181,207 @@ function ControlPanel() {
       
       <hr style={{ margin: '10px 0px 20px 0px' }} />
 
-      {appMode === 'agent' ? (
-        <AgentPanel />
-      ) : (
-      <>
-        {/* Layer Control Section */}
-        <div className="slect-c">
-          <h2>Layer Control</h2>
-        
-        <div style={{ paddingLeft: '10px' }}>
-          <div>
-            <input
-              type="checkbox"
-              className="select-box"
-              id="historicalDataCheckbox"
-              checked={dataType === 'historical'}
-              onChange={() => handleDataTypeChange('historical')}
-            />
-            <span>Single Inundation Event</span>
-          </div>
-          <div>
-            <input
-              type="checkbox"
-              className="select-box"
-              id="floodHotspotCheckbox"
-              checked={dataType === 'floodHotspot'}
-              onChange={() => handleDataTypeChange('floodHotspot')}
-            />
-            <span>Inundation Hotspot</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Year Control Slider */}
-      <div id="yearControlledSlider">
-        <p>Hotspot Duration</p>
-        <div className="trp-range">
-          <label>5 Years</label>
-          <label>25 Years</label>
-        </div>
-        <input
-          className="year-range-slider"
-          type="range"
-          min="5"
-          max="25"
-          value={yearControl}
-          onChange={(e) => setYearControl(parseInt(e.target.value))}
-          disabled={dataType !== 'floodHotspot'}
-          style={{ '--slider-progress': `${((yearControl - 5) / 20) * 100}%` }}
-        />
-        <span className="year-slider-value">{yearControl} Years</span>
-      </div>
-
-      {/* 3D Toggle */}
-      <div className="toggle-switcher-css">
-        <label className="switch-label">3D</label>
-        <div className="form-check form-switch">
-          <input
-            className="form-check-input"
-            type="checkbox"
-            checked={is3DEnabled}
-            onChange={handle3DToggle}
-          />
-        </div>
-        <label className="form-check-label">Buildings</label>
-        <div className="form-check form-switch">
-          <input
-            className="form-check-input"
-            type="checkbox"
-            checked={isBuildingsEnabled}
-            onChange={handleBuildingsToggle}
-          />
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="Legend-sec">
-        <div className="heading-title">
-          <h1>Legend</h1>
-        </div>
-        <div className="water-legends">
-          <div className="legend-value">
-            <div className="legend-block" style={{ backgroundColor: '#00008B' }}></div>
-            <span>Permanent Water Body</span>
-          </div>
-          <div className="legend-value">
-            <div className="legend-block" style={{ backgroundColor: '#FD0303' }}></div>
-            <span>Inundated Area</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Layers */}
-      <div>
-        <h4>Layers</h4>
-        <div style={{ display: 'flex', flexDirection: 'row', paddingLeft: '10px' }}>
-          <div style={{ width: '50%' }}>
-            {getLeftColumnLayers().map((layerName) => (
-              <LayerCheckbox
-                key={layerName}
-                name={layerName}
-                label={getLayerLabel(layerName)}
-                checked={layerVisibility[layerName]}
-                onChange={() => handleLayerChange(layerName)}
+      <div className="panel-scroll">
+        {appMode === 'agent' ? (
+          <AgentPanel />
+        ) : (
+        <>
+          {/* Layer Control Section */}
+          <div className="slect-c">
+            <h2>Layer Control</h2>
+          
+          <div style={{ paddingLeft: '10px' }}>
+            <div>
+              <input
+                type="checkbox"
+                className="select-box"
+                id="historicalDataCheckbox"
+                checked={dataType === 'historical'}
+                onChange={() => handleDataTypeChange('historical')}
               />
-            ))}
-          </div>
-          <div style={{ width: '50%' }}>
-            {getRightColumnLayers(dataType).map((layerName) => (
-              <LayerCheckbox
-                key={layerName}
-                name={layerName}
-                label={getLayerLabel(layerName)}
-                checked={layerVisibility[layerName]}
-                onChange={() => handleLayerChange(layerName)}
+              <span>Single Inundation Event</span>
+            </div>
+            <div>
+              <input
+                type="checkbox"
+                className="select-box"
+                id="floodHotspotCheckbox"
+                checked={dataType === 'floodHotspot'}
+                onChange={() => handleDataTypeChange('floodHotspot')}
               />
-            ))}
+              <span>Inundation Hotspot</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Transparency Control */}
-      <div className="transparency">
-        <h4>Transparency</h4>
-        <div style={{ paddingLeft: '10px' }}>
-          <div className="transparency_layer">
-            <select
-              id="layerDropdown"
-              value={selectedLayer}
-              onChange={(e) => setSelectedLayer(e.target.value)}
-            >
-              <option disabled hidden value="">Choose Layer</option>
-              {visibleLayers.map((layer) => (
-                <option key={layer.name} value={layer.name}>
-                  {layer.label}
-                </option>
+        {/* Year Control Slider */}
+        <div id="yearControlledSlider">
+          <p>Hotspot Duration</p>
+          <div className="trp-range">
+            <label>5 Years</label>
+            <label>25 Years</label>
+          </div>
+          <input
+            className="year-range-slider"
+            type="range"
+            min="5"
+            max="25"
+            value={yearControl}
+            onChange={(e) => setYearControl(parseInt(e.target.value))}
+            disabled={dataType !== 'floodHotspot'}
+            style={{ '--slider-progress': `${((yearControl - 5) / 20) * 100}%` }}
+          />
+          <span className="year-slider-value">{yearControl} Years</span>
+        </div>
+
+        {/* 3D Toggle */}
+        <div className="toggle-switcher-css">
+          <label className="switch-label">3D</label>
+          <div className="form-check form-switch">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              checked={is3DEnabled}
+              onChange={handle3DToggle}
+            />
+          </div>
+          <label className="form-check-label">Buildings</label>
+          <div className="form-check form-switch">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              checked={isBuildingsEnabled}
+              onChange={handleBuildingsToggle}
+            />
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div className="Legend-sec">
+          <div className="heading-title">
+            <h1>Legend</h1>
+          </div>
+          <div className="water-legends">
+            <div className="legend-value">
+              <div className="legend-block" style={{ backgroundColor: '#00008B' }}></div>
+              <span>Permanent Water Body</span>
+            </div>
+            <div className="legend-value">
+              <div className="legend-block" style={{ backgroundColor: '#FD0303' }}></div>
+              <span>Inundated Area</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Layers */}
+        <div>
+          <h4>Layers</h4>
+          <div style={{ display: 'flex', flexDirection: 'row', paddingLeft: '10px' }}>
+            <div style={{ width: '50%' }}>
+              {getLeftColumnLayers().map((layerName) => (
+                <LayerCheckbox
+                  key={layerName}
+                  name={layerName}
+                  label={getLayerLabel(layerName)}
+                  checked={layerVisibility[layerName]}
+                  onChange={() => handleLayerChange(layerName)}
+                />
               ))}
-            </select>
+            </div>
+            <div style={{ width: '50%' }}>
+              {getRightColumnLayers(dataType).map((layerName) => (
+                <LayerCheckbox
+                  key={layerName}
+                  name={layerName}
+                  label={getLayerLabel(layerName)}
+                  checked={layerVisibility[layerName]}
+                  onChange={() => handleLayerChange(layerName)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Transparency Control */}
+        <div className="transparency">
+          <h4>Transparency</h4>
+          <div style={{ paddingLeft: '10px' }}>
+            <div className="transparency_layer">
+              <select
+                id="layerDropdown"
+                value={selectedLayer}
+                onChange={(e) => setSelectedLayer(e.target.value)}
+              >
+                <option disabled hidden value="">Choose Layer</option>
+                {visibleLayers.map((layer) => (
+                  <option key={layer.name} value={layer.name}>
+                    {layer.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="trp-range">
+              <label>0%</label>
+              <label>100%</label>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={selectedLayer ? layerOpacity[selectedLayer] : 1}
+              onChange={handleOpacityChange}
+              disabled={!selectedLayer}
+            />
           </div>
           
-          <div className="trp-range">
-            <label>0%</label>
-            <label>100%</label>
+          <div style={{ paddingLeft: '10px' }}>
+            <h5 
+              className="blue" 
+              style={{ cursor: 'pointer' }}
+              onClick={resetAllOpacity}
+            >
+              Reset Transparency for all
+            </h5>
           </div>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={selectedLayer ? layerOpacity[selectedLayer] : 1}
-            onChange={handleOpacityChange}
-            disabled={!selectedLayer}
-          />
         </div>
-        
-        <div style={{ paddingLeft: '10px' }}>
-          <h5 
-            className="blue" 
-            style={{ cursor: 'pointer' }}
-            onClick={resetAllOpacity}
+
+        {/* Download Button */}
+        <div className="download-btn-div">
+          <a
+            href={geeCodeUrl || '#'}
+            download="gee_code.js"
+            className={`submit btn download ${!geeCodeUrl ? 'disabled' : ''}`}
+            style={{ 
+              opacity: geeCodeUrl ? 1 : 0.5,
+              pointerEvents: geeCodeUrl ? 'auto' : 'none',
+            }}
           >
-            Reset Transparency for all
-          </h5>
+            DOWNLOAD GEE CODE
+          </a>
         </div>
-      </div>
 
-      {/* Download Button */}
-      <div className="download-btn-div">
-        <a
-          href={geeCodeUrl || '#'}
-          download="gee_code.js"
-          className={`submit btn download ${!geeCodeUrl ? 'disabled' : ''}`}
-          style={{ 
-            opacity: geeCodeUrl ? 1 : 0.5,
-            pointerEvents: geeCodeUrl ? 'auto' : 'none',
-          }}
-        >
-          DOWNLOAD GEE CODE
-        </a>
-      </div>
-
-      {/* Footer Links */}
-      <div style={{ display: 'flex', justifyContent: 'space-around' }}>
-        <div 
-          className="pages" 
-          onClick={() => setActiveModal('contact')}
-        >
-          <i className="fa fa-comment-o"></i>
-          <p>Contact Us</p>
+        {/* Footer Links */}
+        <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+          <div 
+            className="pages" 
+            onClick={() => setActiveModal('contact')}
+          >
+            <i className="fa fa-comment-o"></i>
+            <p>Contact Us</p>
+          </div>
+          <div 
+            className="pages" 
+            onClick={() => setActiveModal('help')}
+          >
+            <i className="fa fa-external-link"></i>
+            <p>Help</p>
+          </div>
         </div>
-        <div 
-          className="pages" 
-          onClick={() => setActiveModal('help')}
-        >
-          <i className="fa fa-external-link"></i>
-          <p>Help</p>
-        </div>
+        </>
+        )}
       </div>
-      </>
-      )}
     </div>
   );
 }

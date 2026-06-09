@@ -106,17 +106,7 @@ const areAoiScopesEquivalent = (left, right) => {
 };
 
 const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
-const AGENT_RASTER_TILE_CACHE_TTL_MS = 45 * 60 * 1000;
 const EMPTY_ARRAY = [];
-
-const buildAgentRasterRequestKey = (layerKey, aoiSignature, params = {}) => [
-  layerKey,
-  aoiSignature,
-  params.time_start || '',
-  params.time_end || '',
-  params.year_from || '',
-  params.year_count || '',
-].join('|');
 
 const CORE_LAYER_LEGENDS = {
   sentinel2: {
@@ -1418,7 +1408,6 @@ function AgentPanel() {
     setAgentLayerLoading,
     setAgentTileError,
     mergeLayerData,
-    setLayerDataEntry,
     mapInstance,
     businessLayers,
     selectedAOI,
@@ -1441,7 +1430,6 @@ function AgentPanel() {
   const impactRequestKeyRef = useRef(null);
   const pendingRecommendedLayerRequestsRef = useRef(new Set());
   const pendingAgentRasterRequestKeyRef = useRef({});
-  const agentRasterLayerCacheRef = useRef(new Map());
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
   const selectedAoiSignatureRef = useRef('no-aoi');
   const previousSelectedAoiSignatureRef = useRef('no-aoi');
@@ -1676,72 +1664,6 @@ function AgentPanel() {
     return baseParams;
   }, [currentAfterDate, currentPeekDate, currentPreDate, hotspotDuration, selectedAOI]);
 
-  const readCachedAgentRasterLayer = useCallback((requestKey) => {
-    if (!requestKey) {
-      return null;
-    }
-
-    const cached = agentRasterLayerCacheRef.current.get(requestKey);
-    if (!cached?.descriptor) {
-      return null;
-    }
-
-    if (Date.now() - cached.createdAt > AGENT_RASTER_TILE_CACHE_TTL_MS) {
-      agentRasterLayerCacheRef.current.delete(requestKey);
-      return null;
-    }
-
-    return cached.descriptor;
-  }, []);
-
-  const writeCachedAgentRasterLayers = useCallback((layerKeys, normalizedLayerData) => {
-    const now = Date.now();
-    (layerKeys || []).forEach((layerKey) => {
-      const descriptor = normalizedLayerData?.[layerKey];
-      if (!descriptor?.requestKey || !descriptor?.tileUrl) {
-        return;
-      }
-
-      agentRasterLayerCacheRef.current.set(descriptor.requestKey, {
-        layerKey,
-        descriptor,
-        createdAt: now,
-      });
-    });
-  }, []);
-
-  useEffect(() => {
-    AGENT_RASTER_LAYER_CONFIG.forEach((layer) => {
-      const params = buildAgentRasterRequestParams(layer.key);
-      if (!params) {
-        return;
-      }
-
-      const requestKey = buildAgentRasterRequestKey(layer.key, selectedAoiSignature, params);
-      const cachedDescriptor = readCachedAgentRasterLayer(requestKey);
-      const currentDescriptor = layerData?.[layer.key] || null;
-      if (cachedDescriptor) {
-        if (
-          currentDescriptor?.requestKey !== cachedDescriptor.requestKey
-          || currentDescriptor?.tileUrl !== cachedDescriptor.tileUrl
-        ) {
-          setLayerDataEntry(layer.key, cachedDescriptor);
-        }
-        return;
-      }
-
-      if (currentDescriptor?.requestKey && currentDescriptor.requestKey !== requestKey) {
-        setLayerDataEntry(layer.key, null);
-      }
-    });
-  }, [
-    buildAgentRasterRequestParams,
-    layerData,
-    readCachedAgentRasterLayer,
-    selectedAoiSignature,
-    setLayerDataEntry,
-  ]);
-
   const fetchAgentRasterLayer = useCallback(async (layerKey, overrides = {}) => {
     const params = buildAgentRasterRequestParams(layerKey, overrides);
     if (!params) {
@@ -1750,16 +1672,15 @@ function AgentPanel() {
     }
 
     const requestAoiSignature = selectedAoiSignatureRef.current;
-    const requestKey = buildAgentRasterRequestKey(layerKey, requestAoiSignature, params);
-    const cachedDescriptor = readCachedAgentRasterLayer(requestKey);
+    const requestKey = [
+      layerKey,
+      requestAoiSignature,
+      params.time_start || '',
+      params.time_end || '',
+      params.year_from || '',
+      params.year_count || '',
+    ].join('|');
 
-    if (cachedDescriptor) {
-      setLayerDataEntry(layerKey, cachedDescriptor);
-      setWarning('');
-      return;
-    }
-
-    setLayerDataEntry(layerKey, null);
     setAgentRasterLoading(true);
     pendingAgentRasterRequestKeyRef.current[layerKey] = requestKey;
     setAgentLayerLoading((previous) => ({ ...previous, [`raster-${layerKey}`]: true }));
@@ -1770,11 +1691,10 @@ function AgentPanel() {
         return;
       }
 
-      const normalizedLayerData = mergeLayerData(result, {
+      mergeLayerData(result, {
         aoiSignature: requestAoiSignature,
         requestKey,
       });
-      writeCachedAgentRasterLayers(params.layer_keys || [layerKey], normalizedLayerData);
       setWarning('');
     } catch (error) {
       if (selectedAoiSignatureRef.current !== requestAoiSignature) {
@@ -1793,12 +1713,9 @@ function AgentPanel() {
   }, [
     buildAgentRasterRequestParams,
     mergeLayerData,
-    readCachedAgentRasterLayer,
     setAgentLayerLoading,
     setAgentRasterLoading,
-    setLayerDataEntry,
     setWarning,
-    writeCachedAgentRasterLayers,
   ]);
 
   const handleAgentRasterDownload = useCallback(async ({ layerKey, title, requestParams = null }) => {
@@ -2253,14 +2170,10 @@ function AgentPanel() {
       const visible = Boolean(agentRasterLayerVisibility?.[layer.key]);
       const hasScope = Boolean(selectedAOI);
       const requestParams = buildAgentRasterRequestParams(layer.key);
-      const currentRequestKey = requestParams
-        ? buildAgentRasterRequestKey(layer.key, selectedAoiSignature, requestParams)
-        : null;
       const hasTile = Boolean(
         descriptor?.tileUrl
         && descriptor?.aoiSignature
         && descriptor.aoiSignature === selectedAoiSignature
-        && descriptor?.requestKey === currentRequestKey
       );
       const loading = Boolean(
         hasScope

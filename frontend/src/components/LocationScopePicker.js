@@ -104,6 +104,8 @@ export default function LocationScopePicker({
     setBusinessLayerActive,
     clearAgentVisualState,
     setWarning,
+    floodAgentState,
+    appMode,
   } = useAppContext();
 
   const [query, setQuery] = useState('');
@@ -239,7 +241,10 @@ export default function LocationScopePicker({
       return;
     }
 
-    clearAgentVisualState();
+    const shouldActivateImportedScope = !(appMode === 'agent' && floodAgentState?.confirmation_version);
+    if (shouldActivateImportedScope) {
+      clearAgentVisualState();
+    }
     let firstImportedAoi = null;
 
     selectedCandidates.forEach((candidate) => {
@@ -266,8 +271,12 @@ export default function LocationScopePicker({
       return;
     }
 
-    setBusinessLayerActive(firstImportedAoi.id);
-    setSelectedAOI(firstImportedAoi);
+    if (shouldActivateImportedScope) {
+      setBusinessLayerActive(firstImportedAoi.id);
+      setSelectedAOI(firstImportedAoi);
+    } else {
+      setSelectedAOI(previousSelectedAoiRef.current || null);
+    }
     setWarning('');
 
     if (embedded) {
@@ -283,6 +292,8 @@ export default function LocationScopePicker({
     checkedSet,
     clearAgentVisualState,
     embedded,
+    appMode,
+    floodAgentState,
     onClose,
     registerBusinessLayerFromAoi,
     setBusinessLayerActive,

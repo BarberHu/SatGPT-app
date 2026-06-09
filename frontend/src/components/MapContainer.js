@@ -260,6 +260,10 @@ function MapContainer() {
     clearAgentVisualState,
   } = useAppContext();
 
+  const shouldPreserveAgentActiveScope = appMode === 'agent'
+    && Boolean(floodAgentState?.confirmation_version)
+    && aoiEditorMode !== 'edit';
+
   // Track if map is initialized
   const mapInitialized = useRef(false);
   const agentLayerOrderRef = useRef(agentLayerOrder);
@@ -923,31 +927,40 @@ function MapContainer() {
       return null;
     }
 
-    clearAgentVisualState();
+    const existingBusinessLayer = businessLayers.find((layer) => String(layer.id) === featureId);
+    const shouldActivateDrawnScope = !shouldPreserveAgentActiveScope || Boolean(existingBusinessLayer?.is_active);
+
+    if (shouldActivateDrawnScope) {
+      clearAgentVisualState();
+    }
     setSelectedGridCords(null);
-    setSelectedAOI(nextAoi);
+    if (shouldActivateDrawnScope) {
+      setSelectedAOI(nextAoi);
+    }
     registerBusinessLayerFromAoi(nextAoi, {
       id: nextAoi.id,
       label: nextAoi.label,
       source: 'draw',
       origin: 'draw',
-      markActive: true,
+      markActive: shouldActivateDrawnScope,
     });
     setWarning('');
 
-    if (shouldFit) {
+    if (shouldFit && shouldActivateDrawnScope) {
       fitAoiBounds(nextAoi, { force: true, padding: 56, duration: 500 });
     }
 
     return nextAoi;
   }, [
     fitAoiBounds,
+    businessLayers,
     clearAgentVisualState,
     getDrawScopeLabel,
     registerBusinessLayerFromAoi,
     setSelectedAOI,
     setSelectedGridCords,
     setWarning,
+    shouldPreserveAgentActiveScope,
   ]);
 
   const handleDiscardPendingSpatialScope = useCallback(() => {

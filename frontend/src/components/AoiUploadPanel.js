@@ -59,6 +59,7 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
     setSelectedGridCords,
     setWarning,
     floodAgentState,
+    appMode,
     isAoiEditing,
     startAoiDraw,
     startAoiEdit,
@@ -115,28 +116,38 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
         throw new Error('The file does not contain a valid Polygon or MultiPolygon scope.');
       }
 
+      const shouldActivateUploadedScope = !(appMode === 'agent' && floodAgentState?.confirmation_version);
+
       registerBusinessLayerFromAoi(aoi, {
         id: aoi.id,
         label: aoi.label,
         source: aoi.source,
         origin: 'upload',
-        markActive: true,
+        markActive: shouldActivateUploadedScope,
       });
-      setSelectedGridCords(null);
-      setSelectedAOI(aoi);
-
-      if (lightweight) {
-        clearAgentVisualState();
-        cancelDraftAoi();
-      } else {
-        resetAskSession();
-        cancelDraftAoi();
-        resetAgentSession({ preserveSelectedAoi: true });
+      if (shouldActivateUploadedScope) {
+        setSelectedGridCords(null);
+        setSelectedAOI(aoi);
       }
 
-      window.requestAnimationFrame(() => {
-        fitAoiBoundsOnMap(aoi, { padding: 72, duration: 650 });
-      });
+      if (lightweight) {
+        if (shouldActivateUploadedScope) {
+          clearAgentVisualState();
+        }
+        cancelDraftAoi();
+      } else {
+        cancelDraftAoi();
+        if (shouldActivateUploadedScope) {
+          resetAskSession();
+          resetAgentSession({ preserveSelectedAoi: true });
+        }
+      }
+
+      if (shouldActivateUploadedScope) {
+        window.requestAnimationFrame(() => {
+          fitAoiBoundsOnMap(aoi, { padding: 72, duration: 650 });
+        });
+      }
 
       onAoiChange?.(aoi, { action: 'upload' });
       trackUxEvent('aoi_upload_success', {

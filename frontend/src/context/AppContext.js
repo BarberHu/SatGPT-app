@@ -696,22 +696,9 @@ export const AppProvider = ({ children }) => {
   }, []);
 
   const mergeLayerData = useCallback((data, options = {}) => {
-    const normalized = normalizeLayerData(data, { partial: true, ...options });
     setLayerData((previous) => ({
       ...previous,
-      ...normalized,
-    }));
-    return normalized;
-  }, []);
-
-  const setLayerDataEntry = useCallback((layerKey, descriptor) => {
-    if (!layerKey) {
-      return;
-    }
-
-    setLayerData((previous) => ({
-      ...previous,
-      [layerKey]: descriptor || null,
+      ...normalizeLayerData(data, { partial: true, ...options }),
     }));
   }, []);
 
@@ -918,7 +905,6 @@ export const AppProvider = ({ children }) => {
     layerData,
     updateLayerData,
     mergeLayerData,
-    setLayerDataEntry,
     resetAskSession,
     
     // GEE Code
