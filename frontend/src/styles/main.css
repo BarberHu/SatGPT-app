@@ -21,6 +21,7 @@ body {
 
 .water {
   --satgpt-panel-gap: 12px;
+  --satgpt-disaster-rail-width: 76px;
   --satgpt-left-panel-width: clamp(300px, 22vw, 380px);
   --satgpt-agent-sidebar-width: clamp(380px, 30vw, 520px);
   --satgpt-agent-sidebar-collapsed-width: 56px;
@@ -61,6 +62,12 @@ body,
   width: var(--satgpt-left-panel-width);
   max-width: calc(100vw - (var(--satgpt-panel-gap) * 2));
   z-index: 1;
+}
+
+.water--agent .ui {
+  left: calc(var(--satgpt-disaster-rail-width) + var(--satgpt-panel-gap));
+  width: var(--satgpt-left-panel-width);
+  max-width: calc(100vw - var(--satgpt-disaster-rail-width) - (var(--satgpt-panel-gap) * 2));
 }
 
 .water .panel {
@@ -199,6 +206,132 @@ body,
   border-radius: var(--satgpt-control-radius);
   box-shadow: var(--satgpt-soft-shadow);
   cursor: pointer;
+}
+
+.agent-disaster-rail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 2;
+  width: var(--satgpt-disaster-rail-width);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  background: rgba(255, 255, 255, 0.96);
+  border-right: 1px solid var(--satgpt-surface-border);
+  box-shadow: 8px 0 22px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.agent-disaster-rail__brand {
+  display: grid;
+  place-items: center;
+  min-height: 74px;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--satgpt-surface-border);
+  color: #0f172a;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.agent-disaster-rail__item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 92px;
+  padding: 12px 7px;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  border-left: 4px solid transparent;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.agent-disaster-rail__item--section-start {
+  margin-top: 12px;
+}
+
+.agent-disaster-rail__item--section-start::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: #d8e0ea;
+}
+
+.agent-disaster-rail__item:not(:disabled):hover {
+  background: #f8fafc;
+  color: #111827;
+}
+
+.agent-disaster-rail__item.active {
+  border-left-color: var(--disaster-accent, #2563eb);
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.agent-disaster-rail__item:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.agent-disaster-rail__icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: inherit;
+}
+
+.agent-disaster-rail__item.active .agent-disaster-rail__icon-wrap {
+  color: var(--disaster-accent, #2563eb);
+}
+
+.agent-disaster-rail__badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #9cae45;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.agent-disaster-rail__item.active .agent-disaster-rail__badge {
+  background: var(--disaster-accent, #2563eb);
+}
+
+.agent-disaster-rail__label {
+  max-width: 100%;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.12;
+  text-align: center;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 /*****************************/
@@ -1223,6 +1356,18 @@ a.mapboxgl-ctrl-logo {
 
   .population-health-soil-container {
     left: 60px;
+  }
+}
+
+@media only screen and (max-width: 480px) {
+  .water--agent .agent-disaster-rail {
+    display: none;
+  }
+
+  .water--agent .ui {
+    left: var(--satgpt-panel-gap);
+    width: var(--satgpt-left-panel-width);
+    max-width: calc(100vw - (var(--satgpt-panel-gap) * 2));
   }
 }
 

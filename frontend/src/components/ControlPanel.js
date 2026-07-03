@@ -2,6 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeftRight } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import AgentPanel from './AgentPanel';
+import WildfirePanel from './WildfirePanel';
+import LandslidePanel from './LandslidePanel';
+import ContextPanel from './ContextPanel';
+import ImageryPanel from './ImageryPanel';
+import VectorPanel from './VectorPanel';
 import { trackUxEvent } from '../utils/analytics';
 
 function ControlPanel() {
@@ -26,6 +31,7 @@ function ControlPanel() {
     setCountries,
     selectedAOI,
     appMode,
+    agentModule,
     chatMode,
     setAppMode,
     setChatMode,
@@ -183,7 +189,15 @@ function ControlPanel() {
 
       <div className="panel-scroll">
         {appMode === 'agent' ? (
-          <AgentPanel />
+          agentModule === 'wildfire'
+            ? <WildfirePanel />
+            : (agentModule === 'landslide'
+              ? <LandslidePanel />
+              : (agentModule === 'context'
+                ? <ContextPanel />
+                : (agentModule === 'imagery'
+                  ? <ImageryPanel />
+                  : (agentModule === 'vector' ? <VectorPanel /> : <AgentPanel />))))
         ) : (
         <>
           {/* Layer Control Section */}

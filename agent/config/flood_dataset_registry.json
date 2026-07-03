@@ -63,7 +63,7 @@
       "selection_profile": {
         "recommendable": true,
         "priority": 96,
-        "default_selected": false,
+        "default_selected": true,
         "location_scope": "global"
       },
       "render_profile": {
@@ -152,7 +152,7 @@
       "selection_profile": {
         "recommendable": true,
         "priority": 80,
-        "default_selected": false,
+        "default_selected": true,
         "location_scope": "global"
       },
       "render_profile": {
@@ -193,7 +193,7 @@
       "selection_profile": {
         "recommendable": true,
         "priority": 78,
-        "default_selected": false,
+        "default_selected": true,
         "location_scope": "global"
       },
       "render_profile": {
@@ -237,7 +237,7 @@
       "selection_profile": {
         "recommendable": true,
         "priority": 30,
-        "default_selected": false,
+        "default_selected": true,
         "location_scope": "global"
       },
       "render_profile": {
@@ -279,7 +279,7 @@
       "selection_profile": {
         "recommendable": true,
         "priority": 22,
-        "default_selected": false,
+        "default_selected": true,
         "location_scope": "global"
       },
       "render_profile": {

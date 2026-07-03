@@ -8,6 +8,7 @@
 import React, { Profiler, startTransition, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
+import Slider from 'rc-slider';
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import { downloadAgentRasterFile, getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
@@ -33,6 +34,8 @@ import {
   updateAgentDiagnosticsContext,
   useRenderDiagnostics,
 } from '../utils/agentDiagnostics';
+import FLOOD_DEFAULT_CATALOG_LAYERS from '../config/floodDefaultCatalogLayers';
+import 'rc-slider/assets/index.css';
 import './AgentPanel.css';
 
 // Flood Agent 共享状态的本地默认值。
@@ -84,6 +87,7 @@ const buildRecommendedLayerContextKey = ({
   afterDate,
   aoiSignature,
   layerSignature,
+  timeOverrideSignature,
 }) => [
   confirmationVersion || 0,
   preDate || '',
@@ -91,6 +95,7 @@ const buildRecommendedLayerContextKey = ({
   afterDate || '',
   aoiSignature || 'no-aoi',
   layerSignature || 'no-layers',
+  timeOverrideSignature || 'default-time',
 ].join('|');
 
 const areAoiScopesEquivalent = (left, right) => {
@@ -107,6 +112,196 @@ const areAoiScopesEquivalent = (left, right) => {
 
 const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
 const EMPTY_ARRAY = [];
+const JRC_YEARLY_MIN_YEAR = 1984;
+const JRC_YEARLY_MAX_YEAR = 2021;
+const DEFAULT_HOTSPOT_YEAR_RANGE = [2000, JRC_YEARLY_MAX_YEAR];
+const YEAR_RANGE_MARKS = {
+  1984: '1984',
+  2000: '2000',
+  2010: '2010',
+  2021: '2021',
+};
+const MONTH_OPTIONS = [
+  { value: 1, label: 'Jan' },
+  { value: 2, label: 'Feb' },
+  { value: 3, label: 'Mar' },
+  { value: 4, label: 'Apr' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'Jun' },
+  { value: 7, label: 'Jul' },
+  { value: 8, label: 'Aug' },
+  { value: 9, label: 'Sep' },
+  { value: 10, label: 'Oct' },
+  { value: 11, label: 'Nov' },
+  { value: 12, label: 'Dec' },
+];
+const MONTH_SLIDER_MARKS = {
+  1: 'Jan',
+  4: 'Apr',
+  7: 'Jul',
+  10: 'Oct',
+  12: 'Dec',
+};
+const YEAR_OPTIONS = Array.from(
+  { length: JRC_YEARLY_MAX_YEAR - JRC_YEARLY_MIN_YEAR + 1 },
+  (_, index) => JRC_YEARLY_MIN_YEAR + index
+);
+
+const getMonthLabel = (month) => (
+  MONTH_OPTIONS.find((option) => option.value === Number(month))?.label || String(month)
+);
+
+const clampYear = (value, fallback = JRC_YEARLY_MAX_YEAR) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(JRC_YEARLY_MAX_YEAR, Math.max(JRC_YEARLY_MIN_YEAR, Math.trunc(numeric)));
+};
+
+const normalizeYearRange = (start, end, fallback = DEFAULT_HOTSPOT_YEAR_RANGE) => {
+  const fallbackStart = Array.isArray(fallback) ? fallback[0] : JRC_YEARLY_MIN_YEAR;
+  const fallbackEnd = Array.isArray(fallback) ? fallback[1] : JRC_YEARLY_MAX_YEAR;
+  const yearStart = clampYear(start, fallbackStart);
+  const yearEnd = Math.max(yearStart, clampYear(end, fallbackEnd));
+  return [yearStart, yearEnd];
+};
+
+const getYearRangeCount = (range = []) => Math.max(1, (Number(range[1]) || 0) - (Number(range[0]) || 0) + 1);
+
+const getYearFromDate = (value, fallback = JRC_YEARLY_MAX_YEAR) => {
+  const match = String(value || '').match(/^(\d{4})/);
+  return clampYear(match ? Number(match[1]) : fallback, fallback);
+};
+
+const getMonthFromDate = (value, fallback = 1) => {
+  const match = String(value || '').match(/^\d{4}-(\d{2})/);
+  const numeric = match ? Number(match[1]) : fallback;
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(12, Math.max(1, Math.trunc(numeric)));
+};
+
+const formatMonthDate = (year, month) => `${year}-${String(month).padStart(2, '0')}-01`;
+
+const nextMonthDate = (year, month) => {
+  const nextMonth = month >= 12 ? 1 : month + 1;
+  const nextYear = month >= 12 ? year + 1 : year;
+  return formatMonthDate(nextYear, nextMonth);
+};
+
+const normalizeDateWindow = (startDate, endDate) => {
+  const start = String(startDate || '').slice(0, 10);
+  const end = String(endDate || '').slice(0, 10);
+  return {
+    start_date: start,
+    end_date: end || start,
+  };
+};
+
+const isValidDateWindow = (window) => (
+  Boolean(window?.start_date && window?.end_date && window.start_date <= window.end_date)
+);
+
+const resolveSingleInundationDateWindow = (override = {}, dates = {}) => {
+  const defaultStartYear = getYearFromDate(dates.currentPreDate || dates.currentPeekDate, 2010);
+  const defaultEndYear = getYearFromDate(
+    dates.currentAfterDate || dates.currentPeekDate || dates.currentPreDate,
+    defaultStartYear
+  );
+  const yearStart = clampYear(override.year_start ?? defaultStartYear, defaultStartYear);
+  const yearEnd = Math.max(yearStart, clampYear(override.year_end ?? defaultEndYear, defaultEndYear));
+  return {
+    mode: 'year_range',
+    year_start: yearStart,
+    year_end: yearEnd,
+    start_date: `${yearStart}-01-01`,
+    end_date: `${yearEnd}-12-31`,
+    valueLabel: `${yearStart}-${yearEnd}`,
+  };
+};
+
+const getCatalogTimeControlMode = (layer) => {
+  if (!layer || layer.execution_profile?.requires_date_range === false) {
+    return null;
+  }
+  if (layer.temporal_type === 'yearly') {
+    return 'year_range';
+  }
+  if (layer.temporal_type === 'monthly') {
+    return 'month';
+  }
+  return 'date_range';
+};
+
+const resolveCatalogLayerDateWindow = (layer, override = {}, dates = {}) => {
+  const mode = getCatalogTimeControlMode(layer);
+  if (!mode) {
+    return { mode: null, start_date: null, end_date: null, valueLabel: 'Static' };
+  }
+
+  const eventStart = dates.currentPreDate || dates.currentPeekDate || '';
+  const eventEnd = dates.currentAfterDate || dates.currentPeekDate || eventStart;
+  const eventPeak = dates.currentPeekDate || eventStart || eventEnd;
+
+  if (mode === 'year_range') {
+    const defaultYear = getYearFromDate(eventPeak || eventStart || eventEnd, JRC_YEARLY_MAX_YEAR);
+    const yearStart = clampYear(override.year_start ?? defaultYear, defaultYear);
+    const yearEnd = Math.max(yearStart, clampYear(override.year_end ?? defaultYear, defaultYear));
+    return {
+      mode,
+      year_start: yearStart,
+      year_end: yearEnd,
+      start_date: `${yearStart}-01-01`,
+      end_date: `${Math.min(yearEnd + 1, JRC_YEARLY_MAX_YEAR + 1)}-01-01`,
+      valueLabel: `${yearStart}-${yearEnd}`,
+    };
+  }
+
+  if (mode === 'month') {
+    const defaultYear = getYearFromDate(eventPeak || eventStart || eventEnd, JRC_YEARLY_MAX_YEAR);
+    const defaultMonth = getMonthFromDate(eventPeak || eventStart || eventEnd, 1);
+    const year = clampYear(override.year ?? defaultYear, defaultYear);
+    const month = getMonthFromDate(`${year}-${String(override.month ?? defaultMonth).padStart(2, '0')}-01`, defaultMonth);
+    return {
+      mode,
+      year,
+      month,
+      start_date: formatMonthDate(year, month),
+      end_date: nextMonthDate(year, month),
+      valueLabel: `${year}-${String(month).padStart(2, '0')}`,
+    };
+  }
+
+  const window = normalizeDateWindow(
+    override.start_date || eventStart,
+    override.end_date || eventEnd
+  );
+  return {
+    mode,
+    ...window,
+    valueLabel: window.start_date && window.end_date ? `${window.start_date} to ${window.end_date}` : 'Needs dates',
+  };
+};
+
+const buildCatalogTimeOverrideSignature = (overrides = {}) => (
+  Object.keys(overrides || {})
+    .sort()
+    .map((layerId) => {
+      const value = overrides[layerId] || {};
+      return [
+        layerId,
+        value.start_date || '',
+        value.end_date || '',
+        value.year_start || '',
+        value.year_end || '',
+        value.year || '',
+        value.month || '',
+      ].join(':');
+    })
+    .join('|')
+);
 
 const CORE_LAYER_LEGENDS = {
   sentinel2: {
@@ -241,36 +436,6 @@ const AGENT_RASTER_LAYER_CONFIG = [
       palette: ['#ffa9bb', '#ff8f9e', '#ff6171', '#ff3b50', '#ff084a'],
     },
     hasDurationControl: true,
-  },
-  {
-    key: 'populationDensity',
-    orderId: 'agent-raster-populationDensity',
-    title: 'Population Density',
-    infoText: 'CIESIN GPWv4.11 population density for rapid exposure context.',
-    dataset: SOURCE_REFERENCES.populationDensity.datasetId,
-    method: 'AOI clipped raster overlay',
-    sourceRef: SOURCE_REFERENCES.populationDensity,
-    legend: CORE_LAYER_LEGENDS.population_density,
-  },
-  {
-    key: 'lclu',
-    orderId: 'agent-raster-lclu',
-    title: 'LCLU',
-    infoText: 'ESA WorldCover land cover classification clipped to the selected AOI.',
-    dataset: SOURCE_REFERENCES.lclu.datasetId,
-    method: 'Categorical land-cover raster clipped to AOI',
-    sourceRef: SOURCE_REFERENCES.lclu,
-    legend: CORE_LAYER_LEGENDS.lclu_raster,
-  },
-  {
-    key: 'soilTexture',
-    orderId: 'agent-raster-soilTexture',
-    title: 'Soil Texture',
-    infoText: 'Soil texture class layer for infiltration and runoff context.',
-    dataset: SOURCE_REFERENCES.soilTexture.datasetId,
-    method: 'Soil class raster clipped to AOI',
-    sourceRef: SOURCE_REFERENCES.soilTexture,
-    legend: CORE_LAYER_LEGENDS.soil_texture,
   },
 ];
 
@@ -784,8 +949,81 @@ function LayerManagerItemCopy({ item }) {
       {item.detailText ? (
         <div className="layer-manager-item-detail">{item.detailText}</div>
       ) : null}
+      {item.sliderControl ? (
+        <LayerSliderControl control={item.sliderControl} />
+      ) : null}
       {item.durationControl ? (
         <LayerDurationControl control={item.durationControl} />
+      ) : null}
+      {item.timeWindowControl ? (
+        <LayerTimeWindowControl control={item.timeWindowControl} />
+      ) : null}
+    </div>
+  );
+}
+
+function LayerSliderControl({ control }) {
+  if (!control) {
+    return null;
+  }
+
+  return (
+    <div className="layer-manager-slider-control" onClick={(event) => event.stopPropagation()}>
+      <div className="layer-manager-duration-label">
+        {control.label}
+        <span>{control.valueLabel}</span>
+      </div>
+      {control.fields?.length ? (
+        <div className="layer-manager-slider-fields">
+          {control.fields.map((field) => (
+            <label className="layer-manager-slider-field" key={field.key}>
+              <span>{field.label}</span>
+              {field.type === 'select' ? (
+                <select
+                  value={field.value}
+                  disabled={control.disabled || field.disabled}
+                  onChange={(event) => control.onFieldChange?.(field.key, event.target.value)}
+                  aria-label={field.ariaLabel || field.label}
+                >
+                  {(field.options || []).map((option) => (
+                    <option key={`${field.key}-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={field.type || 'text'}
+                  value={field.value || ''}
+                  min={field.min}
+                  max={field.max}
+                  disabled={control.disabled || field.disabled}
+                  onChange={(event) => control.onFieldChange?.(field.key, event.target.value)}
+                  aria-label={field.ariaLabel || field.label}
+                />
+              )}
+            </label>
+          ))}
+        </div>
+      ) : null}
+      <div className="layer-manager-rc-slider-wrap">
+        <Slider
+          range={Boolean(control.range)}
+          min={control.min}
+          max={control.max}
+          step={control.step || 1}
+          marks={control.marks}
+          dots={Boolean(control.dots)}
+          value={control.value}
+          disabled={control.disabled}
+          allowCross={false}
+          pushable={control.range ? (control.pushable ?? 0) : undefined}
+          onChange={control.onChange}
+          onChangeComplete={control.onCommit || control.onChange}
+        />
+      </div>
+      {control.helpText ? (
+        <div className="layer-manager-slider-help">{control.helpText}</div>
       ) : null}
     </div>
   );
@@ -820,6 +1058,52 @@ function LayerDurationControl({ control }) {
       <div className="layer-manager-duration-ticks">
         {(control.ticks || []).map((tick) => (
           <span key={tick}>{tick}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LayerTimeWindowControl({ control }) {
+  if (!control) {
+    return null;
+  }
+
+  return (
+    <div className="layer-manager-time-control" onClick={(event) => event.stopPropagation()}>
+      <div className="layer-manager-duration-label">
+        {control.label}
+        <span>{control.valueLabel}</span>
+      </div>
+      <div className={`layer-manager-time-fields mode-${control.mode || 'date_range'}`}>
+        {(control.fields || []).map((field) => (
+          <label className="layer-manager-time-field" key={field.key}>
+            <span>{field.label}</span>
+            {field.type === 'select' ? (
+              <select
+                value={field.value}
+                disabled={control.disabled || field.disabled}
+                onChange={(event) => control.onChange(field.key, event.target.value)}
+                aria-label={field.ariaLabel || field.label}
+              >
+                {(field.options || []).map((option) => (
+                  <option key={`${field.key}-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={field.type || 'date'}
+                value={field.value || ''}
+                min={field.min}
+                max={field.max}
+                disabled={control.disabled || field.disabled}
+                onChange={(event) => control.onChange(field.key, event.target.value)}
+                aria-label={field.ariaLabel || field.label}
+              />
+            )}
+          </label>
         ))}
       </div>
     </div>
@@ -1375,12 +1659,6 @@ function AgentPanel() {
     agentImagery,
     agentImageryLoading,
     // Agent control states from context
-    agentSelectedPeriod,
-    setAgentSelectedType,
-    agentShowBaseImagery,
-    setAgentShowBaseImagery,
-    agentBaseImageryVisibility,
-    setAgentBaseImageryVisibility,
     agentShowFloodDetection,
     setAgentShowFloodDetection,
     agentShowPopulationLayer,
@@ -1409,17 +1687,15 @@ function AgentPanel() {
     setAgentTileError,
     mergeLayerData,
     mapInstance,
-    businessLayers,
     selectedAOI,
-    toggleBusinessLayerVisibility,
-    activateBusinessLayerRecord,
-    deleteBusinessLayer,
   } = useAppContext();
 
   const [draggedLayerId, setDraggedLayerId] = useState(null);
   const [dragOverState, setDragOverState] = useState({ groupKey: null, targetLayerId: null, position: 'before' });
   const [rasterDownloadState, setRasterDownloadState] = useState({});
-  const [hotspotDuration, setHotspotDuration] = useState(5);
+  const [hotspotYearRange, setHotspotYearRange] = useState(DEFAULT_HOTSPOT_YEAR_RANGE);
+  const [singleInundationTimeWindow, setSingleInundationTimeWindow] = useState({});
+  const [catalogLayerTimeOverrides, setCatalogLayerTimeOverrides] = useState({});
 
   const { state } = useCoAgent({
     name: "flood_agent",
@@ -1604,6 +1880,25 @@ function AgentPanel() {
   );
   const analysisDisplayEnabled = hasResolvedAnalysisContext && analysisScopeMatchesSelection;
   const effectiveAoi = analysisDisplayEnabled ? agentDerivedAoi : null;
+  const catalogRenderAoi = effectiveAoi || selectedAOI || agentDerivedAoi || null;
+  const catalogRenderAoiSignature = useMemo(
+    () => buildAoiSignature(catalogRenderAoi, currentBounds),
+    [catalogRenderAoi, currentBounds]
+  );
+  const catalogLayerTimeOverrideSignature = useMemo(
+    () => buildCatalogTimeOverrideSignature(catalogLayerTimeOverrides),
+    [catalogLayerTimeOverrides]
+  );
+  const getCatalogLayerDateWindow = useCallback((layer) => resolveCatalogLayerDateWindow(
+    layer,
+    catalogLayerTimeOverrides?.[layer?.id] || {},
+    { currentPreDate, currentPeekDate, currentAfterDate }
+  ), [catalogLayerTimeOverrides, currentAfterDate, currentPeekDate, currentPreDate]);
+  const canRenderCatalogLayer = useCallback((layer) => {
+    const requiresDateRange = layer?.execution_profile?.requires_date_range !== false;
+    const dateWindow = getCatalogLayerDateWindow(layer);
+    return Boolean(catalogRenderAoi) && (!requiresDateRange || isValidDateWindow(dateWindow));
+  }, [catalogRenderAoi, getCatalogLayerDateWindow]);
   const selectedAoiSignature = useMemo(() => buildAoiSignature(selectedAOI), [selectedAOI]);
 
   useEffect(() => {
@@ -1645,9 +1940,17 @@ function AgentPanel() {
       return null;
     }
 
+    const singleEventWindow = resolveSingleInundationDateWindow(
+      singleInundationTimeWindow,
+      { currentPreDate, currentPeekDate, currentAfterDate }
+    );
     const baseParams = buildAskMapRequestParams(selectedAOI, {
-      time_start: currentPreDate || '2010-01-01',
-      time_end: currentAfterDate || currentPeekDate || '2024-12-31',
+      time_start: layerKey === 'singleInundationEvent'
+        ? (overrides.time_start || singleEventWindow.start_date)
+        : (currentPreDate || '2010-01-01'),
+      time_end: layerKey === 'singleInundationEvent'
+        ? (overrides.time_end || singleEventWindow.end_date)
+        : (currentAfterDate || currentPeekDate || '2024-12-31'),
       cloud_mask: 'true',
       climatology: 'false',
       month_from: '1',
@@ -1657,12 +1960,23 @@ function AgentPanel() {
     });
 
     if (layerKey === 'inundationHotspot') {
-      baseParams.year_from = overrides.year_from || 1988;
-      baseParams.year_count = overrides.year_count || hotspotDuration;
+      const [yearStart, yearEnd] = normalizeYearRange(
+        overrides.year_start ?? overrides.year_from ?? hotspotYearRange[0],
+        overrides.year_end ?? (
+          overrides.year_count
+            ? Number(overrides.year_from ?? hotspotYearRange[0]) + Number(overrides.year_count) - 1
+            : hotspotYearRange[1]
+        ),
+        hotspotYearRange
+      );
+      baseParams.year_start = yearStart;
+      baseParams.year_end = yearEnd;
+      baseParams.year_from = yearStart;
+      baseParams.year_count = getYearRangeCount([yearStart, yearEnd]);
     }
 
     return baseParams;
-  }, [currentAfterDate, currentPeekDate, currentPreDate, hotspotDuration, selectedAOI]);
+  }, [currentAfterDate, currentPeekDate, currentPreDate, hotspotYearRange, selectedAOI, singleInundationTimeWindow]);
 
   const fetchAgentRasterLayer = useCallback(async (layerKey, overrides = {}) => {
     const params = buildAgentRasterRequestParams(layerKey, overrides);
@@ -1677,6 +1991,8 @@ function AgentPanel() {
       requestAoiSignature,
       params.time_start || '',
       params.time_end || '',
+      params.year_start || '',
+      params.year_end || '',
       params.year_from || '',
       params.year_count || '',
     ].join('|');
@@ -1789,42 +2105,63 @@ function AgentPanel() {
     ),
     [currentRecommendedLayers]
   );
-  const confirmedRecommendedCatalogLayers = useMemo(() => {
-    const confirmedIds = new Set(currentSelectedLayerIds);
-    return recommendedCatalogLayers.filter((layer) => confirmedIds.has(layer.id));
-  }, [currentSelectedLayerIds, recommendedCatalogLayers]);
+  const controlPanelCatalogLayers = useMemo(() => {
+    const byAssetId = new Map();
+
+    FLOOD_DEFAULT_CATALOG_LAYERS.forEach((layer) => {
+      byAssetId.set(layer.asset_id || layer.id, layer);
+    });
+
+    recommendedCatalogLayers.forEach((layer) => {
+      const key = layer.asset_id || layer.id;
+      const fallbackLayer = byAssetId.get(key) || {};
+      byAssetId.set(key, {
+        ...fallbackLayer,
+        ...layer,
+        source_meta: {
+          ...(fallbackLayer.source_meta || {}),
+          ...(layer.source_meta || {}),
+        },
+        selection_profile: {
+          ...(fallbackLayer.selection_profile || {}),
+          ...(layer.selection_profile || {}),
+        },
+        render_profile: {
+          ...(fallbackLayer.render_profile || {}),
+          ...(layer.render_profile || {}),
+        },
+        execution_profile: {
+          ...(fallbackLayer.execution_profile || {}),
+          ...(layer.execution_profile || {}),
+        },
+        ui_profile: {
+          ...(fallbackLayer.ui_profile || {}),
+          ...(layer.ui_profile || {}),
+        },
+      });
+    });
+
+    return sortCatalogLayers(Array.from(byAssetId.values()));
+  }, [recommendedCatalogLayers]);
+  const controlPanelCatalogLayerSignature = buildLayerSignature(controlPanelCatalogLayers);
   const effectiveAoiSignature = buildAoiSignature(effectiveAoi, currentBounds);
   const recommendedLayerContextKey = useMemo(() => buildRecommendedLayerContextKey({
     confirmationVersion: currentConfirmationVersion,
     preDate: currentPreDate,
     peekDate: currentPeekDate,
     afterDate: currentAfterDate,
-    aoiSignature: effectiveAoiSignature,
-    layerSignature: currentRecommendedLayerSignature,
+    aoiSignature: catalogRenderAoiSignature,
+    layerSignature: controlPanelCatalogLayerSignature,
+    timeOverrideSignature: catalogLayerTimeOverrideSignature,
   }), [
     currentConfirmationVersion,
     currentPreDate,
     currentPeekDate,
     currentAfterDate,
-    currentRecommendedLayerSignature,
-    effectiveAoiSignature,
+    controlPanelCatalogLayerSignature,
+    catalogRenderAoiSignature,
+    catalogLayerTimeOverrideSignature,
   ]);
-  const scopeSourceLabel = useCallback((source) => {
-    const normalizedSource = String(source || '').toLowerCase();
-    if (normalizedSource === 'place_search') return 'place search';
-    if (normalizedSource === 'draw') return 'draw';
-    if (normalizedSource === 'upload') return 'upload';
-    if (normalizedSource === 'edited') return 'edited';
-    return normalizedSource || 'scope';
-  }, []);
-  const selectedPeriodMeta = useMemo(
-    () => ({
-      pre_date: { label: 'Pre-Flood' },
-      peek_date: { label: 'Peak' },
-      after_date: { label: 'Post-Flood' },
-    }[agentSelectedPeriod] || { label: agentSelectedPeriod || 'Period' }),
-    [agentSelectedPeriod]
-  );
   const panelProfiler = useMemo(
     () => createReactProfilerHandler('AgentPanel', () => ({
       analysisDisplayEnabled,
@@ -1988,109 +2325,6 @@ function AgentPanel() {
   }, [mapInstance]);
 
   const layerManagerGroups = useMemo(() => {
-    const imageryGroup = {
-      key: 'imagery',
-      label: 'Imagery',
-      items: ['sentinel2', 'sentinel1'].map((type) => {
-          const sourceRef = type === 'sentinel2' ? SOURCE_REFERENCES.sentinel2 : SOURCE_REFERENCES.sentinel1;
-          const periodSlug = agentSelectedPeriod.replace('_date', '');
-          const orderId = `agent-${type === 'sentinel2' ? 's2' : 's1'}-${periodSlug}`;
-          const descriptor = agentImagery?.[agentSelectedPeriod]?.[type] || null;
-          const visible = Boolean(agentBaseImageryVisibility?.[type]);
-          const isAvailable = Boolean(descriptor?.tile_url);
-          const isLoading = Boolean(
-            visible
-            && (
-              agentImageryLoading
-              || agentLayerLoading?.[`base-imagery-${type}`]
-              || agentLayerLoading?.[orderId]
-            )
-          );
-
-          return {
-            id: `base-imagery-${type}`,
-            orderId,
-            defaultOrder: type === 'sentinel2' ? 0 : 1,
-            draggable: true,
-            title: type === 'sentinel2' ? 'Optical Imagery' : 'SAR Imagery',
-            infoKicker: 'Base imagery',
-            infoMeta: `${sourceRef.datasetId}${descriptor?.date ? ` / ${descriptor.date}` : ''}`,
-            infoText: type === 'sentinel2'
-              ? 'Optical base imagery for visual flood context'
-              : 'SAR base imagery for cloud-resistant flood context',
-            infoDetails: [
-              { label: 'Source', value: sourceRef.producer },
-              { label: 'Dataset ID', value: sourceRef.datasetId },
-              { label: 'Period', value: selectedPeriodMeta.label },
-              { label: 'Date', value: descriptor?.date },
-              { label: 'Resolution', value: descriptor?.resolution ? `${descriptor.resolution}m` : sourceRef.resolution },
-              { label: 'Content date', value: sourceRef.contentDate },
-              { label: 'License', value: sourceRef.license },
-              { label: 'Status', value: isAvailable ? (visible ? 'Visible' : 'Ready') : 'Unavailable' },
-            ],
-            infoSections: [
-              {
-                title: 'Function',
-                text: type === 'sentinel2'
-                  ? 'True-color optical context for visual interpretation of water, vegetation, built-up area, and cloud cover.'
-                  : 'Radar context for flood analysis when clouds reduce optical visibility.',
-              },
-              {
-                title: 'Overview',
-                text: sourceRef.overview,
-              },
-              {
-                title: 'Use in workflow',
-                rows: [
-                  { label: 'Period', value: selectedPeriodMeta.label },
-                  { label: 'Role', value: 'Visual evidence layer' },
-                ],
-              },
-              {
-                title: 'Citation',
-                text: sourceRef.citation,
-              },
-            ],
-            infoWarnings: type === 'sentinel2'
-              ? [sourceRef.cautions]
-              : [sourceRef.cautions],
-            infoLinks: [
-              { label: 'Official catalog', href: sourceRef.officialUrl },
-            ],
-            legend: CORE_LAYER_LEGENDS[type],
-            checked: Boolean(visible && agentShowBaseImagery && isAvailable),
-            disabled: !isAvailable,
-            loading: isLoading,
-            checkboxState: isLoading ? 'loading' : (isAvailable ? 'ready' : 'idle'),
-            onToggle: (event) => {
-              if (!isAvailable) {
-                return;
-              }
-
-              const nextVisible = Boolean(event?.target?.checked);
-              const nextBaseVisibility = {
-                ...(agentBaseImageryVisibility || {}),
-                [type]: nextVisible,
-              };
-
-              flushSync(() => {
-                setAgentSelectedType(type);
-                setAgentBaseImageryVisibility(nextBaseVisibility);
-                setAgentShowBaseImagery(Object.values(nextBaseVisibility).some(Boolean));
-              });
-
-              if (!nextVisible) {
-                [
-                  `agent-${type === 'sentinel2' ? 's2' : 's1'}-pre`,
-                  `agent-${type === 'sentinel2' ? 's2' : 's1'}-peek`,
-                  `agent-${type === 'sentinel2' ? 's2' : 's1'}-after`,
-                ].forEach(removeMapLayerFromMap);
-              }
-            },
-          };
-        }),
-    };
-
     const floodDetectionDescriptor = agentImagery?.flood_detection || null;
     const floodDetectionAvailable = Boolean(floodDetectionDescriptor?.tile_url);
     const floodDetectionLoading = Boolean(agentShowFloodDetection && agentLayerLoading?.['flood-detection']);
@@ -2184,12 +2418,23 @@ function AgentPanel() {
       );
       const downloadState = rasterDownloadState[layer.key] || null;
       const isDownloading = downloadState?.status === 'preparing';
-      const durationMeta = layer.key === 'inundationHotspot'
-        ? {
-          yearFrom: requestParams?.year_from || 1988,
-          yearCount: requestParams?.year_count || hotspotDuration,
-          yearTo: (requestParams?.year_from || 1988) + (requestParams?.year_count || hotspotDuration),
-        }
+      const hotspotRange = layer.key === 'inundationHotspot'
+        ? normalizeYearRange(
+          requestParams?.year_start ?? requestParams?.year_from ?? hotspotYearRange[0],
+          requestParams?.year_end ?? (
+            requestParams?.year_count
+              ? Number(requestParams?.year_from ?? hotspotYearRange[0]) + Number(requestParams.year_count) - 1
+              : hotspotYearRange[1]
+          ),
+          hotspotYearRange
+        )
+        : null;
+      const hotspotYearCount = hotspotRange ? getYearRangeCount(hotspotRange) : null;
+      const singleEventWindow = layer.key === 'singleInundationEvent'
+        ? resolveSingleInundationDateWindow(
+          singleInundationTimeWindow,
+          { currentPreDate, currentPeekDate, currentAfterDate }
+        )
         : null;
 
       return {
@@ -2210,7 +2455,7 @@ function AgentPanel() {
           { label: 'License', value: layer.sourceRef.license },
           { label: 'Scope', value: selectedAOI?.label || 'No active scope' },
           { label: 'Date window', value: layer.key === 'singleInundationEvent' ? `${requestParams?.time_start || '2010-01-01'} to ${requestParams?.time_end || '2024-12-31'}` : null },
-          { label: 'Hotspot duration', value: durationMeta ? `${durationMeta.yearFrom}-${durationMeta.yearTo} (${durationMeta.yearCount} years)` : null },
+          { label: 'Hotspot period', value: hotspotRange ? `${hotspotRange[0]}-${hotspotRange[1]} (${hotspotYearCount} years)` : null },
           { label: 'Status', value: !hasScope ? 'Unavailable' : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : (hasTile ? 'Ready' : 'Pending'))) },
         ],
         infoSections: [
@@ -2237,7 +2482,7 @@ function AgentPanel() {
                 : layer.key === 'inundationHotspot'
                   ? 'Long-term inundation hotspot context'
                   : 'Context for interpreting flood exposure and environment' },
-              { label: 'Duration', value: durationMeta ? `${durationMeta.yearCount} years` : null },
+              { label: 'Duration', value: hotspotYearCount ? `${hotspotYearCount} years` : null },
             ],
           },
           {
@@ -2266,19 +2511,79 @@ function AgentPanel() {
           },
         ],
         legend: layer.legend,
-        durationControl: layer.hasDurationControl ? {
-          label: 'Hotspot duration',
-          value: hotspotDuration,
-          valueLabel: `${durationMeta?.yearFrom || 1988}-${durationMeta?.yearTo || 1988 + hotspotDuration}`,
-          min: 5,
-          max: 25,
+        sliderControl: layer.key === 'inundationHotspot' && hotspotRange ? {
+          range: true,
+          label: 'Hotspot period',
+          value: hotspotRange,
+          valueLabel: `${hotspotRange[0]}-${hotspotRange[1]} (${hotspotYearCount} years)`,
+          min: JRC_YEARLY_MIN_YEAR,
+          max: JRC_YEARLY_MAX_YEAR,
           step: 1,
-          ticks: [5, 10, 15, 20, 25],
+          marks: YEAR_RANGE_MARKS,
+          pushable: 1,
           disabled: !hasScope || loading,
-          onChange: (nextValue) => {
-            setHotspotDuration(nextValue);
+          helpText: 'Frequency is computed across the selected inclusive year range.',
+          onChange: (nextRange) => {
+            if (Array.isArray(nextRange)) {
+              setHotspotYearRange(normalizeYearRange(nextRange[0], nextRange[1], hotspotRange));
+            }
+          },
+          onCommit: (nextRange) => {
+            if (!Array.isArray(nextRange)) {
+              return;
+            }
+            const nextHotspotRange = normalizeYearRange(nextRange[0], nextRange[1], hotspotRange);
+            setHotspotYearRange(nextHotspotRange);
             if (agentRasterLayerVisibility?.inundationHotspot) {
-              fetchAgentRasterLayer('inundationHotspot', { year_count: nextValue });
+              fetchAgentRasterLayer('inundationHotspot', {
+                year_start: nextHotspotRange[0],
+                year_end: nextHotspotRange[1],
+              });
+            }
+          },
+        } : singleEventWindow ? {
+          range: true,
+          label: 'Year range',
+          value: [singleEventWindow.year_start, singleEventWindow.year_end],
+          valueLabel: singleEventWindow.valueLabel,
+          min: JRC_YEARLY_MIN_YEAR,
+          max: JRC_YEARLY_MAX_YEAR,
+          step: 1,
+          marks: YEAR_RANGE_MARKS,
+          pushable: 1,
+          disabled: !hasScope || loading,
+          helpText: 'JRC yearly classes are annual, so the slider uses whole years.',
+          onChange: (nextRange) => {
+            if (!Array.isArray(nextRange)) {
+              return;
+            }
+            const [yearStart, yearEnd] = normalizeYearRange(nextRange[0], nextRange[1], [
+              singleEventWindow.year_start,
+              singleEventWindow.year_end,
+            ]);
+            setSingleInundationTimeWindow({
+              year_start: yearStart,
+              year_end: yearEnd,
+            });
+          },
+          onCommit: (nextRange) => {
+            if (!Array.isArray(nextRange)) {
+              return;
+            }
+            const [yearStart, yearEnd] = normalizeYearRange(nextRange[0], nextRange[1], [
+              singleEventWindow.year_start,
+              singleEventWindow.year_end,
+            ]);
+            const nextWindow = resolveSingleInundationDateWindow(
+              { year_start: yearStart, year_end: yearEnd },
+              { currentPreDate, currentPeekDate, currentAfterDate }
+            );
+            setSingleInundationTimeWindow({ year_start: yearStart, year_end: yearEnd });
+            if (agentRasterLayerVisibility?.singleInundationEvent) {
+              fetchAgentRasterLayer('singleInundationEvent', {
+                time_start: nextWindow.start_date,
+                time_end: nextWindow.end_date,
+              });
             }
           },
         } : null,
@@ -2311,7 +2616,7 @@ function AgentPanel() {
       };
     });
 
-    const recommendedItems = confirmedRecommendedCatalogLayers.map((layer, index) => {
+    const recommendedItems = controlPanelCatalogLayers.map((layer, index) => {
       const descriptor = agentRecommendedLayerData?.[layer.id] || null;
       const sourceMeta = mergeCatalogSourceMeta(layer, descriptor);
       const sourceTitle = trimEarthEngineTitle(sourceMeta.title) || layer.title;
@@ -2319,9 +2624,105 @@ function AgentPanel() {
       const selectedBands = layer.render_profile?.bands || sourceMeta?.legend_spec?.bands;
       const bandRows = buildBandMetadataRows(sourceMeta.band_metadata, selectedBands);
       const visible = Boolean(agentRecommendedLayerVisibility?.[layer.id]);
-      const loading = Boolean(visible && agentLayerLoading?.[layer.id]);
-      const hasTile = Boolean(descriptor?.tile_url);
+      const requiresDateRange = layer.execution_profile?.requires_date_range !== false;
+      const hasCatalogScope = Boolean(catalogRenderAoi);
+      const catalogDateWindow = getCatalogLayerDateWindow(layer);
+      const hasRequiredDates = !requiresDateRange || isValidDateWindow(catalogDateWindow);
+      const renderable = hasCatalogScope && hasRequiredDates;
+      const loading = Boolean(renderable && visible && agentLayerLoading?.[layer.id]);
+      const hasTile = Boolean(descriptor?.tile_url && descriptor?.context_key === recommendedLayerContextKey);
       const orderId = getCatalogMapLayerId(layer.id);
+      const yearRangeSliderControl = catalogDateWindow.mode === 'year_range' ? {
+        range: true,
+        label: 'Year range',
+        value: [catalogDateWindow.year_start, catalogDateWindow.year_end],
+        valueLabel: catalogDateWindow.valueLabel,
+        min: JRC_YEARLY_MIN_YEAR,
+        max: JRC_YEARLY_MAX_YEAR,
+        step: 1,
+        marks: YEAR_RANGE_MARKS,
+        pushable: 1,
+        disabled: !hasCatalogScope || loading,
+        helpText: 'Annual products are filtered by the inclusive year range.',
+        onChange: (nextRange) => {
+          if (!Array.isArray(nextRange)) {
+            return;
+          }
+          const [yearStart, yearEnd] = normalizeYearRange(nextRange[0], nextRange[1], [
+            catalogDateWindow.year_start,
+            catalogDateWindow.year_end,
+          ]);
+          setCatalogLayerTimeOverrides((previous) => ({
+            ...(previous || {}),
+            [layer.id]: {
+              ...((previous || {})[layer.id] || {}),
+              year_start: yearStart,
+              year_end: yearEnd,
+            },
+          }));
+        },
+      } : null;
+      const monthSliderControl = catalogDateWindow.mode === 'month' ? {
+        range: false,
+        label: 'Month',
+        value: catalogDateWindow.month,
+        valueLabel: `${catalogDateWindow.year} ${getMonthLabel(catalogDateWindow.month)}`,
+        min: 1,
+        max: 12,
+        step: 1,
+        marks: MONTH_SLIDER_MARKS,
+        dots: true,
+        disabled: !hasCatalogScope || loading,
+        helpText: 'Monthly products use the selected year and month.',
+        fields: [
+          {
+            key: 'year',
+            label: 'Year',
+            type: 'select',
+            value: catalogDateWindow.year,
+            options: YEAR_OPTIONS.map((year) => ({ value: year, label: String(year) })),
+          },
+        ],
+        onFieldChange: (fieldKey, nextValue) => {
+          setCatalogLayerTimeOverrides((previous) => {
+            const current = previous?.[layer.id] || {};
+            return {
+              ...(previous || {}),
+              [layer.id]: {
+                ...current,
+                year: fieldKey === 'year' ? clampYear(nextValue, catalogDateWindow.year) : catalogDateWindow.year,
+                month: current.month ?? catalogDateWindow.month,
+              },
+            };
+          });
+        },
+        onChange: (nextMonth) => {
+          setCatalogLayerTimeOverrides((previous) => {
+            const current = previous?.[layer.id] || {};
+            return {
+              ...(previous || {}),
+              [layer.id]: {
+                ...current,
+                year: current.year ?? catalogDateWindow.year,
+                month: getMonthFromDate(
+                  `${catalogDateWindow.year}-${String(nextMonth).padStart(2, '0')}-01`,
+                  catalogDateWindow.month
+                ),
+              },
+            };
+          });
+        },
+      } : null;
+      const dateWindowDetailText = catalogDateWindow.mode === 'date_range'
+        ? (hasRequiredDates
+          ? `Event window: ${catalogDateWindow.valueLabel}`
+          : 'Event window required from the flood event')
+        : null;
+      const statusLabel = !hasCatalogScope
+        ? 'Unavailable: select an AOI first'
+        : (!hasRequiredDates
+          ? 'Needs time window'
+          : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : 'Hidden')));
       return {
         id: `recommended-${layer.id}`,
         orderId,
@@ -2331,14 +2732,16 @@ function AgentPanel() {
         infoKicker: layer.ui_profile?.group_label || 'Recommended dataset',
         infoMeta: sourceMeta.asset_id || layer.asset_id,
         infoText: sourceSummary || layer.ui_profile?.group_label || 'Recommended catalog layer',
+        detailText: dateWindowDetailText,
         infoDetails: [
           { label: 'Group', value: layer.ui_profile?.group_label || layer.product_group },
           { label: 'Source', value: sourceTitle },
           { label: 'Asset ID', value: sourceMeta.asset_id || layer.asset_id },
           { label: 'Asset type', value: sourceMeta.asset_type || layer.asset_type },
           { label: 'Temporal', value: sourceMeta.temporal_type || layer.temporal_type },
+          { label: 'Time window', value: catalogDateWindow.valueLabel },
           { label: 'Coverage', value: sourceMeta.spatial_scope || layer.spatial_scope },
-          { label: 'Status', value: !analysisDisplayEnabled ? 'Unavailable' : (loading ? 'Loading' : (visible ? (descriptor?.tile_url ? 'Visible' : 'Pending') : 'Hidden')) },
+          { label: 'Status', value: statusLabel },
         ],
         infoSections: [
           {
@@ -2386,38 +2789,46 @@ function AgentPanel() {
         ],
         infoWarnings: [
           visible && !hasTile ? 'Layer is selected but tile rendering has not completed yet.' : null,
-          !analysisDisplayEnabled ? 'Confirm event dates and AOI before rendering this dataset.' : null,
+          !hasCatalogScope ? 'Select an AOI before rendering this dataset.' : null,
+          hasCatalogScope && !hasRequiredDates ? 'This dataset needs a valid time window before rendering.' : null,
         ],
         infoLinks: [
           { label: 'Official dataset page', href: sourceMeta.official_url || layer.official_url || descriptor?.official_url },
           { label: 'GEE water catalog source', href: sourceMeta.catalog_source_url },
         ].filter((link) => link.href),
         legend: buildCatalogLegendModel(descriptor || layer, layer.title),
+        sliderControl: yearRangeSliderControl || monthSliderControl,
+        timeWindowControl: null,
         checked: visible,
-        disabled: !analysisDisplayEnabled,
+        disabled: !renderable,
         loading,
-        checkboxState: !analysisDisplayEnabled ? 'idle' : (loading ? 'loading' : (hasTile ? 'ready' : 'idle')),
-        status: !analysisDisplayEnabled
-          ? 'Unavailable'
-          : (loading ? 'Loading' : (visible ? (hasTile ? 'Visible' : 'Pending') : 'Hidden')),
-        tone: !analysisDisplayEnabled
+        checkboxState: !renderable ? 'idle' : (loading ? 'loading' : (hasTile ? 'ready' : 'idle')),
+        status: statusLabel,
+        tone: !renderable
           ? 'idle'
           : (loading ? 'loading' : (visible ? (hasTile ? 'ready' : 'pending') : 'off')),
         badge: layer.ui_profile?.badge_label || null,
         onToggle: (event) => {
-          if (analysisDisplayEnabled) {
-            const nextVisible = Boolean(event?.target?.checked);
-            flushSync(() => {
-              setAgentRecommendedLayerVisibility((previous) => ({
-                ...previous,
-                [layer.id]: nextVisible,
-              }));
-            });
+          if (!hasCatalogScope) {
+            setWarning('Please select an AOI before loading this catalog layer.');
+            return;
+          }
+          if (!hasRequiredDates) {
+            setWarning('This catalog layer needs a valid time window before it can be loaded.');
+            return;
+          }
 
-            if (!nextVisible) {
-              removeMapLayerFromMap(orderId);
-              window.requestAnimationFrame(() => removeMapLayerFromMap(orderId));
-            }
+          const nextVisible = Boolean(event?.target?.checked);
+          flushSync(() => {
+            setAgentRecommendedLayerVisibility((previous) => ({
+              ...previous,
+              [layer.id]: nextVisible,
+            }));
+          });
+
+          if (!nextVisible) {
+            removeMapLayerFromMap(orderId);
+            window.requestAnimationFrame(() => removeMapLayerFromMap(orderId));
           }
         },
       };
@@ -2439,104 +2850,48 @@ function AgentPanel() {
       });
     }
 
-    imageryGroup.items = orderLayerManagerItems(imageryGroup.items);
-    groups.push(imageryGroup);
-
-    groups.push({
-      key: 'scopes',
-      label: 'Vector Layers',
-      items: (businessLayers || []).map((layer) => {
-        const isVisible = layer.is_visible !== false;
-        return {
-          id: `scope-${layer.id}`,
-          title: layer.label,
-          detailText: scopeSourceLabel(layer.source),
-          infoKicker: 'Vector layer',
-          infoMeta: layer.source || 'business layer',
-          infoText: 'User-managed vector scope used to constrain flood analysis and map rendering.',
-          infoDetails: [
-            { label: 'Source', value: scopeSourceLabel(layer.source) },
-            { label: 'Status', value: isVisible ? 'Visible' : 'Hidden' },
-            { label: 'Active', value: layer.is_active },
-          ],
-          infoSections: [
-            {
-              title: 'Use in workflow',
-              rows: [
-                { label: 'Role', value: 'AOI / business scope' },
-                { label: 'Can constrain analysis', value: true },
-                { label: 'Created', value: layer.created_at },
-                { label: 'Updated', value: layer.updated_at },
-              ],
-            },
-          ],
-          legend: null,
-          checked: isVisible,
-          disabled: false,
-          loading: false,
-          checkboxState: layer.is_active ? 'ready' : 'vector-inactive',
-          status: isVisible ? 'Visible' : 'Hidden',
-          tone: isVisible ? 'ready' : 'off',
-          actionLabel: 'Delete',
-          onToggle: () => toggleBusinessLayerVisibility(layer.id),
-          onSelect: () => activateBusinessLayerRecord(layer.id),
-          onAction: () => deleteBusinessLayer(layer.id),
-        };
-      }),
-    });
-
     return groups;
   }, [
-    agentImageryLoading,
     agentImagery,
-    agentBaseImageryVisibility,
     agentLayerLoading,
     agentRasterLayerVisibility,
     agentRasterLoading,
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
-    agentShowBaseImagery,
     analysisDisplayEnabled,
-    businessLayers,
-    confirmedRecommendedCatalogLayers,
+    catalogRenderAoi,
+    controlPanelCatalogLayers,
+    currentAfterDate,
     currentPeekDate,
     currentPreDate,
+    getCatalogLayerDateWindow,
     layerData,
     orderLayerManagerItems,
     rasterDownloadState,
-    scopeSourceLabel,
-    agentSelectedPeriod,
     agentShowFloodDetection,
     buildAgentRasterRequestParams,
     handleAgentRasterDownload,
     fetchAgentRasterLayer,
-    hotspotDuration,
-    selectedPeriodMeta.label,
+    hotspotYearRange,
+    recommendedLayerContextKey,
     selectedAOI,
     selectedAoiSignature,
-    activateBusinessLayerRecord,
-    deleteBusinessLayer,
+    singleInundationTimeWindow,
     removeMapLayerFromMap,
     setAgentRasterLayerVisibility,
-    setAgentBaseImageryVisibility,
     setAgentRecommendedLayerVisibility,
-    setAgentSelectedType,
-    setAgentShowBaseImagery,
     setAgentShowFloodDetection,
-    setHotspotDuration,
-    toggleBusinessLayerVisibility,
+    setWarning,
   ]);
   useEffect(() => {
-    if (!analysisDisplayEnabled || !currentRecommendedLayers.length) {
+    if (!catalogRenderAoi || !controlPanelCatalogLayers.length) {
       setAgentRecommendedLayerVisibility({});
       setAgentRecommendedLayerData({});
       setAgentLayerOrder((previous) => previous.filter((layerId) => !String(layerId).startsWith('agent-rec-')));
       return;
     }
 
-    const catalogLayerOrderIds = currentRecommendedLayers
-      .filter((layer) => layer.layer_family === 'catalog')
-      .map((layer) => getCatalogMapLayerId(layer.id));
+    const catalogLayerOrderIds = controlPanelCatalogLayers.map((layer) => getCatalogMapLayerId(layer.id));
 
     setAgentLayerOrder((previous) => {
       const filtered = previous.filter((layerId) => (
@@ -2546,22 +2901,21 @@ function AgentPanel() {
       return [...filtered, ...missing];
     });
 
-    setAgentRecommendedLayerVisibility(() => {
-      const selectedIds = new Set(currentSelectedLayerIds);
+    setAgentRecommendedLayerVisibility((previous) => {
       const next = {};
-      currentRecommendedLayers.forEach((layer) => {
-        if (layer.layer_family === 'catalog') {
-          next[layer.id] = selectedIds.has(layer.id);
-        }
+      controlPanelCatalogLayers.forEach((layer) => {
+        const requiresDateRange = layer.execution_profile?.requires_date_range !== false;
+        const renderable = !requiresDateRange || isValidDateWindow(getCatalogLayerDateWindow(layer));
+        next[layer.id] = Boolean(renderable && previous?.[layer.id]);
       });
       return next;
     });
   }, [
-    analysisDisplayEnabled,
+    catalogRenderAoi,
     currentConfirmationVersion,
-    currentSelectedLayerIds,
-    currentRecommendedLayers,
-    currentRecommendedLayerSignature,
+    controlPanelCatalogLayers,
+    controlPanelCatalogLayerSignature,
+    getCatalogLayerDateWindow,
     setAgentLayerOrder,
     setAgentRecommendedLayerData,
     setAgentRecommendedLayerVisibility,
@@ -2810,8 +3164,10 @@ function AgentPanel() {
   }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, analysisDisplayEnabled, fetchImpactData]);
 
   useEffect(() => {
-    const visibleCatalogLayers = confirmedRecommendedCatalogLayers.filter((layer) => agentRecommendedLayerVisibility[layer.id]);
-    if (!analysisDisplayEnabled || !visibleCatalogLayers.length || !effectiveAoi) {
+    const visibleCatalogLayers = controlPanelCatalogLayers.filter((layer) => (
+      agentRecommendedLayerVisibility[layer.id] && canRenderCatalogLayer(layer)
+    ));
+    if (!catalogRenderAoi || !visibleCatalogLayers.length) {
       return;
     }
 
@@ -2842,13 +3198,14 @@ function AgentPanel() {
       setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: true }));
 
       try {
+        const layerDateWindow = getCatalogLayerDateWindow(layer);
         const result = await renderRecommendedLayer({
           layer_id: layer.id,
-          recommended_layers: currentRecommendedLayers,
-          confirmed_aoi: effectiveAoi,
-          pre_date: currentPreDate,
-          peek_date: currentPeekDate,
-          after_date: currentAfterDate,
+          recommended_layers: controlPanelCatalogLayers,
+          confirmed_aoi: catalogRenderAoi,
+          pre_date: layerDateWindow.start_date || currentPreDate,
+          peek_date: currentPeekDate || layerDateWindow.start_date,
+          after_date: layerDateWindow.end_date || currentAfterDate,
         });
 
         if (cancelled || !result?.success) {
@@ -2911,13 +3268,13 @@ function AgentPanel() {
     };
   }, [
     agentRecommendedLayerVisibility,
-    analysisDisplayEnabled,
-    confirmedRecommendedCatalogLayers,
+    canRenderCatalogLayer,
+    catalogRenderAoi,
+    controlPanelCatalogLayers,
     currentAfterDate,
     currentPeekDate,
     currentPreDate,
-    currentRecommendedLayers,
-    effectiveAoi,
+    getCatalogLayerDateWindow,
     recommendedLayerContextKey,
     setAgentLayerLoading,
     setAgentRecommendedLayerData,

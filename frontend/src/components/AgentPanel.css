@@ -714,6 +714,178 @@
   line-height: 1;
 }
 
+.layer-manager-slider-control {
+  margin-top: 12px;
+  padding: 10px 2px 2px;
+}
+
+.layer-manager-slider-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.layer-manager-slider-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #52525b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.layer-manager-slider-field span {
+  flex: 0 0 auto;
+}
+
+.layer-manager-slider-field input,
+.layer-manager-slider-field select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #27272a;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.layer-manager-slider-field input {
+  padding: 0 7px;
+}
+
+.layer-manager-slider-field select {
+  padding: 0 24px 0 8px;
+}
+
+.layer-manager-slider-field input:disabled,
+.layer-manager-slider-field select:disabled {
+  background: #f4f4f5;
+  color: #a1a1aa;
+  cursor: not-allowed;
+}
+
+.layer-manager-rc-slider-wrap {
+  padding: 10px 8px 18px;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider {
+  height: 18px;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-rail {
+  height: 5px;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-track,
+.layer-manager-rc-slider-wrap .rc-slider-tracks {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563eb, #0ea5e9);
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-handle {
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border: 2px solid #ffffff;
+  border-radius: 6px;
+  background: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.32);
+  opacity: 1;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-handle:hover,
+.layer-manager-rc-slider-wrap .rc-slider-handle:focus,
+.layer-manager-rc-slider-wrap .rc-slider-handle-dragging {
+  border-color: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18) !important;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-dot {
+  bottom: -3px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-dot-active {
+  border-color: #2563eb;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-mark {
+  top: 15px;
+  color: #71717a;
+  font-size: 10px;
+}
+
+.layer-manager-rc-slider-wrap .rc-slider-mark-text {
+  white-space: nowrap;
+}
+
+.layer-manager-slider-help {
+  margin-top: 2px;
+  color: #71717a;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.layer-manager-time-control {
+  margin-top: 12px;
+  padding: 10px 0 2px;
+}
+
+.layer-manager-time-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.layer-manager-time-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: #52525b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.layer-manager-time-field input,
+.layer-manager-time-field select {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #27272a;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.layer-manager-time-field input {
+  padding: 0 7px;
+}
+
+.layer-manager-time-field select {
+  padding: 0 24px 0 8px;
+}
+
+.layer-manager-time-field input:disabled,
+.layer-manager-time-field select:disabled {
+  background: #f4f4f5;
+  color: #a1a1aa;
+  cursor: not-allowed;
+}
+
 .layer-manager-item-side {
   flex: 0 0 auto;
   display: flex;

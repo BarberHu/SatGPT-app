@@ -15,6 +15,10 @@ import {
   getCatalogMapLayerId,
   isCatalogMapLayerId,
 } from '../utils/catalogLayers';
+import {
+  ALL_AGENT_RASTER_LAYER_IDS,
+  ALL_AGENT_RASTER_LAYER_NAMES,
+} from '../config/agentRasterLayerConfig';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -25,14 +29,6 @@ const DEFAULT_ZOOM = 5;
 // Custom Mapbox style (same as original project)
 const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
 const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-const AGENT_RASTER_LAYER_NAMES = [
-  'singleInundationEvent',
-  'inundationHotspot',
-  'populationDensity',
-  'lclu',
-  'soilTexture',
-];
-const AGENT_RASTER_LAYER_IDS = AGENT_RASTER_LAYER_NAMES.map((layerName) => `agent-raster-${layerName}`);
 const AGENT_BASE_LAYER_IDS = [
   'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
   'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
@@ -40,7 +36,7 @@ const AGENT_BASE_LAYER_IDS = [
 const AGENT_ANALYSIS_LAYER_IDS = [
   'agent-flood-detection', 'agent-population', 'agent-urban', 'agent-landcover',
 ];
-const AGENT_OVERLAY_LAYER_IDS = [...AGENT_ANALYSIS_LAYER_IDS, ...AGENT_RASTER_LAYER_IDS];
+const AGENT_OVERLAY_LAYER_IDS = [...AGENT_ANALYSIS_LAYER_IDS, ...ALL_AGENT_RASTER_LAYER_IDS];
 const AGENT_SOURCE_IDS = [
   ...AGENT_BASE_LAYER_IDS,
   ...AGENT_OVERLAY_LAYER_IDS,
@@ -247,6 +243,7 @@ function MapContainer() {
     agentShowUrbanLayer,
     agentShowLandcoverLayer,
     agentRasterLayerVisibility,
+    agentRasterExpectedRequestKeys,
     agentImpactData,
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
@@ -270,6 +267,7 @@ function MapContainer() {
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
   const agentRasterTileUrlRef = useRef({});
   const agentRasterLayerVisibilityRef = useRef(agentRasterLayerVisibility);
+  const agentRasterExpectedRequestKeysRef = useRef(agentRasterExpectedRequestKeys);
   const selectedAoiSignatureRef = useRef(buildAoiSignature(selectedAOI));
   const appModeRef = useRef(appMode);
   const layerDataRef = useRef(layerData);
@@ -278,6 +276,7 @@ function MapContainer() {
   agentLayerOrderRef.current = agentLayerOrder;
   agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
   agentRasterLayerVisibilityRef.current = agentRasterLayerVisibility;
+  agentRasterExpectedRequestKeysRef.current = agentRasterExpectedRequestKeys;
   selectedAoiSignatureRef.current = buildAoiSignature(selectedAOI);
   appModeRef.current = appMode;
   layerDataRef.current = layerData;
@@ -605,22 +604,26 @@ function MapContainer() {
     const currentAppMode = appModeRef.current;
     const currentLayerData = layerDataRef.current || {};
     const currentRasterVisibility = agentRasterLayerVisibilityRef.current || {};
+    const currentExpectedRequestKeys = agentRasterExpectedRequestKeysRef.current || {};
     const currentLayerOrder = agentLayerOrderRef.current || [];
     const currentAoiSignature = selectedAoiSignatureRef.current;
 
     if (currentAppMode === 'agent') {
-      removeAskRasterSiblings(map, AGENT_RASTER_LAYER_NAMES);
+      removeAskRasterSiblings(map, ALL_AGENT_RASTER_LAYER_NAMES);
     }
 
     const rasterOrderIndex = new Map(
       currentLayerOrder.map((layerId, index) => [layerId, index])
     );
-    const orderedRasterNames = [...AGENT_RASTER_LAYER_NAMES].sort((left, right) => {
+    const orderedRasterNames = [...ALL_AGENT_RASTER_LAYER_NAMES].sort((left, right) => {
       const leftId = `agent-raster-${left}`;
       const rightId = `agent-raster-${right}`;
       const leftIndex = rasterOrderIndex.has(leftId) ? rasterOrderIndex.get(leftId) : Number.MAX_SAFE_INTEGER;
       const rightIndex = rasterOrderIndex.has(rightId) ? rasterOrderIndex.get(rightId) : Number.MAX_SAFE_INTEGER;
-      return leftIndex - rightIndex;
+      if (leftIndex !== rightIndex) {
+        return leftIndex - rightIndex;
+      }
+      return ALL_AGENT_RASTER_LAYER_NAMES.indexOf(left) - ALL_AGENT_RASTER_LAYER_NAMES.indexOf(right);
     });
 
     orderedRasterNames.forEach((layerName) => {
@@ -630,7 +633,15 @@ function MapContainer() {
         descriptor?.aoiSignature
         && descriptor.aoiSignature === currentAoiSignature
       );
-      const nextTileUrl = currentRasterVisibility?.[layerName] && descriptorMatchesCurrentAoi && descriptor?.tileUrl
+      const expectedRequestKey = currentExpectedRequestKeys?.[layerName] || null;
+      const descriptorMatchesExpectedRequest = Boolean(
+        !expectedRequestKey
+        || descriptor?.requestKey === expectedRequestKey
+      );
+      const nextTileUrl = currentRasterVisibility?.[layerName]
+        && descriptorMatchesCurrentAoi
+        && descriptorMatchesExpectedRequest
+        && descriptor?.tileUrl
         ? descriptor.tileUrl
         : null;
       const previousTileUrl = agentRasterTileUrlRef.current?.[layerName] || null;

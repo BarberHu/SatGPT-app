@@ -11,6 +11,10 @@ import {
   saveBusinessLayerRecords,
 } from '../utils/businessLayerStore';
 import { syncBusinessLayers } from '../services/agentApi';
+import {
+  buildDefaultAgentLayerOrder,
+  buildDefaultAgentRasterLayerVisibility,
+} from '../config/agentRasterLayerConfig';
 
 const AppContext = createContext();
 
@@ -50,7 +54,7 @@ const defaultFloodAgentState = {
 const defaultAgentLayerVisibility = {
   agentSelectedPeriod: 'peek_date',
   agentSelectedType: 'sentinel2',
-  agentShowBaseImagery: true,
+  agentShowBaseImagery: false,
   agentShowFloodDetection: false,
   agentShowPopulationLayer: false,
   agentShowUrbanLayer: false,
@@ -58,31 +62,12 @@ const defaultAgentLayerVisibility = {
 };
 
 const defaultAgentBaseImageryVisibility = {
-  sentinel2: true,
+  sentinel2: false,
   sentinel1: false,
 };
 
-const defaultAgentRasterLayerVisibility = {
-  singleInundationEvent: false,
-  inundationHotspot: false,
-  lclu: false,
-  populationDensity: false,
-  soilTexture: false,
-};
-
-const defaultAgentLayerOrder = [
-  'agent-s2-pre',
-  'agent-s1-pre',
-  'agent-s2-peek',
-  'agent-s1-peek',
-  'agent-s2-after',
-  'agent-s1-after',
-  'agent-raster-singleInundationEvent',
-  'agent-raster-inundationHotspot',
-  'agent-raster-populationDensity',
-  'agent-raster-lclu',
-  'agent-raster-soilTexture',
-];
+const defaultAgentRasterLayerVisibility = buildDefaultAgentRasterLayerVisibility();
+const defaultAgentLayerOrder = buildDefaultAgentLayerOrder();
 
 const resolveCurrentBusinessScopeAoi = (records = [], selectedAoi = null) => {
   const activeRecord = (records || []).find((record) => record?.is_active) || null;
@@ -116,6 +101,7 @@ export const AppProvider = ({ children }) => {
   // 应用主模式：`ask` 表示传统问答流，`agent` 表示 Flood Agent 工作流。
   const [appMode, setAppMode] = useState('ask');
   const [agentSidebarCollapsed, setAgentSidebarCollapsed] = useState(false);
+  const [agentModule, setAgentModule] = useState('flood');
   
   // ChatBox 独立维护的聊天模式，用于兼容 `appMode` 切换中的过渡状态。
   const [chatMode, setChatMode] = useState('ask');
@@ -169,6 +155,13 @@ export const AppProvider = ({ children }) => {
   const [layerData, setLayerData] = useState({
     singleInundationEvent: null,
     inundationHotspot: null,
+    wildfireRisk: null,
+    landslideRisk: null,
+    activeFireDetections: null,
+    burnHistory: null,
+    slopeSteepness: null,
+    populationExposure: null,
+    fuelLandCover: null,
     water: null,
     flood: null,
     lclu: null,
@@ -198,13 +191,14 @@ export const AppProvider = ({ children }) => {
   // ========== Agent Mode Control States ==========
   const [agentSelectedPeriod, setAgentSelectedPeriod] = useState('peek_date'); // 'pre_date' | 'peek_date' | 'after_date'
   const [agentSelectedType, setAgentSelectedType] = useState('sentinel2'); // 'sentinel2' | 'sentinel1'
-  const [agentShowBaseImagery, setAgentShowBaseImagery] = useState(true);
+  const [agentShowBaseImagery, setAgentShowBaseImagery] = useState(false);
   const [agentBaseImageryVisibility, setAgentBaseImageryVisibility] = useState(defaultAgentBaseImageryVisibility);
   const [agentShowFloodDetection, setAgentShowFloodDetection] = useState(true);
   const [agentShowPopulationLayer, setAgentShowPopulationLayer] = useState(false);
   const [agentShowUrbanLayer, setAgentShowUrbanLayer] = useState(false);
   const [agentShowLandcoverLayer, setAgentShowLandcoverLayer] = useState(false);
   const [agentRasterLayerVisibility, setAgentRasterLayerVisibility] = useState(defaultAgentRasterLayerVisibility);
+  const [agentRasterExpectedRequestKeys, setAgentRasterExpectedRequestKeys] = useState({});
   const [agentRasterLoading, setAgentRasterLoading] = useState(false);
   const [agentImpactData, setAgentImpactData] = useState(null);
   const [agentImpactLoading, setAgentImpactLoading] = useState(false);
@@ -230,10 +224,11 @@ export const AppProvider = ({ children }) => {
     setAgentImagery(null);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
+    setAgentRasterExpectedRequestKeys({});
     setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentRasterLoading(false);
-    setAgentLayerOrder(defaultAgentLayerOrder);
+    setAgentLayerOrder(buildDefaultAgentLayerOrder());
   }, []);
 
   const clearAgentVisualState = useCallback(() => {
@@ -244,10 +239,11 @@ export const AppProvider = ({ children }) => {
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
+    setAgentRasterExpectedRequestKeys({});
     setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentRasterLoading(false);
-    setAgentLayerOrder(defaultAgentLayerOrder);
+    setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
     setAgentTileError(null);
     setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
@@ -468,9 +464,10 @@ export const AppProvider = ({ children }) => {
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
+    setAgentRasterExpectedRequestKeys({});
     setAgentRasterLoading(false);
-    setAgentLayerOrder(defaultAgentLayerOrder);
+    setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
     setAgentTileError(null);
     setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
@@ -500,6 +497,13 @@ export const AppProvider = ({ children }) => {
     setLayerData({
       singleInundationEvent: null,
       inundationHotspot: null,
+      wildfireRisk: null,
+      landslideRisk: null,
+      activeFireDetections: null,
+      burnHistory: null,
+      slopeSteepness: null,
+      populationExposure: null,
+      fuelLandCover: null,
       water: null,
       flood: null,
       lclu: null,
@@ -729,6 +733,18 @@ export const AppProvider = ({ children }) => {
         tileUrl: data.eeMapURLInundationHotspot,
         meta: data.inundationHotspotMeta || null,
     });
+    setLayer('wildfireRisk', 'eeMapURLWildfireRisk', {
+        mapId: data.eeMapIdWildfireRisk,
+        token: data.eeTokenWildfireRisk,
+        tileUrl: data.eeMapURLWildfireRisk,
+        meta: data.wildfireRiskMeta || null,
+    });
+    setLayer('landslideRisk', 'eeMapURLLandslideRisk', {
+        mapId: data.eeMapIdLandslideRisk,
+        token: data.eeTokenLandslideRisk,
+        tileUrl: data.eeMapURLLandslideRisk,
+        meta: data.landslideRiskMeta || null,
+    });
     setLayer('water', 'eeMapURLWater', {
         mapId: data.eeMapIdWater, 
         token: data.eeTokenWater, 
@@ -753,6 +769,36 @@ export const AppProvider = ({ children }) => {
         mapId: data.eeMapIdSoilTexture, 
         token: data.eeTokenSoilTexture, 
         tileUrl: data.eeMapURLSoilTexture 
+    });
+    setLayer('activeFireDetections', 'eeMapURLActiveFireDetections', {
+        mapId: data.eeMapIdActiveFireDetections,
+        token: data.eeTokenActiveFireDetections,
+        tileUrl: data.eeMapURLActiveFireDetections,
+        meta: data.activeFireDetectionsMeta || null,
+    });
+    setLayer('burnHistory', 'eeMapURLBurnHistory', {
+        mapId: data.eeMapIdBurnHistory,
+        token: data.eeTokenBurnHistory,
+        tileUrl: data.eeMapURLBurnHistory,
+        meta: data.burnHistoryMeta || null,
+    });
+    setLayer('slopeSteepness', 'eeMapURLSlopeSteepness', {
+        mapId: data.eeMapIdSlopeSteepness,
+        token: data.eeTokenSlopeSteepness,
+        tileUrl: data.eeMapURLSlopeSteepness,
+        meta: data.slopeSteepnessMeta || null,
+    });
+    setLayer('populationExposure', 'eeMapURLPopulationExposure', {
+        mapId: data.eeMapIdPopulationExposure,
+        token: data.eeTokenPopulationExposure,
+        tileUrl: data.eeMapURLPopulationExposure,
+        meta: data.populationExposureMeta || null,
+    });
+    setLayer('fuelLandCover', 'eeMapURLFuelLandCover', {
+        mapId: data.eeMapIdFuelLandCover,
+        token: data.eeTokenFuelLandCover,
+        tileUrl: data.eeMapURLFuelLandCover,
+        meta: data.fuelLandCoverMeta || null,
     });
     setLayer('healthCareAccess', 'eeMapURLHealthCareAccess', {
         mapId: data.eeMapIdHealthCareAccess, 
@@ -933,6 +979,8 @@ export const AppProvider = ({ children }) => {
     setAppMode,
     agentSidebarCollapsed,
     setAgentSidebarCollapsed,
+    agentModule,
+    setAgentModule,
     chatMode,
     setChatMode,
     
@@ -976,6 +1024,8 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerVisibility,
     agentRasterLayerVisibility,
     setAgentRasterLayerVisibility,
+    agentRasterExpectedRequestKeys,
+    setAgentRasterExpectedRequestKeys,
     agentRasterLoading,
     setAgentRasterLoading,
     agentLayerOrder,

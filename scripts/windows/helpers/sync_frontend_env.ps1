@@ -35,6 +35,9 @@ function Get-EnvValue {
 
 $frontendHost = Get-EnvValue -Names @("FRONTEND_HOST") -Default "0.0.0.0"
 $frontendPort = Get-EnvValue -Names @("FRONTEND_PORT") -Default "3000"
+$publicHost = Get-EnvValue -Names @("SATGPT_PUBLIC_HOST") -Default "localhost"
+$agentPort = Get-EnvValue -Names @("AGENT_PORT") -Default "8000"
+$runtimePort = Get-EnvValue -Names @("RUNTIME_PORT") -Default "5000"
 
 $defaultCopilotkitUrl = "/copilotkit"
 
@@ -43,6 +46,9 @@ $content = @(
     "# Edit the root .env, then rerun scripts\windows\start_windows.bat",
     "HOST=${frontendHost}",
     "PORT=${frontendPort}",
+    "SATGPT_PUBLIC_HOST=${publicHost}",
+    "AGENT_PORT=${agentPort}",
+    "RUNTIME_PORT=${runtimePort}",
     "GENERATE_SOURCEMAP=$(Get-EnvValue -Names @('GENERATE_SOURCEMAP') -Default 'false')",
     "REACT_APP_MAPBOX_ACCESS_KEY=$(Get-EnvValue -Names @('REACT_APP_MAPBOX_ACCESS_KEY'))",
     "REACT_APP_API_URL=$(Get-EnvValue -Names @('REACT_APP_API_URL'))",
