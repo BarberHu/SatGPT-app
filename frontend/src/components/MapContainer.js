@@ -14,11 +14,17 @@ import {
   buildCatalogMapLayerDefinition,
   getCatalogMapLayerId,
   isCatalogMapLayerId,
+  shouldReuseCatalogMapLayer,
 } from '../utils/catalogLayers';
 import {
   ALL_AGENT_RASTER_LAYER_IDS,
   ALL_AGENT_RASTER_LAYER_NAMES,
 } from '../config/agentRasterLayerConfig';
+import {
+  buildTileEventKey,
+  calculateTileLoadPercent,
+  TILE_PROGRESS_START,
+} from '../utils/layerLoadProgress';
 
 // Mapbox access token - should be set via environment variable
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
@@ -32,6 +38,7 @@ const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTex
 const AGENT_BASE_LAYER_IDS = [
   'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
   'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
+  'agent-s2-custom_range', 'agent-s1-custom_range',
 ];
 const AGENT_ANALYSIS_LAYER_IDS = [
   'agent-flood-detection', 'agent-population', 'agent-urban', 'agent-landcover',
@@ -203,7 +210,7 @@ function MapContainer() {
   const gridClickButtonRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
   const lastConfirmationFocusRef = useRef(null);
-  const gridClickEnabledRef = useRef(true);
+  const gridClickEnabledRef = useRef(false);
   const programmaticDrawMutationRef = useRef(false);
   const isAoiEditingRef = useRef(false);
   const editableGeojsonRef = useRef(null);
@@ -249,6 +256,7 @@ function MapContainer() {
     agentRecommendedLayerVisibility,
     agentLayerOrder,
     setAgentLayerLoading,
+    setAgentLayerProgress,
     setAgentTileError,
     businessLayers,
     agentVisualResetVersion,
@@ -265,6 +273,8 @@ function MapContainer() {
   const mapInitialized = useRef(false);
   const agentLayerOrderRef = useRef(agentLayerOrder);
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
+  const agentRecommendedTileSignatureRef = useRef({});
+  const agentRecommendedTileLifecycleRef = useRef({});
   const agentRasterTileUrlRef = useRef({});
   const agentRasterLayerVisibilityRef = useRef(agentRasterLayerVisibility);
   const agentRasterExpectedRequestKeysRef = useRef(agentRasterExpectedRequestKeys);
@@ -272,6 +282,7 @@ function MapContainer() {
   const appModeRef = useRef(appMode);
   const layerDataRef = useRef(layerData);
   const syncAgentRasterLayersRef = useRef(null);
+  const agentRasterTileLifecycleRef = useRef({});
 
   agentLayerOrderRef.current = agentLayerOrder;
   agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
@@ -311,9 +322,180 @@ function MapContainer() {
     }
   }, []);
 
+  // Tracks the real client-side lifecycle of one Mapbox raster source. Earth Engine
+  // does not expose server computation percentages for map tiles, so this progress
+  // is intentionally scoped to requests needed by the current viewport.
+  const createLayerTileLifecycle = useCallback((map, layerKey, sourceId = layerKey) => {
+    const requestedTiles = new Set();
+    const settledTiles = new Set();
+    const failedTiles = new Set();
+    let lastPercent = TILE_PROGRESS_START;
+    let disposed = false;
+    let waveActive = false;
+    let timeoutId = null;
+    let clearProgressTimeoutId = null;
+
+    const clearProgress = () => {
+      setAgentLayerProgress((previous) => {
+        if (!previous?.[layerKey]) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[layerKey];
+        return next;
+      });
+    };
+
+    const publish = (patch = {}) => {
+      if (disposed) {
+        return;
+      }
+
+      const requestedCount = requestedTiles.size;
+      const settledCount = settledTiles.size;
+      lastPercent = patch.percent ?? calculateTileLoadPercent({
+        requestedTiles: requestedCount,
+        settledTiles: settledCount,
+        previousPercent: lastPercent,
+      });
+
+      setAgentLayerProgress((previous) => ({
+        ...previous,
+        [layerKey]: {
+          sourceId,
+          status: 'loading',
+          label: requestedCount ? 'Loading map tiles' : 'Preparing map layer',
+          percent: lastPercent,
+          requestedTiles: requestedCount,
+          settledTiles: settledCount,
+          failedTiles: failedTiles.size,
+          updatedAt: Date.now(),
+          ...patch,
+        },
+      }));
+    };
+
+    const beginWave = () => {
+      if (disposed || waveActive) {
+        return;
+      }
+
+      waveActive = true;
+      requestedTiles.clear();
+      settledTiles.clear();
+      failedTiles.clear();
+      lastPercent = TILE_PROGRESS_START;
+      window.clearTimeout(timeoutId);
+      window.clearTimeout(clearProgressTimeoutId);
+      setAgentLayerLoading((previous) => ({ ...previous, [layerKey]: true }));
+      publish();
+      timeoutId = window.setTimeout(() => finish('slow'), 15000);
+    };
+
+    const detach = () => {
+      map.off('sourcedataloading', handleSourceLoading);
+      map.off('sourcedata', handleSourceData);
+      map.off('error', handleSourceError);
+      map.off('idle', handleIdle);
+    };
+
+    const finish = (status = 'complete') => {
+      if (disposed || !waveActive) {
+        return;
+      }
+
+      waveActive = false;
+      window.clearTimeout(timeoutId);
+      setAgentLayerLoading((previous) => ({ ...previous, [layerKey]: false }));
+
+      const timedOut = status === 'slow';
+      publish({
+        status,
+        label: timedOut ? 'Tiles are still loading' : 'Map tiles loaded',
+        percent: timedOut
+          ? lastPercent
+          : calculateTileLoadPercent({ complete: true }),
+      });
+
+      clearProgressTimeoutId = window.setTimeout(clearProgress, timedOut ? 4000 : 900);
+    };
+
+    function handleSourceLoading(event) {
+      if (event?.sourceId !== sourceId) {
+        return;
+      }
+
+      beginWave();
+      const tileKey = buildTileEventKey(event);
+      if (tileKey) {
+        requestedTiles.add(tileKey);
+      }
+      publish();
+    }
+
+    function handleSourceData(event) {
+      if (event?.sourceId !== sourceId || !waveActive) {
+        return;
+      }
+
+      const tileKey = buildTileEventKey(event);
+      if (tileKey) {
+        requestedTiles.add(tileKey);
+        settledTiles.add(tileKey);
+      }
+
+      publish();
+      if (event?.isSourceLoaded === true && requestedTiles.size > 0) {
+        finish('complete');
+      }
+    }
+
+    function handleSourceError(event) {
+      if (event?.sourceId !== sourceId || !waveActive) {
+        return;
+      }
+
+      const tileKey = buildTileEventKey(event);
+      if (tileKey) {
+        requestedTiles.add(tileKey);
+        settledTiles.add(tileKey);
+        failedTiles.add(tileKey);
+      }
+      publish({ label: 'Loading map tiles' });
+    }
+
+    function handleIdle() {
+      finish('complete');
+    }
+
+    map.on('sourcedataloading', handleSourceLoading);
+    map.on('sourcedata', handleSourceData);
+    map.on('error', handleSourceError);
+    map.on('idle', handleIdle);
+    beginWave();
+
+    return {
+      cleanup: () => {
+        disposed = true;
+        waveActive = false;
+        detach();
+        window.clearTimeout(timeoutId);
+        window.clearTimeout(clearProgressTimeoutId);
+        setAgentLayerLoading((previous) => ({ ...previous, [layerKey]: false }));
+        clearProgress();
+      },
+    };
+  }, [setAgentLayerLoading, setAgentLayerProgress]);
+
   useEffect(() => {
-    gridClickEnabledRef.current = gridClickEnabled;
-  }, [gridClickEnabled]);
+    gridClickEnabledRef.current = gridClickEnabled && appMode !== 'agent';
+  }, [appMode, gridClickEnabled]);
+
+  useEffect(() => {
+    if (appMode === 'agent' && gridClickEnabled) {
+      setGridClickEnabled(false);
+    }
+  }, [appMode, gridClickEnabled, setGridClickEnabled]);
 
   useEffect(() => () => {
     clearTransientWarningTimer();
@@ -325,14 +507,17 @@ function MapContainer() {
       return;
     }
 
-    const disabled = isAoiEditing || isPolygonDrawMode;
+    const disabled = appMode === 'agent' || isAoiEditing || isPolygonDrawMode;
+    button.disabled = disabled;
     button.classList.toggle('active', gridClickEnabled && !disabled);
     button.classList.toggle('disabled', disabled);
-    button.setAttribute('aria-pressed', gridClickEnabled ? 'true' : 'false');
-    button.title = disabled
+    button.setAttribute('aria-pressed', gridClickEnabled && !disabled ? 'true' : 'false');
+    button.title = appMode === 'agent'
+      ? 'Grid selection is available only in Ask mode.'
+      : disabled
       ? 'Drawing is in progress, so map click loading is temporarily disabled.'
       : (gridClickEnabled ? 'Click map grids to load data.' : 'Map grid click loading is off.');
-  }, [gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
+  }, [appMode, gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
 
 
   useEffect(() => {
@@ -344,13 +529,13 @@ function MapContainer() {
     map.setLayoutProperty(
       'grid_cell-layer',
       'visibility',
-      gridClickEnabled ? 'visible' : 'none'
+      gridClickEnabled && appMode !== 'agent' ? 'visible' : 'none'
     );
 
-    if (!gridClickEnabled) {
+    if (!gridClickEnabled || appMode === 'agent') {
       map.getCanvas().style.cursor = '';
     }
-  }, [gridClickEnabled]);
+  }, [appMode, gridClickEnabled]);
 
   useEffect(() => {
     isAoiEditingRef.current = isAoiEditing;
@@ -628,6 +813,13 @@ function MapContainer() {
 
     orderedRasterNames.forEach((layerName) => {
       const mapLayerId = `agent-raster-${layerName}`;
+      const stopTileLifecycle = () => {
+        const cleanup = agentRasterTileLifecycleRef.current?.[layerName];
+        if (cleanup) {
+          cleanup();
+          delete agentRasterTileLifecycleRef.current[layerName];
+        }
+      };
       const descriptor = currentAppMode === 'agent' ? currentLayerData?.[layerName] : null;
       const descriptorMatchesCurrentAoi = Boolean(
         descriptor?.aoiSignature
@@ -647,6 +839,7 @@ function MapContainer() {
       const previousTileUrl = agentRasterTileUrlRef.current?.[layerName] || null;
 
       if (!nextTileUrl) {
+        stopTileLifecycle();
         if (map.getLayer(mapLayerId)) {
           map.removeLayer(mapLayerId);
         }
@@ -661,6 +854,7 @@ function MapContainer() {
         return;
       }
 
+      stopTileLifecycle();
       if (map.getLayer(mapLayerId)) {
         map.removeLayer(mapLayerId);
       }
@@ -688,6 +882,11 @@ function MapContainer() {
       } else {
         map.addLayer(rasterLayerDefinition);
       }
+      agentRasterTileLifecycleRef.current[layerName] = createLayerTileLifecycle(
+        map,
+        `raster-${layerName}`,
+        mapLayerId
+      ).cleanup;
       agentRasterTileUrlRef.current[layerName] = nextTileUrl;
     });
 
@@ -695,6 +894,7 @@ function MapContainer() {
     promoteDrawLayers(map);
     return true;
   }, [
+    createLayerTileLifecycle,
     getInsertBeforeId,
     promoteDrawLayers,
     reconcileLayerOrder,
@@ -704,6 +904,13 @@ function MapContainer() {
   useEffect(() => {
     syncAgentRasterLayersRef.current = syncAgentRasterLayers;
   }, [syncAgentRasterLayers]);
+
+  useEffect(() => () => {
+    Object.values(agentRasterTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
+    agentRasterTileLifecycleRef.current = {};
+    Object.values(agentRecommendedTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
+    agentRecommendedTileLifecycleRef.current = {};
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -747,7 +954,7 @@ function MapContainer() {
 
     // Grid cell click handler
     map.on('click', 'grid_cell-layer', (e) => {
-      if (!gridClickEnabledRef.current || isAoiEditingRef.current) return;
+      if (appModeRef.current === 'agent' || !gridClickEnabledRef.current || isAoiEditingRef.current) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['grid_cell-layer'] });
       if (features.length > 0 && features[0].geometry) {
         const cords = features[0].geometry.coordinates[0];
@@ -768,7 +975,7 @@ function MapContainer() {
 
     // Change cursor on hover
     map.on('mouseenter', 'grid_cell-layer', () => {
-      if (!gridClickEnabledRef.current || isAoiEditingRef.current) return;
+      if (appModeRef.current === 'agent' || !gridClickEnabledRef.current || isAoiEditingRef.current) return;
       map.getCanvas().style.cursor = 'pointer';
     });
 
@@ -824,17 +1031,24 @@ function MapContainer() {
             event.preventDefault();
             event.stopPropagation();
 
-            if (isAoiEditingRef.current || drawRef.current?.getMode?.() === 'draw_polygon') {
+            if (
+              appModeRef.current === 'agent'
+              || isAoiEditingRef.current
+              || drawRef.current?.getMode?.() === 'draw_polygon'
+            ) {
               return;
             }
 
             setGridClickEnabled((previous) => !previous);
           };
 
-          const disabled = isAoiEditingRef.current || drawRef.current?.getMode?.() === 'draw_polygon';
+          const disabled = appModeRef.current === 'agent'
+            || isAoiEditingRef.current
+            || drawRef.current?.getMode?.() === 'draw_polygon';
+          gridButton.disabled = disabled;
           gridButton.classList.toggle('active', gridClickEnabledRef.current && !disabled);
           gridButton.classList.toggle('disabled', disabled);
-          gridButton.setAttribute('aria-pressed', gridClickEnabledRef.current ? 'true' : 'false');
+          gridButton.setAttribute('aria-pressed', gridClickEnabledRef.current && !disabled ? 'true' : 'false');
 
           container.appendChild(gridButton);
           gridClickButtonRef.current = gridButton;
@@ -1467,31 +1681,6 @@ function MapContainer() {
     reconcileLayerOrder(map);
   }, [isBuildingsEnabled, reconcileLayerOrder]);
 
-  // ========== Helper: per-layer tile loading lifecycle ==========
-  // Creates standard idle/timeout handlers for a single layer, managing its own loading key.
-  const createLayerTileLifecycle = useCallback((map, layerKey) => {
-    setAgentLayerLoading(prev => ({ ...prev, [layerKey]: true }));
-
-    let resolved = false;
-    const finish = () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timeout);
-      setAgentLayerLoading(prev => ({ ...prev, [layerKey]: false }));
-    };
-    map.once('idle', finish);
-    const timeout = setTimeout(finish, 15000);
-
-    return {
-      cleanup: () => {
-        resolved = true;
-        setAgentLayerLoading(prev => ({ ...prev, [layerKey]: false }));
-        map.off('idle', finish);
-        clearTimeout(timeout);
-      },
-    };
-  }, [setAgentLayerLoading]);
-
   // ========== Effect A: Base Sentinel Imagery ==========
   useEffect(() => {
     const map = mapRef.current;
@@ -1500,6 +1689,7 @@ function MapContainer() {
     const sentinelIds = [
       'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
       'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
+      'agent-s2-custom_range', 'agent-s1-custom_range',
     ];
     sentinelIds.forEach(id => {
       if (map.getLayer(id)) map.removeLayer(id);
@@ -1519,8 +1709,11 @@ function MapContainer() {
 
     if (!visibleBaseTypes.length) return;
 
+    const tileLifecycleCleanups = [];
+    const activeSourceIds = new Set();
     visibleBaseTypes.forEach((typeKey) => {
       const sourceId = `agent-${typeKey === 'sentinel2' ? 's2' : 's1'}-${periodKey.replace('_date', '')}`;
+      activeSourceIds.add(sourceId);
       map.addSource(sourceId, {
         type: 'raster',
         tiles: [periodData[typeKey].tile_url],
@@ -1538,6 +1731,11 @@ function MapContainer() {
       } else {
         map.addLayer(imageryLayerDefinition);
       }
+      tileLifecycleCleanups.push(createLayerTileLifecycle(
+        map,
+        `base-imagery-${typeKey}`,
+        sourceId
+      ).cleanup);
     });
     reconcileLayerOrder(map);
 
@@ -1545,7 +1743,7 @@ function MapContainer() {
     let tileErrorCount = 0;
     const failedSourceIds = new Set();
     const onTileError = (e) => {
-      if (isTileRequestError(e) || e?.type === 'error') {
+      if (activeSourceIds.has(e?.sourceId) && (isTileRequestError(e) || e?.type === 'error')) {
         tileErrorCount++;
         const sourceId = e?.sourceId;
         console.warn('Tile load error:', sourceId || 'unknown', e?.error?.message || '');
@@ -1557,22 +1755,11 @@ function MapContainer() {
     };
     map.on('error', onTileError);
 
-    const loadingUpdates = visibleBaseTypes.reduce((updates, typeKey) => ({
-      ...updates,
-      [`base-imagery-${typeKey}`]: true,
-    }), { 'base-imagery': true });
-    setAgentLayerLoading(prev => ({ ...prev, ...loadingUpdates }));
-
     let resolved = false;
     const finish = (isTimeout) => {
       if (resolved) return;
       resolved = true;
-      clearTimeout(timeout);
-      const nextLoadingUpdates = visibleBaseTypes.reduce((updates, typeKey) => ({
-        ...updates,
-        [`base-imagery-${typeKey}`]: false,
-      }), { 'base-imagery': false });
-      setAgentLayerLoading(prev => ({ ...prev, ...nextLoadingUpdates }));
+      window.clearTimeout(timeout);
       if (tileErrorCount > 0) {
         console.warn(`${tileErrorCount} tile(s) failed to load.`);
         setAgentTileError({
@@ -1586,21 +1773,18 @@ function MapContainer() {
         setAgentTileError(null);
       }
     };
-    map.once('idle', () => finish(false));
-    const timeout = setTimeout(() => finish(true), 15000);
+    const onIdle = () => finish(false);
+    map.once('idle', onIdle);
+    const timeout = window.setTimeout(() => finish(true), 15000);
 
     return () => {
       resolved = true;
-      const nextLoadingUpdates = visibleBaseTypes.reduce((updates, typeKey) => ({
-        ...updates,
-        [`base-imagery-${typeKey}`]: false,
-      }), { 'base-imagery': false });
-      setAgentLayerLoading(prev => ({ ...prev, ...nextLoadingUpdates }));
+      tileLifecycleCleanups.forEach((cleanup) => cleanup());
       map.off('error', onTileError);
-      map.off('idle', finish);
-      clearTimeout(timeout);
+      map.off('idle', onIdle);
+      window.clearTimeout(timeout);
     };
-  }, [agentBaseImageryVisibility, agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, getInsertBeforeId, reconcileLayerOrder, removeLayerAndSource, setAgentLayerLoading, setAgentTileError]);
+  }, [agentBaseImageryVisibility, agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder, removeLayerAndSource, setAgentTileError]);
 
   // ========== Effect B: Flood Detection Overlay ==========
   useEffect(() => {
@@ -1631,7 +1815,7 @@ function MapContainer() {
     }
     reconcileLayerOrder(map);
 
-    const lifecycle = createLayerTileLifecycle(map, 'flood-detection');
+    const lifecycle = createLayerTileLifecycle(map, 'flood-detection', 'agent-flood-detection');
     return lifecycle.cleanup;
   }, [agentImagery, appMode, agentShowFloodDetection, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
@@ -1664,7 +1848,7 @@ function MapContainer() {
     }
     reconcileLayerOrder(map);
 
-    const lifecycle = createLayerTileLifecycle(map, 'population');
+    const lifecycle = createLayerTileLifecycle(map, 'population', 'agent-population');
     return lifecycle.cleanup;
   }, [agentImpactData, appMode, agentShowPopulationLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
@@ -1697,7 +1881,7 @@ function MapContainer() {
     }
     reconcileLayerOrder(map);
 
-    const lifecycle = createLayerTileLifecycle(map, 'urban');
+    const lifecycle = createLayerTileLifecycle(map, 'urban', 'agent-urban');
     return lifecycle.cleanup;
   }, [agentImpactData, appMode, agentShowUrbanLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
@@ -1730,7 +1914,7 @@ function MapContainer() {
     }
     reconcileLayerOrder(map);
 
-    const lifecycle = createLayerTileLifecycle(map, 'landcover');
+    const lifecycle = createLayerTileLifecycle(map, 'landcover', 'agent-landcover');
     return lifecycle.cleanup;
   }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
 
@@ -1774,24 +1958,36 @@ function MapContainer() {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
 
+    const stopCatalogTileLifecycle = (mapLayerId) => {
+      const cleanup = agentRecommendedTileLifecycleRef.current?.[mapLayerId];
+      if (cleanup) {
+        cleanup();
+        delete agentRecommendedTileLifecycleRef.current[mapLayerId];
+      }
+    };
+
+    const removeCatalogLayer = (mapLayerId) => {
+      stopCatalogTileLifecycle(mapLayerId);
+      if (map.getLayer(mapLayerId)) {
+        map.removeLayer(mapLayerId);
+      }
+      if (map.getSource(mapLayerId)) {
+        map.removeSource(mapLayerId);
+      }
+      delete agentRecommendedTileSignatureRef.current[mapLayerId];
+    };
+
     if (appMode !== 'agent') {
       (map.getStyle()?.layers || [])
         .map((layer) => layer.id)
         .filter((id) => isCatalogMapLayerId(id))
-        .forEach((id) => {
-          if (map.getLayer(id)) {
-            map.removeLayer(id);
-          }
-          if (map.getSource(id)) {
-            map.removeSource(id);
-          }
-        });
+        .forEach(removeCatalogLayer);
+      Object.keys(agentRecommendedTileLifecycleRef.current || {}).forEach(stopCatalogTileLifecycle);
       return;
     }
 
     const layerEntries = Object.entries(agentRecommendedLayerData || {});
     const activeLayerIds = new Set();
-    const tileLifecycleCleanups = [];
 
     layerEntries.forEach(([layerId, descriptor]) => {
       const mapDefinition = buildCatalogMapLayerDefinition(layerId, descriptor);
@@ -1803,16 +1999,23 @@ function MapContainer() {
 
       activeLayerIds.add(mapLayerId);
 
-      if (map.getLayer(mapLayerId)) {
-        map.removeLayer(mapLayerId);
-      }
-      if (map.getSource(mapLayerId)) {
-        map.removeSource(mapLayerId);
-      }
-
       if (!descriptor?.tile_url || !agentRecommendedLayerVisibility?.[layerId]) {
+        removeCatalogLayer(mapLayerId);
         return;
       }
+
+      const nextTileSignature = `${descriptor.context_key || ''}|${descriptor.tile_url}`;
+      const previousTileSignature = agentRecommendedTileSignatureRef.current?.[mapLayerId] || null;
+      if (shouldReuseCatalogMapLayer({
+        previousSignature: previousTileSignature,
+        nextSignature: nextTileSignature,
+        hasLayer: Boolean(map.getLayer(mapLayerId)),
+        hasSource: Boolean(map.getSource(mapLayerId)),
+      })) {
+        return;
+      }
+
+      removeCatalogLayer(mapLayerId);
 
       map.addSource(mapLayerId, mapDefinition.source);
       const catalogLayerDefinition = {
@@ -1825,26 +2028,24 @@ function MapContainer() {
       } else {
         map.addLayer(catalogLayerDefinition);
       }
-      tileLifecycleCleanups.push(createLayerTileLifecycle(map, layerId).cleanup);
+      agentRecommendedTileSignatureRef.current[mapLayerId] = nextTileSignature;
+      agentRecommendedTileLifecycleRef.current[mapLayerId] = createLayerTileLifecycle(
+        map,
+        layerId,
+        mapLayerId
+      ).cleanup;
     });
 
     (map.getStyle()?.layers || [])
       .map((layer) => layer.id)
       .filter((id) => isCatalogMapLayerId(id) && !activeLayerIds.has(id))
-      .forEach((id) => {
-        if (map.getLayer(id)) {
-          map.removeLayer(id);
-        }
-        if (map.getSource(id)) {
-          map.removeSource(id);
-        }
-      });
+      .forEach(removeCatalogLayer);
+
+    Object.keys(agentRecommendedTileLifecycleRef.current || {})
+      .filter((mapLayerId) => !activeLayerIds.has(mapLayerId))
+      .forEach(stopCatalogTileLifecycle);
 
     reconcileLayerOrder(map);
-
-    return () => {
-      tileLifecycleCleanups.forEach((cleanup) => cleanup());
-    };
   }, [
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,

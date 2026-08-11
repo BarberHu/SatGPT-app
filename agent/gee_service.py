@@ -336,6 +336,109 @@ class GEEService:
             )
         
         return self._get_imagery_for_bounds(pre_date, peek_date, after_date, bounds, center)
+
+    def _get_imagery_window_for_region(
+        self,
+        start_date: str,
+        end_date: str,
+        region: ee.Geometry,
+        bounds: Dict[str, float],
+        center: Tuple[float, float],
+    ) -> Dict[str, Any]:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        if start > end:
+            raise ValueError("Imagery window start date must not be after the end date.")
+
+        return {
+            "center": center,
+            "bounds": bounds,
+            "imagery_window": {
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            "custom_range": {
+                "sentinel2": self._get_sentinel2_by_region(
+                    start_date,
+                    region,
+                    window_end_date=end_date,
+                ),
+                "sentinel1": self._get_sentinel1_by_region(
+                    start_date,
+                    region,
+                    window_end_date=end_date,
+                ),
+            },
+        }
+
+    def get_imagery_window_by_bounds(
+        self,
+        start_date: str,
+        end_date: str,
+        bounds: Dict[str, float],
+        center: Optional[Tuple[float, float]] = None,
+    ) -> Dict[str, Any]:
+        resolved_center = center or (
+            (bounds["west"] + bounds["east"]) / 2,
+            (bounds["south"] + bounds["north"]) / 2,
+        )
+        region = ee.Geometry.Rectangle([
+            bounds["west"],
+            bounds["south"],
+            bounds["east"],
+            bounds["north"],
+        ])
+        return self._get_imagery_window_for_region(
+            start_date,
+            end_date,
+            region,
+            bounds,
+            resolved_center,
+        )
+
+    def get_imagery_window(
+        self,
+        start_date: str,
+        end_date: str,
+        center: Tuple[float, float],
+        buffer_km: float = 50,
+    ) -> Dict[str, Any]:
+        lat_buffer = buffer_km / 111
+        lon_buffer = buffer_km / (111 * abs(center[1]) if center[1] != 0 else 111)
+        bounds = {
+            "west": center[0] - lon_buffer,
+            "south": center[1] - lat_buffer,
+            "east": center[0] + lon_buffer,
+            "north": center[1] + lat_buffer,
+        }
+        return self.get_imagery_window_by_bounds(start_date, end_date, bounds, center)
+
+    def get_imagery_window_by_geojson(
+        self,
+        start_date: str,
+        end_date: str,
+        geojson: Dict[str, Any],
+        center: Optional[Tuple[float, float]] = None,
+    ) -> Dict[str, Any]:
+        region = ee.Geometry(geojson)
+        bounds_list = region.bounds().getInfo()["coordinates"][0]
+        bounds = {
+            "west": min(point[0] for point in bounds_list),
+            "south": min(point[1] for point in bounds_list),
+            "east": max(point[0] for point in bounds_list),
+            "north": max(point[1] for point in bounds_list),
+        }
+        resolved_center = center or (
+            (bounds["west"] + bounds["east"]) / 2,
+            (bounds["south"] + bounds["north"]) / 2,
+        )
+        return self._get_imagery_window_for_region(
+            start_date,
+            end_date,
+            region,
+            bounds,
+            resolved_center,
+        )
     
     def get_flood_imagery_by_geojson(
         self,
@@ -558,7 +661,8 @@ class GEEService:
         date: str,
         region: ee.Geometry,
         cloud_cover_max: int = 30,
-        days_range: int = 15
+        days_range: int = 15,
+        window_end_date: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """使用 EE Geometry 获取 Sentinel-2 影像"""
         if not self.initialized:
@@ -567,11 +671,20 @@ class GEEService:
         try:
             request_started_at = time.perf_counter()
             target_date = datetime.strptime(date, "%Y-%m-%d")
-            start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
-            end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+            if window_end_date:
+                window_end = datetime.strptime(window_end_date, "%Y-%m-%d")
+                if target_date > window_end:
+                    raise ValueError("Imagery window start date must not be after the end date.")
+                start_date = date
+                end_date = window_end_date
+                filter_end_date = (window_end + timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
+                end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+                filter_end_date = end_date
             
             s2_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
-                .filterDate(start_date, end_date) \
+                .filterDate(start_date, filter_end_date) \
                 .filterBounds(region) \
                 .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_cover_max)) \
                 .sort("CLOUDY_PIXEL_PERCENTAGE")
@@ -588,9 +701,10 @@ class GEEService:
                     count_query_ms,
                 )
                 return {
-                    "error": f"No Sentinel-2 imagery found near {date}",
+                    "error": f"No Sentinel-2 imagery found in {start_date} to {end_date}",
                     "type": "Sentinel-2",
                     "requested_date": date,
+                    "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                     "search_range": f"{start_date} ~ {end_date}",
                     "image_count": 0
                 }
@@ -649,6 +763,7 @@ class GEEService:
                 "tile_url": tile_url,
                 "date": image_date,
                 "requested_date": date,
+                "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                 "search_range": f"{start_date} ~ {end_date}",
                 "actual_date_range": dates_info.get("date_range"),
                 "cloud_cover": properties.get("CLOUDY_PIXEL_PERCENTAGE", 0),
@@ -668,7 +783,8 @@ class GEEService:
         date: str,
         region: ee.Geometry,
         days_range: int = 15,
-        polarization: str = "VV"
+        polarization: str = "VV",
+        window_end_date: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """使用 EE Geometry 获取 Sentinel-1 影像"""
         if not self.initialized:
@@ -677,11 +793,20 @@ class GEEService:
         try:
             request_started_at = time.perf_counter()
             target_date = datetime.strptime(date, "%Y-%m-%d")
-            start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
-            end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+            if window_end_date:
+                window_end = datetime.strptime(window_end_date, "%Y-%m-%d")
+                if target_date > window_end:
+                    raise ValueError("Imagery window start date must not be after the end date.")
+                start_date = date
+                end_date = window_end_date
+                filter_end_date = (window_end + timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
+                end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+                filter_end_date = end_date
             
             s1_collection = ee.ImageCollection("COPERNICUS/S1_GRD") \
-                .filterDate(start_date, end_date) \
+                .filterDate(start_date, filter_end_date) \
                 .filterBounds(region) \
                 .filter(ee.Filter.listContains("transmitterReceiverPolarisation", polarization)) \
                 .filter(ee.Filter.eq("instrumentMode", "IW")) \
@@ -699,9 +824,10 @@ class GEEService:
                     count_query_ms,
                 )
                 return {
-                    "error": f"No Sentinel-1 imagery found near {date}",
+                    "error": f"No Sentinel-1 imagery found in {start_date} to {end_date}",
                     "type": "Sentinel-1",
                     "requested_date": date,
+                    "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                     "search_range": f"{start_date} ~ {end_date}",
                     "image_count": 0
                 }
@@ -751,6 +877,7 @@ class GEEService:
                 "tile_url": tile_url,
                 "date": image_date,
                 "requested_date": date,
+                "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                 "search_range": f"{start_date} ~ {end_date}",
                 "actual_date_range": dates_info.get("date_range"),
                 "id": info.get("id", "unknown"),

@@ -912,6 +912,30 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
                 supplementary_catalog["soilTexture"]["dataset"]
             ).select(supplementary_catalog["soilTexture"]["band"]).clip(region),
         },
+        "wildfireRisk": {
+            "title": "Wildfire Risk",
+            "filename": "wildfire_risk",
+            "scale": 100,
+            "image_builder": lambda region, payload: _build_wildfire_risk_class_image(payload, region),
+        },
+        "burnHistory": {
+            "title": "Burn History",
+            "filename": "burn_history",
+            "scale": 500,
+            "image_builder": lambda region, payload: _build_burn_history_image(payload, region),
+        },
+        "landslideRisk": {
+            "title": "Landslide Risk",
+            "filename": "landslide_risk",
+            "scale": 100,
+            "image_builder": lambda region, payload: _build_landslide_risk_class_image(payload, region),
+        },
+        "slopeSteepness": {
+            "title": "Slope Steepness",
+            "filename": "slope_steepness",
+            "scale": 30,
+            "image_builder": lambda region, payload: _build_slope_steepness_image(region),
+        },
     }
 
     config = layer_configs.get(layer_key)
@@ -985,6 +1009,12 @@ def _agent_raster_download_scales(layer_key: str, base_scale: int) -> list[int]:
         return [base_scale, 20, 30, 50, 100]
     if layer_key == "soilTexture":
         return [base_scale, 500, 1000]
+    if layer_key in {"wildfireRisk", "landslideRisk"}:
+        return [base_scale, 250, 500, 1000]
+    if layer_key == "burnHistory":
+        return [base_scale, 1000]
+    if layer_key == "slopeSteepness":
+        return [base_scale, 60, 100, 250]
     return [base_scale]
 
 

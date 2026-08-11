@@ -88,6 +88,8 @@ def _summarize_flood_image_request(request: "FloodImageRequest") -> dict:
         "pre_date": request.pre_date,
         "peek_date": request.peek_date,
         "after_date": request.after_date,
+        "imagery_start_date": request.imagery_start_date,
+        "imagery_end_date": request.imagery_end_date,
         "longitude": _rounded(request.longitude),
         "latitude": _rounded(request.latitude),
         "has_bounds": bool(request.bounds),
@@ -220,9 +222,11 @@ class GeoBounds(BaseModel):
 
 class FloodImageRequest(BaseModel):
     """洪水影像请求"""
-    pre_date: str
-    peek_date: str
-    after_date: str
+    pre_date: Optional[str] = None
+    peek_date: Optional[str] = None
+    after_date: Optional[str] = None
+    imagery_start_date: Optional[str] = None
+    imagery_end_date: Optional[str] = None
     longitude: float
     latitude: float
     buffer_km: Optional[float] = 50
@@ -455,6 +459,14 @@ async def get_flood_imagery(request: FloodImageRequest):
     request_summary = _summarize_flood_image_request(request)
     logger.info("[flood-images] request:start summary=%s", request_summary)
 
+    has_imagery_window = bool(request.imagery_start_date and request.imagery_end_date)
+    if bool(request.imagery_start_date) != bool(request.imagery_end_date):
+        raise HTTPException(status_code=400, detail="Both imagery_start_date and imagery_end_date are required.")
+    if has_imagery_window and request.imagery_start_date > request.imagery_end_date:
+        raise HTTPException(status_code=400, detail="imagery_start_date must not be after imagery_end_date.")
+    if not has_imagery_window and not all((request.pre_date, request.peek_date, request.after_date)):
+        raise HTTPException(status_code=400, detail="Flood imagery requires pre_date, peek_date, and after_date.")
+
     """
     获取洪水事件的卫星影像
     支持三种区域定义方式：
@@ -470,7 +482,34 @@ async def get_flood_imagery(request: FloodImageRequest):
     
     try:
         # 优先使用 geojson，其次 bounds，最后使用中心点
-        if request.geojson:
+        if request.imagery_start_date and request.imagery_end_date and request.geojson:
+            result = gee_service.get_imagery_window_by_geojson(
+                start_date=request.imagery_start_date,
+                end_date=request.imagery_end_date,
+                geojson=request.geojson,
+                center=(request.longitude, request.latitude),
+            )
+        elif request.imagery_start_date and request.imagery_end_date and request.bounds:
+            bounds_dict = {
+                "west": request.bounds.west,
+                "south": request.bounds.south,
+                "east": request.bounds.east,
+                "north": request.bounds.north,
+            }
+            result = gee_service.get_imagery_window_by_bounds(
+                start_date=request.imagery_start_date,
+                end_date=request.imagery_end_date,
+                bounds=bounds_dict,
+                center=(request.longitude, request.latitude),
+            )
+        elif request.imagery_start_date and request.imagery_end_date:
+            result = gee_service.get_imagery_window(
+                start_date=request.imagery_start_date,
+                end_date=request.imagery_end_date,
+                center=(request.longitude, request.latitude),
+                buffer_km=request.buffer_km or 50,
+            )
+        elif request.geojson:
             result = gee_service.get_flood_imagery_by_geojson(
                 pre_date=request.pre_date,
                 peek_date=request.peek_date,

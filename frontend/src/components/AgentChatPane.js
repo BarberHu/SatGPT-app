@@ -81,14 +81,10 @@ function AgentChatPane() {
       wildfire: {
         labels: {
           title: "Wildfire Analysis Agent",
-          initial: "Explore wildfire module readiness, fire detections, burn severity, and exposure layers. This prototype still needs real wildfire data services before execution.",
+          initial: "Explore wildfire risk, burn history, burn severity, and exposure layers. This prototype still needs real wildfire data services before execution.",
           placeholder: "Enter wildfire event or module integration question...",
         },
         suggestions: [
-          {
-            title: "Active Fire Layer",
-            message: "What inputs do we need to add an active fire detection layer?",
-          },
           {
             title: "Burn Severity Workflow",
             message: "Sketch a burn severity analysis workflow for a selected AOI",

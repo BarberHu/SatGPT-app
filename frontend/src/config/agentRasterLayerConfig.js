@@ -14,7 +14,6 @@ export const AGENT_RASTER_LAYER_KEYS_BY_MODULE = {
   ],
   wildfire: [
     'wildfireRisk',
-    'activeFireDetections',
     'burnHistory',
   ],
   landslide: [
@@ -131,28 +130,6 @@ export const WILDFIRE_RASTER_LAYER_CONFIG = [
     maxRecentWindow: 365,
     recentWindowTicks: [7, 30, 60, 180, 365],
     recentWindowHelpText: 'Risk uses the selected recent window ending today; the baseline is computed from the preceding 3 years.',
-  },
-  {
-    key: 'activeFireDetections',
-    orderId: 'agent-raster-activeFireDetections',
-    title: 'Active Fire Detections',
-    infoText: 'NASA FIRMS MODIS thermal anomaly detections clipped to the selected AOI.',
-    subtitle: 'MODIS thermal anomalies',
-    detailText: 'Brightness temperature',
-    dataset: 'FIRMS',
-    legend: {
-      type: 'palette',
-      label: 'Fire brightness temperature',
-      min: '325 K',
-      max: '400 K',
-      palette: ['#ef4444', '#f97316', '#facc15'],
-    },
-    hasDetectionWindowControl: true,
-    defaultDetectionWindow: 30,
-    minDetectionWindow: 1,
-    maxDetectionWindow: 365,
-    detectionWindowTicks: [1, 30, 90, 180, 365],
-    emptyVisibleStatus: 'Visible; blank map means no detections in this window',
   },
   {
     key: 'burnHistory',

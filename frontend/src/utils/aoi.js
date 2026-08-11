@@ -88,6 +88,12 @@ export const buildAoiSignature = (aoi, fallbackBounds = null) => [
   buildAoiBoundsSignature(aoi?.bounds || fallbackBounds),
 ].join('|');
 
+export const isFishnetAoi = (aoi) =>
+  String(aoi?.source || '').toLowerCase() === 'fishnet';
+
+export const resolveAgentAnalysisAoi = (...candidates) =>
+  candidates.find((aoi) => aoi && !isFishnetAoi(aoi)) || null;
+
 const mergeBounds = (boundsList = []) => {
   const validBounds = boundsList.filter(Boolean);
   if (!validBounds.length) {

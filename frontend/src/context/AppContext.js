@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { buildAoiFromAgentState } from '../utils/aoi';
+import { buildAoiFromAgentState, isFishnetAoi } from '../utils/aoi';
 import {
   buildBusinessLayerRecordFromAoi,
   buildAoiFromBusinessLayerRecord,
@@ -64,6 +64,11 @@ const defaultAgentLayerVisibility = {
 const defaultAgentBaseImageryVisibility = {
   sentinel2: false,
   sentinel1: false,
+};
+
+const defaultAgentImageryDateWindow = {
+  start_date: null,
+  end_date: null,
 };
 
 const defaultAgentRasterLayerVisibility = buildDefaultAgentRasterLayerVisibility();
@@ -187,6 +192,7 @@ export const AppProvider = ({ children }) => {
   // Flood Agent 当前加载的影像结果，用于地图渲染与图层面板显示。
   const [agentImagery, setAgentImagery] = useState(null);
   const [agentImageryLoading, setAgentImageryLoading] = useState(false);
+  const [agentImageryDateWindow, setAgentImageryDateWindow] = useState(defaultAgentImageryDateWindow);
   
   // ========== Agent Mode Control States ==========
   const [agentSelectedPeriod, setAgentSelectedPeriod] = useState('peek_date'); // 'pre_date' | 'peek_date' | 'after_date'
@@ -208,6 +214,9 @@ export const AppProvider = ({ children }) => {
   const [agentLayerOrder, setAgentLayerOrder] = useState(defaultAgentLayerOrder);
   // Per-layer loading tracking: { 'base-imagery': bool, 'flood-detection': bool, 'population': bool, 'urban': bool, 'landcover': bool }
   const [agentLayerLoading, setAgentLayerLoading] = useState({});
+  // Per-layer viewport tile progress. This measures client-side Mapbox tile requests,
+  // not Earth Engine server-side computation progress.
+  const [agentLayerProgress, setAgentLayerProgress] = useState({});
   const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
   
   // 更新 Flood Agent 单个字段，避免在组件里散落手写对象合并逻辑。
@@ -222,6 +231,7 @@ export const AppProvider = ({ children }) => {
   const resetFloodAgentState = useCallback(() => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
+    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
     setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
@@ -229,11 +239,14 @@ export const AppProvider = ({ children }) => {
     setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentRasterLoading(false);
     setAgentLayerOrder(buildDefaultAgentLayerOrder());
+    setAgentLayerLoading({});
+    setAgentLayerProgress({});
   }, []);
 
   const clearAgentVisualState = useCallback(() => {
     setAgentImagery(null);
     setAgentImageryLoading(false);
+    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentImpactData(null);
     setAgentImpactLoading(false);
     setAgentTileLoading(false);
@@ -245,6 +258,7 @@ export const AppProvider = ({ children }) => {
     setAgentRasterLoading(false);
     setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
+    setAgentLayerProgress({});
     setAgentTileError(null);
     setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
     setAgentShowFloodDetection(false);
@@ -430,8 +444,8 @@ export const AppProvider = ({ children }) => {
     persistAgentSessionId(nextSessionId);
     setAgentSessionId(nextSessionId);
 
-    const shouldSeedSelectedAoi = preserveSelectedAoi && isBusinessLayerAoiSource(selectedAOI?.source);
-    const seededLayers = shouldSeedSelectedAoi
+    const shouldPreserveSelectedAoi = preserveSelectedAoi && isBusinessLayerAoiSource(selectedAOI?.source);
+    const seededLayers = shouldPreserveSelectedAoi
       ? [buildBusinessLayerRecordFromAoi(selectedAOI, {
           id: selectedAOI?.id,
           label: selectedAOI?.label,
@@ -447,7 +461,7 @@ export const AppProvider = ({ children }) => {
       console.error('Failed to seed business layers for new agent session:', error);
     });
 
-    if (!preserveSelectedAoi) {
+    if (!shouldPreserveSelectedAoi) {
       setSelectedAOI(null);
       setSelectedGridCords(null);
     }
@@ -459,6 +473,7 @@ export const AppProvider = ({ children }) => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
     setAgentImageryLoading(false);
+    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentImpactData(null);
     setAgentImpactLoading(false);
     setAgentTileLoading(false);
@@ -469,6 +484,7 @@ export const AppProvider = ({ children }) => {
     setAgentRasterLoading(false);
     setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
+    setAgentLayerProgress({});
     setAgentTileError(null);
     setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
     setAgentSelectedType(defaultAgentLayerVisibility.agentSelectedType);
@@ -523,7 +539,7 @@ export const AppProvider = ({ children }) => {
     const previousMode = previousAppModeRef.current;
 
     if (previousMode !== appMode) {
-      if (String(selectedAOI?.source || '').toLowerCase() === 'fishnet') {
+      if (isFishnetAoi(selectedAOI)) {
         resetAskSession();
         setSelectedGridCords(null);
         setSelectedAOI(null);
@@ -994,6 +1010,8 @@ export const AppProvider = ({ children }) => {
     setAgentImagery,
     agentImageryLoading,
     setAgentImageryLoading,
+    agentImageryDateWindow,
+    setAgentImageryDateWindow,
     
     // Agent Mode Controls
     agentSelectedPeriod,
@@ -1032,6 +1050,8 @@ export const AppProvider = ({ children }) => {
     setAgentLayerOrder,
     agentLayerLoading,
     setAgentLayerLoading,
+    agentLayerProgress,
+    setAgentLayerProgress,
     agentTileError,
     setAgentTileError,
   };

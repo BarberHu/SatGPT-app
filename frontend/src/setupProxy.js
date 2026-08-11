@@ -1,11 +1,11 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
-  const publicHost = process.env.SATGPT_PUBLIC_HOST || 'localhost';
+  const serviceHost = process.env.SATGPT_SERVICE_HOST || '127.0.0.1';
   const agentPort = process.env.AGENT_PORT || '8000';
   const runtimePort = process.env.RUNTIME_PORT || '5000';
-  const agentTarget = `http://${publicHost}:${agentPort}`;
-  const runtimeTarget = `http://${publicHost}:${runtimePort}`;
+  const agentTarget = `http://${serviceHost}:${agentPort}`;
+  const runtimeTarget = `http://${serviceHost}:${runtimePort}`;
 
   // Proxy FloodAgent API requests to FastAPI.
   app.use(
