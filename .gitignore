@@ -61,6 +61,8 @@ Thumbs.db
 *.log
 test_output.txt
 .cache/
+.codex-model-inspection/
+.codex-skill-validation/
 
 # =====================
 # Local notes / helper files

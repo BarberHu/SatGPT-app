@@ -70,8 +70,12 @@ export const getGEEScript = async (message) => {
 };
 
 // Get PDF
-export const getPDF = async () => {
-  const response = await axios.get(`${API_BASE}/api/scripts/pdf`, { responseType: 'blob' });
+export const getPDF = async (script) => {
+  const response = await axios.post(
+    `${API_BASE}/api/scripts/pdf`,
+    { script },
+    { responseType: 'blob' }
+  );
   return response.data;
 };
 

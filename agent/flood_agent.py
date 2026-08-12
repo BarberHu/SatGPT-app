@@ -10,16 +10,18 @@
 - confirmation_node: 用户确认 (HITL)
 - processing_node: 数据处理，地理编码 + 报告生成
 """
+import asyncio
 import os
 import json
 import re
 import requests
-from typing import Literal, Optional, Dict, Any
+from typing import Annotated, Literal, Optional, Dict, Any
 
 from langchain.tools import tool
+from langchain_core.tools import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from openai import AsyncOpenAI
-from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
@@ -659,9 +661,7 @@ def _has_complete_flood_info(state: FloodAgentState) -> bool:
 
 # ============== 工具定义 ==============
 
-# 全局变量用于临时存储搜索来源信息和完整内容
-_pending_search_sources: list = []
-_pending_search_contents: list = []
+# Search payloads are written to FloodAgentState by the tool Command.
 MAX_SEARCH_SOURCES = 8
 MAX_SEARCH_CONTENT_CHARS = 700
 
@@ -673,7 +673,10 @@ def _compact_search_content(content: str, limit: int = MAX_SEARCH_CONTENT_CHARS)
     return text[:limit].rstrip() + "..."
 
 @tool
-def search_flood_event(query: str) -> str:
+def search_flood_event(
+    query: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
     """
     搜索洪水事件的相关信息。
     
@@ -683,14 +686,25 @@ def search_flood_event(query: str) -> str:
     Returns:
         搜索结果的摘要文本
     """
-    global _pending_search_sources, _pending_search_contents
+    search_sources: list[Dict[str, str]] = []
+    search_contents: list[Dict[str, str]] = []
+
+    def build_result(message: str) -> Command:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(content=message, tool_call_id=tool_call_id)
+                ],
+                "search_sources": search_sources,
+                "search_contents": search_contents,
+            }
+        )
+
     try:
         from tavily import TavilyClient
         tavily_api_key = os.getenv("TAVILY_API_KEY")
         if not tavily_api_key:
-            _pending_search_sources = []
-            _pending_search_contents = []
-            return (
+            return build_result(
                 "Search tool is unavailable because TAVILY_API_KEY is not configured. "
                 "Use built-in knowledge only, and tell the user that online search is disabled."
             )
@@ -769,17 +783,24 @@ def search_flood_event(query: str) -> str:
         
         all_sources = all_sources[:MAX_SEARCH_SOURCES]
         results = results[: MAX_SEARCH_SOURCES + 1]
-        _pending_search_sources = [{"title": s["title"], "url": s["url"]} for s in all_sources]
-        _pending_search_contents = all_sources  # Store full content for report generation
+        search_sources.extend(
+            {"title": source["title"], "url": source["url"]}
+            for source in all_sources
+        )
+        search_contents.extend(all_sources)
         
         print(f"[INFO] Search completed with {len(all_sources)} sources")
         
-        return "\n---\n".join(results) if results else "No relevant flood event information found"
+        return build_result(
+            "\n---\n".join(results)
+            if results
+            else "No relevant flood event information found"
+        )
         
     except Exception as e:
-        _pending_search_sources = []
-        _pending_search_contents = []
-        return f"Search error: {str(e)}"
+        search_sources.clear()
+        search_contents.clear()
+        return build_result(f"Search error: {str(e)}")
 
 
 # 工具列表
@@ -837,6 +858,7 @@ async def entry_node(
                 "confirmation_version": 0,
                 "geo_data": None,
                 "search_sources": [],
+                "search_contents": [],
                 "gee_code": None,
                 "intent": None,
             }
@@ -1046,7 +1068,8 @@ async def pre_confirmation_node(
         thread_id=(state.get("copilotkit") or {}).get("threadId"),
     )
 
-    confirmation_context = build_confirmation_context(
+    confirmation_context = await asyncio.to_thread(
+        build_confirmation_context,
         event=state.get("event"),
         event_description=state.get("event_description"),
         location=state.get("location"),
@@ -1207,8 +1230,6 @@ async def processing_node(
     2. 使用 LLM 基于搜索内容生成详细洪水分析报告
     3. 更新最终状态
     """
-    global _pending_search_contents
-    
     location = state.get("location")
     event = state.get("event")
     event_description = state.get("event_description")
@@ -1245,8 +1266,9 @@ async def processing_node(
     
     # 格式化搜索内容用于 LLM 生成报告
     search_contents_text = ""
-    if _pending_search_contents:
-        for i, item in enumerate(_pending_search_contents, 1):
+    search_contents = state.get("search_contents") or []
+    if search_contents:
+        for i, item in enumerate(search_contents, 1):
             title = item.get("title", "")
             content = item.get("content", "")
             url = item.get("url", "")
@@ -1268,7 +1290,7 @@ async def processing_node(
     )
     
     try:
-        response = model.invoke([HumanMessage(content=report_prompt)])
+        response = await model.ainvoke([HumanMessage(content=report_prompt)])
         detailed_report = response.content
         print(f"[INFO] Detailed report generated by LLM, length={len(detailed_report)}")
     except Exception as e:
@@ -1292,7 +1314,8 @@ Limited information available; no recovery progress information at this time.
 This flood event has caused certain impacts. Further information collection is needed for a complete assessment."""
     
     # 格式化来源信息
-    sources_text = _format_sources_text(_pending_search_sources)
+    search_sources = list(state.get("search_sources") or [])
+    sources_text = _format_sources_text(search_sources)
     
     # 组装最终报告
     flood_report = FLOOD_REPORT_TEMPLATE.format(
@@ -1304,9 +1327,6 @@ This flood event has caused certain impacts. Further information collection is n
         detailed_report=detailed_report,
         sources=sources_text
     )
-    
-    # 保存来源信息
-    search_sources = _pending_search_sources.copy() if _pending_search_sources else []
     
     # 创建报告完成消息
     report_message = AIMessage(content=f"✅ Information confirmed, report generated!\n\n{flood_report}")

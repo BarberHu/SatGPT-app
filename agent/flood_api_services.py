@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import threading
 from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -43,10 +42,6 @@ JRC_YEARLY_HISTORY_MAX_YEAR = 2021
 DEFAULT_RISK_WINDOW_DAYS = 60
 WILDFIRE_RISK_PALETTE = ["#2E7D32", "#FDD835", "#FF8F00", "#E53935", "#B71C1C"]
 LANDSLIDE_RISK_PALETTE = ["#1565C0", "#42A5F5", "#FFC107", "#FF6F00", "#D84315"]
-
-_LATEST_SCRIPT_LOCK = threading.Lock()
-_LATEST_SCRIPT: Optional[str] = None
-
 
 def _load_layer_catalog() -> Dict[str, Any]:
     with LAYER_CATALOG_PATH.open("r", encoding="utf-8") as handle:
@@ -1333,17 +1328,6 @@ def get_code_response(user_input: str) -> Optional[str]:
         return json_data["response"][0]["script"]
     except Exception:
         return None
-
-
-def remember_latest_script(script: str) -> None:
-    global _LATEST_SCRIPT
-    with _LATEST_SCRIPT_LOCK:
-        _LATEST_SCRIPT = script
-
-
-def get_latest_script() -> Optional[str]:
-    with _LATEST_SCRIPT_LOCK:
-        return _LATEST_SCRIPT
 
 
 def build_script_pdf(script: str) -> bytes:

@@ -29,6 +29,11 @@ import {
   sortCatalogLayers,
 } from '../utils/catalogLayers';
 import { buildCatalogLayerContextKey } from '../utils/catalogLayerContext';
+import {
+  resolveDefaultCatalogHistoryRange,
+  resolveDefaultCatalogPointSelection,
+  resolveDefaultCatalogYearRange,
+} from '../utils/catalogTimeDefaults';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 import SOURCE_REFERENCES from '../config/agentLayerSourceReferences';
 import {
@@ -117,7 +122,10 @@ const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
 const EMPTY_ARRAY = [];
 const JRC_YEARLY_MIN_YEAR = 1984;
 const JRC_YEARLY_MAX_YEAR = 2021;
-const DEFAULT_HOTSPOT_YEAR_RANGE = [2000, JRC_YEARLY_MAX_YEAR];
+const DEFAULT_HOTSPOT_YEAR_RANGE = resolveDefaultCatalogHistoryRange({
+  minYear: JRC_YEARLY_MIN_YEAR,
+  maxYear: JRC_YEARLY_MAX_YEAR,
+});
 const YEAR_RANGE_MARKS = {
   1984: '1984',
   2000: '2000',
@@ -172,11 +180,6 @@ const normalizeYearRange = (start, end, fallback = DEFAULT_HOTSPOT_YEAR_RANGE) =
 
 const getYearRangeCount = (range = []) => Math.max(1, (Number(range[1]) || 0) - (Number(range[0]) || 0) + 1);
 
-const getYearFromDate = (value, fallback = JRC_YEARLY_MAX_YEAR) => {
-  const match = String(value || '').match(/^(\d{4})/);
-  return clampYear(match ? Number(match[1]) : fallback, fallback);
-};
-
 const getMonthFromDate = (value, fallback = 1) => {
   const match = String(value || '').match(/^\d{4}-(\d{2})/);
   const numeric = match ? Number(match[1]) : fallback;
@@ -220,11 +223,13 @@ const isValidDateWindow = (window) => (
 );
 
 const resolveSingleInundationDateWindow = (override = {}, dates = {}) => {
-  const defaultStartYear = getYearFromDate(dates.currentPreDate || dates.currentPeekDate, 2010);
-  const defaultEndYear = getYearFromDate(
-    dates.currentAfterDate || dates.currentPeekDate || dates.currentPreDate,
-    defaultStartYear
-  );
+  const [defaultStartYear, defaultEndYear] = resolveDefaultCatalogYearRange({
+    startDate: dates.currentPreDate,
+    peakDate: dates.currentPeekDate,
+    endDate: dates.currentAfterDate,
+    minYear: JRC_YEARLY_MIN_YEAR,
+    maxYear: JRC_YEARLY_MAX_YEAR,
+  });
   const yearStart = clampYear(override.year_start ?? defaultStartYear, defaultStartYear);
   const yearEnd = Math.max(yearStart, clampYear(override.year_end ?? defaultEndYear, defaultEndYear));
   return {
@@ -259,9 +264,16 @@ const resolveCatalogLayerDateWindow = (layer, override = {}, dates = {}) => {
   const eventStart = dates.currentPreDate || dates.currentPeekDate || '';
   const eventEnd = dates.currentAfterDate || dates.currentPeekDate || eventStart;
   const eventPeak = dates.currentPeekDate || eventStart || eventEnd;
+  const defaultPointSelection = resolveDefaultCatalogPointSelection({
+    peakDate: eventPeak,
+    startDate: eventStart,
+    endDate: eventEnd,
+    minYear: JRC_YEARLY_MIN_YEAR,
+    maxYear: JRC_YEARLY_MAX_YEAR,
+  });
 
   if (mode === 'year') {
-    const defaultYear = getYearFromDate(eventPeak || eventStart || eventEnd, JRC_YEARLY_MAX_YEAR);
+    const defaultYear = defaultPointSelection.year;
     const year = clampYear(override.year ?? defaultYear, defaultYear);
     return {
       mode,
@@ -273,8 +285,8 @@ const resolveCatalogLayerDateWindow = (layer, override = {}, dates = {}) => {
   }
 
   if (mode === 'month') {
-    const defaultYear = getYearFromDate(eventPeak || eventStart || eventEnd, JRC_YEARLY_MAX_YEAR);
-    const defaultMonth = getMonthFromDate(eventPeak || eventStart || eventEnd, 1);
+    const defaultYear = defaultPointSelection.year;
+    const defaultMonth = defaultPointSelection.month;
     const year = clampYear(override.year ?? defaultYear, defaultYear);
     const month = getMonthFromDate(`${year}-${String(override.month ?? defaultMonth).padStart(2, '0')}-01`, defaultMonth);
     return {
