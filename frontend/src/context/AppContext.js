@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { buildAoiFromAgentState } from '../utils/aoi';
+import { buildAoiFromAgentState, isFishnetAoi } from '../utils/aoi';
 import {
   buildBusinessLayerRecordFromAoi,
   buildAoiFromBusinessLayerRecord,
@@ -11,6 +11,10 @@ import {
   saveBusinessLayerRecords,
 } from '../utils/businessLayerStore';
 import { syncBusinessLayers } from '../services/agentApi';
+import {
+  buildDefaultAgentLayerOrder,
+  buildDefaultAgentRasterLayerVisibility,
+} from '../config/agentRasterLayerConfig';
 
 const AppContext = createContext();
 
@@ -40,6 +44,8 @@ const defaultFloodAgentState = {
   confirmed_aoi: null,
   recommended_layers: [],
   selected_layer_ids: [],
+  recommendation_strategy: null,
+  recommendation_source: null,
   confirmation_version: 0,
   search_sources: null,
   is_valid_flood_query: false,
@@ -48,7 +54,7 @@ const defaultFloodAgentState = {
 const defaultAgentLayerVisibility = {
   agentSelectedPeriod: 'peek_date',
   agentSelectedType: 'sentinel2',
-  agentShowBaseImagery: true,
+  agentShowBaseImagery: false,
   agentShowFloodDetection: false,
   agentShowPopulationLayer: false,
   agentShowUrbanLayer: false,
@@ -56,31 +62,17 @@ const defaultAgentLayerVisibility = {
 };
 
 const defaultAgentBaseImageryVisibility = {
-  sentinel2: true,
+  sentinel2: false,
   sentinel1: false,
 };
 
-const defaultAgentRasterLayerVisibility = {
-  singleInundationEvent: false,
-  inundationHotspot: false,
-  lclu: false,
-  populationDensity: false,
-  soilTexture: false,
+const defaultAgentImageryDateWindow = {
+  start_date: null,
+  end_date: null,
 };
 
-const defaultAgentLayerOrder = [
-  'agent-s2-pre',
-  'agent-s1-pre',
-  'agent-s2-peek',
-  'agent-s1-peek',
-  'agent-s2-after',
-  'agent-s1-after',
-  'agent-raster-singleInundationEvent',
-  'agent-raster-inundationHotspot',
-  'agent-raster-populationDensity',
-  'agent-raster-lclu',
-  'agent-raster-soilTexture',
-];
+const defaultAgentRasterLayerVisibility = buildDefaultAgentRasterLayerVisibility();
+const defaultAgentLayerOrder = buildDefaultAgentLayerOrder();
 
 const resolveCurrentBusinessScopeAoi = (records = [], selectedAoi = null) => {
   const activeRecord = (records || []).find((record) => record?.is_active) || null;
@@ -114,6 +106,7 @@ export const AppProvider = ({ children }) => {
   // 应用主模式：`ask` 表示传统问答流，`agent` 表示 Flood Agent 工作流。
   const [appMode, setAppMode] = useState('ask');
   const [agentSidebarCollapsed, setAgentSidebarCollapsed] = useState(false);
+  const [agentModule, setAgentModule] = useState('flood');
   
   // ChatBox 独立维护的聊天模式，用于兼容 `appMode` 切换中的过渡状态。
   const [chatMode, setChatMode] = useState('ask');
@@ -167,6 +160,13 @@ export const AppProvider = ({ children }) => {
   const [layerData, setLayerData] = useState({
     singleInundationEvent: null,
     inundationHotspot: null,
+    wildfireRisk: null,
+    landslideRisk: null,
+    activeFireDetections: null,
+    burnHistory: null,
+    slopeSteepness: null,
+    populationExposure: null,
+    fuelLandCover: null,
     water: null,
     flood: null,
     lclu: null,
@@ -192,17 +192,19 @@ export const AppProvider = ({ children }) => {
   // Flood Agent 当前加载的影像结果，用于地图渲染与图层面板显示。
   const [agentImagery, setAgentImagery] = useState(null);
   const [agentImageryLoading, setAgentImageryLoading] = useState(false);
+  const [agentImageryDateWindow, setAgentImageryDateWindow] = useState(defaultAgentImageryDateWindow);
   
   // ========== Agent Mode Control States ==========
   const [agentSelectedPeriod, setAgentSelectedPeriod] = useState('peek_date'); // 'pre_date' | 'peek_date' | 'after_date'
   const [agentSelectedType, setAgentSelectedType] = useState('sentinel2'); // 'sentinel2' | 'sentinel1'
-  const [agentShowBaseImagery, setAgentShowBaseImagery] = useState(true);
+  const [agentShowBaseImagery, setAgentShowBaseImagery] = useState(false);
   const [agentBaseImageryVisibility, setAgentBaseImageryVisibility] = useState(defaultAgentBaseImageryVisibility);
   const [agentShowFloodDetection, setAgentShowFloodDetection] = useState(true);
   const [agentShowPopulationLayer, setAgentShowPopulationLayer] = useState(false);
   const [agentShowUrbanLayer, setAgentShowUrbanLayer] = useState(false);
   const [agentShowLandcoverLayer, setAgentShowLandcoverLayer] = useState(false);
   const [agentRasterLayerVisibility, setAgentRasterLayerVisibility] = useState(defaultAgentRasterLayerVisibility);
+  const [agentRasterExpectedRequestKeys, setAgentRasterExpectedRequestKeys] = useState({});
   const [agentRasterLoading, setAgentRasterLoading] = useState(false);
   const [agentImpactData, setAgentImpactData] = useState(null);
   const [agentImpactLoading, setAgentImpactLoading] = useState(false);
@@ -212,6 +214,9 @@ export const AppProvider = ({ children }) => {
   const [agentLayerOrder, setAgentLayerOrder] = useState(defaultAgentLayerOrder);
   // Per-layer loading tracking: { 'base-imagery': bool, 'flood-detection': bool, 'population': bool, 'urban': bool, 'landcover': bool }
   const [agentLayerLoading, setAgentLayerLoading] = useState({});
+  // Per-layer viewport tile progress. This measures client-side Mapbox tile requests,
+  // not Earth Engine server-side computation progress.
+  const [agentLayerProgress, setAgentLayerProgress] = useState({});
   const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
   
   // 更新 Flood Agent 单个字段，避免在组件里散落手写对象合并逻辑。
@@ -226,27 +231,34 @@ export const AppProvider = ({ children }) => {
   const resetFloodAgentState = useCallback(() => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
+    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
+    setAgentRasterExpectedRequestKeys({});
     setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentRasterLoading(false);
-    setAgentLayerOrder(defaultAgentLayerOrder);
+    setAgentLayerOrder(buildDefaultAgentLayerOrder());
+    setAgentLayerLoading({});
+    setAgentLayerProgress({});
   }, []);
 
   const clearAgentVisualState = useCallback(() => {
     setAgentImagery(null);
     setAgentImageryLoading(false);
+    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentImpactData(null);
     setAgentImpactLoading(false);
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
+    setAgentRasterExpectedRequestKeys({});
     setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
     setAgentRasterLoading(false);
-    setAgentLayerOrder(defaultAgentLayerOrder);
+    setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
+    setAgentLayerProgress({});
     setAgentTileError(null);
     setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
     setAgentShowFloodDetection(false);
@@ -432,8 +444,8 @@ export const AppProvider = ({ children }) => {
     persistAgentSessionId(nextSessionId);
     setAgentSessionId(nextSessionId);
 
-    const shouldSeedSelectedAoi = preserveSelectedAoi && isBusinessLayerAoiSource(selectedAOI?.source);
-    const seededLayers = shouldSeedSelectedAoi
+    const shouldPreserveSelectedAoi = preserveSelectedAoi && isBusinessLayerAoiSource(selectedAOI?.source);
+    const seededLayers = shouldPreserveSelectedAoi
       ? [buildBusinessLayerRecordFromAoi(selectedAOI, {
           id: selectedAOI?.id,
           label: selectedAOI?.label,
@@ -449,7 +461,7 @@ export const AppProvider = ({ children }) => {
       console.error('Failed to seed business layers for new agent session:', error);
     });
 
-    if (!preserveSelectedAoi) {
+    if (!shouldPreserveSelectedAoi) {
       setSelectedAOI(null);
       setSelectedGridCords(null);
     }
@@ -461,15 +473,18 @@ export const AppProvider = ({ children }) => {
     setFloodAgentState(defaultFloodAgentState);
     setAgentImagery(null);
     setAgentImageryLoading(false);
+    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentImpactData(null);
     setAgentImpactLoading(false);
     setAgentTileLoading(false);
     setAgentRecommendedLayerData({});
     setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(defaultAgentRasterLayerVisibility);
+    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
+    setAgentRasterExpectedRequestKeys({});
     setAgentRasterLoading(false);
-    setAgentLayerOrder(defaultAgentLayerOrder);
+    setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
+    setAgentLayerProgress({});
     setAgentTileError(null);
     setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
     setAgentSelectedType(defaultAgentLayerVisibility.agentSelectedType);
@@ -498,6 +513,13 @@ export const AppProvider = ({ children }) => {
     setLayerData({
       singleInundationEvent: null,
       inundationHotspot: null,
+      wildfireRisk: null,
+      landslideRisk: null,
+      activeFireDetections: null,
+      burnHistory: null,
+      slopeSteepness: null,
+      populationExposure: null,
+      fuelLandCover: null,
       water: null,
       flood: null,
       lclu: null,
@@ -517,7 +539,7 @@ export const AppProvider = ({ children }) => {
     const previousMode = previousAppModeRef.current;
 
     if (previousMode !== appMode) {
-      if (String(selectedAOI?.source || '').toLowerCase() === 'fishnet') {
+      if (isFishnetAoi(selectedAOI)) {
         resetAskSession();
         setSelectedGridCords(null);
         setSelectedAOI(null);
@@ -693,19 +715,25 @@ export const AppProvider = ({ children }) => {
     setLayerData(normalizeLayerData(data));
   }, []);
 
-  const mergeLayerData = useCallback((data) => {
+  const mergeLayerData = useCallback((data, options = {}) => {
     setLayerData((previous) => ({
       ...previous,
-      ...normalizeLayerData(data, { partial: true }),
+      ...normalizeLayerData(data, { partial: true, ...options }),
     }));
   }, []);
 
   function normalizeLayerData(data = {}, options = {}) {
-    const { partial = false } = options;
+    const { partial = false, aoiSignature = null, requestKey = null } = options;
     const normalized = {};
     const setLayer = (key, urlField, layerValue) => {
       if (!partial || Object.prototype.hasOwnProperty.call(data, urlField)) {
-        normalized[key] = data[urlField] ? layerValue : null;
+        normalized[key] = data[urlField]
+          ? {
+            ...layerValue,
+            aoiSignature,
+            requestKey,
+          }
+          : null;
       }
     };
 
@@ -720,6 +748,18 @@ export const AppProvider = ({ children }) => {
         token: data.eeTokenInundationHotspot,
         tileUrl: data.eeMapURLInundationHotspot,
         meta: data.inundationHotspotMeta || null,
+    });
+    setLayer('wildfireRisk', 'eeMapURLWildfireRisk', {
+        mapId: data.eeMapIdWildfireRisk,
+        token: data.eeTokenWildfireRisk,
+        tileUrl: data.eeMapURLWildfireRisk,
+        meta: data.wildfireRiskMeta || null,
+    });
+    setLayer('landslideRisk', 'eeMapURLLandslideRisk', {
+        mapId: data.eeMapIdLandslideRisk,
+        token: data.eeTokenLandslideRisk,
+        tileUrl: data.eeMapURLLandslideRisk,
+        meta: data.landslideRiskMeta || null,
     });
     setLayer('water', 'eeMapURLWater', {
         mapId: data.eeMapIdWater, 
@@ -745,6 +785,36 @@ export const AppProvider = ({ children }) => {
         mapId: data.eeMapIdSoilTexture, 
         token: data.eeTokenSoilTexture, 
         tileUrl: data.eeMapURLSoilTexture 
+    });
+    setLayer('activeFireDetections', 'eeMapURLActiveFireDetections', {
+        mapId: data.eeMapIdActiveFireDetections,
+        token: data.eeTokenActiveFireDetections,
+        tileUrl: data.eeMapURLActiveFireDetections,
+        meta: data.activeFireDetectionsMeta || null,
+    });
+    setLayer('burnHistory', 'eeMapURLBurnHistory', {
+        mapId: data.eeMapIdBurnHistory,
+        token: data.eeTokenBurnHistory,
+        tileUrl: data.eeMapURLBurnHistory,
+        meta: data.burnHistoryMeta || null,
+    });
+    setLayer('slopeSteepness', 'eeMapURLSlopeSteepness', {
+        mapId: data.eeMapIdSlopeSteepness,
+        token: data.eeTokenSlopeSteepness,
+        tileUrl: data.eeMapURLSlopeSteepness,
+        meta: data.slopeSteepnessMeta || null,
+    });
+    setLayer('populationExposure', 'eeMapURLPopulationExposure', {
+        mapId: data.eeMapIdPopulationExposure,
+        token: data.eeTokenPopulationExposure,
+        tileUrl: data.eeMapURLPopulationExposure,
+        meta: data.populationExposureMeta || null,
+    });
+    setLayer('fuelLandCover', 'eeMapURLFuelLandCover', {
+        mapId: data.eeMapIdFuelLandCover,
+        token: data.eeTokenFuelLandCover,
+        tileUrl: data.eeMapURLFuelLandCover,
+        meta: data.fuelLandCoverMeta || null,
     });
     setLayer('healthCareAccess', 'eeMapURLHealthCareAccess', {
         mapId: data.eeMapIdHealthCareAccess, 
@@ -925,6 +995,8 @@ export const AppProvider = ({ children }) => {
     setAppMode,
     agentSidebarCollapsed,
     setAgentSidebarCollapsed,
+    agentModule,
+    setAgentModule,
     chatMode,
     setChatMode,
     
@@ -938,6 +1010,8 @@ export const AppProvider = ({ children }) => {
     setAgentImagery,
     agentImageryLoading,
     setAgentImageryLoading,
+    agentImageryDateWindow,
+    setAgentImageryDateWindow,
     
     // Agent Mode Controls
     agentSelectedPeriod,
@@ -968,12 +1042,16 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerVisibility,
     agentRasterLayerVisibility,
     setAgentRasterLayerVisibility,
+    agentRasterExpectedRequestKeys,
+    setAgentRasterExpectedRequestKeys,
     agentRasterLoading,
     setAgentRasterLoading,
     agentLayerOrder,
     setAgentLayerOrder,
     agentLayerLoading,
     setAgentLayerLoading,
+    agentLayerProgress,
+    setAgentLayerProgress,
     agentTileError,
     setAgentTileError,
   };

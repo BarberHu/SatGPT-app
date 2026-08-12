@@ -5,9 +5,19 @@ import { trackUxEvent } from '../utils/analytics';
 import AgentChatPane from './AgentChatPane';
 import './AgentWorkspaceSidebar.css';
 
+const AGENT_MODULE_TITLE = {
+  flood: 'Flood Analysis Chat',
+  wildfire: 'Wildfire Analysis Chat',
+  landslide: 'Landslide Analysis Chat',
+  context: 'Context Layers Chat',
+  imagery: 'Imagery Layers Chat',
+  vector: 'Vector Layers Chat',
+};
+
 function AgentWorkspaceSidebar() {
   const {
     appMode,
+    agentModule,
     chatMode,
     agentSidebarCollapsed,
     setAgentSidebarCollapsed,
@@ -23,8 +33,8 @@ function AgentWorkspaceSidebar() {
     startNewAgentSession({ preserveSelectedAoi: true });
     resetAgentSession({ preserveSelectedAoi: true });
     setWarning('');
-    trackUxEvent('agent_new_chat', { mode: chatMode, entry: 'workspace_header' });
-  }, [chatMode, resetAgentSession, setThreadId, setWarning, startNewAgentSession]);
+    trackUxEvent('agent_new_chat', { mode: chatMode, module: agentModule, entry: 'workspace_header' });
+  }, [agentModule, chatMode, resetAgentSession, setThreadId, setWarning, startNewAgentSession]);
 
   useEffect(() => {
     if (appMode !== 'agent') {
@@ -42,7 +52,9 @@ function AgentWorkspaceSidebar() {
         {!agentSidebarCollapsed ? (
           <div className="agent-workspace-sidebar__title-block">
             <div className="agent-workspace-sidebar__eyebrow">Agent Workspace</div>
-            <h2 className="agent-workspace-sidebar__title">Flood Analysis Chat</h2>
+            <h2 className="agent-workspace-sidebar__title">
+              {AGENT_MODULE_TITLE[agentModule] || AGENT_MODULE_TITLE.flood}
+            </h2>
           </div>
         ) : null}
 

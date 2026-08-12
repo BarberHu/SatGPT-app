@@ -2,7 +2,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: var(--satgpt-panel-body-bg, #ffffff);
 }
 
 .agent-chat-pane__messages {
@@ -40,7 +40,7 @@
 
 .agent-chat-pane .copilotKitMessage {
   max-width: 94%;
-  border-radius: 14px;
+  border-radius: var(--satgpt-card-radius, 16px);
   padding: 8px 12px;
   margin-bottom: 6px;
   font-size: 14px;

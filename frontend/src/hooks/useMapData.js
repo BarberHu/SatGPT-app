@@ -1,19 +1,14 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
-import { buildAskMapRequestParams } from '../utils/aoi';
+import { buildAskMapRequestParams, isFishnetAoi } from '../utils/aoi';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 
 const FLOOD_HOTSPOT_YEAR_FROM = 1988;
 const ASK_AUTOLOAD_AOI_SOURCES = new Set(['fishnet']);
-const AGENT_AUTOLOAD_AOI_SOURCES = new Set(['fishnet']);
 
 const isAskAutoloadAoi = (aoi) => ASK_AUTOLOAD_AOI_SOURCES.has(String(aoi?.source || '').toLowerCase());
-const isFishnetAoi = (aoi) => String(aoi?.source || '').toLowerCase() === 'fishnet';
-const isAgentAutoloadAoi = (aoi) => {
-  const source = String(aoi?.source || '').toLowerCase();
-  return AGENT_AUTOLOAD_AOI_SOURCES.has(source) || isBusinessLayerAoiSource(source);
-};
+const isAgentAutoloadAoi = (aoi) => isBusinessLayerAoiSource(aoi?.source);
 const canAutoloadAoi = (mode, aoi) => (
   mode === 'ask'
     ? isAskAutoloadAoi(aoi)

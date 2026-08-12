@@ -24,9 +24,25 @@ export const getHistoricalMap = async (params) => {
   return response.data;
 };
 
+const normalizeApiError = (error, fallbackMessage) => {
+  const detail =
+    error?.response?.data?.detail ||
+    error?.response?.data?.message ||
+    error?.message ||
+    fallbackMessage;
+  const normalized = new Error(detail);
+  normalized.status = error?.response?.status || null;
+  normalized.payload = error?.response?.data || null;
+  return normalized;
+};
+
 export const getAgentRasterLayers = async (params) => {
-  const response = await axios.post(`${API_BASE}/api/agent-raster-layers`, params);
-  return response.data;
+  try {
+    const response = await axios.post(`${API_BASE}/api/agent-raster-layers`, params);
+    return response.data;
+  } catch (error) {
+    throw normalizeApiError(error, 'Raster layer request failed.');
+  }
 };
 
 // Get unsupervised classification map
@@ -54,8 +70,12 @@ export const getGEEScript = async (message) => {
 };
 
 // Get PDF
-export const getPDF = async () => {
-  const response = await axios.get(`${API_BASE}/api/scripts/pdf`, { responseType: 'blob' });
+export const getPDF = async (script) => {
+  const response = await axios.post(
+    `${API_BASE}/api/scripts/pdf`,
+    { script },
+    { responseType: 'blob' }
+  );
   return response.data;
 };
 
@@ -126,9 +146,11 @@ Map.addLayer(HealthCareAccess, {}, 'Healthcare Access');
 `;
   } else if (dataType === 'flood_hotspot') {
     code += `// Flood Hotspot Analysis
-var year_from = ${params.year_from || 2000};
+var year_from = ${params.year_start || params.year_from || 2000};
+var year_to = ${params.year_end || null};
 var year_count = ${params.year_count || 5};
-var year_to = year_from + year_count;
+year_to = year_to || (year_from + year_count - 1);
+year_count = year_to - year_from + 1;
 
 var WaterESA2 = ee.ImageCollection('${hotspotCatalog.worldCoverPrimaryWater.dataset}').first().eq(${hotspotCatalog.worldCoverPrimaryWater.classValue}).selfMask();
 var WaterESA1 = ee.ImageCollection('${hotspotCatalog.worldCoverLegacyWater.dataset}').first().eq(${hotspotCatalog.worldCoverLegacyWater.classValue}).selfMask();

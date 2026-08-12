@@ -168,10 +168,17 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
                 <Layers3 size={16} />
                 Recommended Layers
               </div>
+              {formData.recommendation_strategy ? (
+                <div className="recommendation-strategy">
+                  {formData.recommendation_strategy}
+                </div>
+              ) : null}
 
               <div className="recommended-layers-list">
                 {(formData.recommended_layers || []).map((layer) => {
                   const checked = Boolean(layerSelection[layer.id]);
+                  const recommendationReason = layer.recommendation_reason || layer.when_to_use || layer.summary;
+                  const riskNotes = layer.risk_notes || layer.when_not_to_use;
 
                   return (
                     <label
@@ -191,8 +198,11 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
                           <span>{layer.spatial_scope}</span>
                           {layer.has_official_recipe ? <span>official style</span> : null}
                         </div>
-                        {layer.summary ? (
-                          <div className="recommended-layer-summary">{layer.summary}</div>
+                        {recommendationReason ? (
+                          <div className="recommended-layer-summary">{recommendationReason}</div>
+                        ) : null}
+                        {riskNotes ? (
+                          <div className="recommended-layer-summary muted">{riskNotes}</div>
                         ) : null}
                       </div>
                     </label>

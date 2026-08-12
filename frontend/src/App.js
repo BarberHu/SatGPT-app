@@ -8,6 +8,7 @@ import Legends from './components/Legends';
 import Modals from './components/Modals';
 import Spinner from './components/Spinner';
 import AgentWorkspaceSidebar from './components/AgentWorkspaceSidebar';
+import AgentDisasterRail from './components/AgentDisasterRail';
 import LocationScopePicker from './components/LocationScopePicker';
 import { useAppContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
@@ -79,6 +80,7 @@ function App() {
         <Profiler id="MapContainer" onRender={mapProfiler}>
           <MapContainer />
         </Profiler>
+        <AgentDisasterRail />
         <div className="ui">
           <SettingsButton />
           <Legends />

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Search } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { searchLocationCandidates } from '../services/agentApi';
 import './LocationScopePicker.css';
@@ -103,6 +104,8 @@ export default function LocationScopePicker({
     setBusinessLayerActive,
     clearAgentVisualState,
     setWarning,
+    floodAgentState,
+    appMode,
   } = useAppContext();
 
   const [query, setQuery] = useState('');
@@ -238,7 +241,10 @@ export default function LocationScopePicker({
       return;
     }
 
-    clearAgentVisualState();
+    const shouldActivateImportedScope = !(appMode === 'agent' && floodAgentState?.confirmation_version);
+    if (shouldActivateImportedScope) {
+      clearAgentVisualState();
+    }
     let firstImportedAoi = null;
 
     selectedCandidates.forEach((candidate) => {
@@ -265,8 +271,12 @@ export default function LocationScopePicker({
       return;
     }
 
-    setBusinessLayerActive(firstImportedAoi.id);
-    setSelectedAOI(firstImportedAoi);
+    if (shouldActivateImportedScope) {
+      setBusinessLayerActive(firstImportedAoi.id);
+      setSelectedAOI(firstImportedAoi);
+    } else {
+      setSelectedAOI(previousSelectedAoiRef.current || null);
+    }
     setWarning('');
 
     if (embedded) {
@@ -282,6 +292,8 @@ export default function LocationScopePicker({
     checkedSet,
     clearAgentVisualState,
     embedded,
+    appMode,
+    floodAgentState,
     onClose,
     registerBusinessLayerFromAoi,
     setBusinessLayerActive,
@@ -335,8 +347,14 @@ export default function LocationScopePicker({
           className="location-scope-picker-search-btn"
           onClick={handleSearch}
           disabled={loading}
+          aria-label={loading ? 'Searching places' : 'Search places'}
+          title={loading ? 'Searching' : 'Search'}
         >
-          {loading ? 'Searching...' : 'Search'}
+          {loading ? (
+            <span className="location-scope-picker-search-spinner" aria-hidden="true" />
+          ) : (
+            <Search size={16} strokeWidth={2.4} aria-hidden="true" />
+          )}
         </button>
       </div>
 
@@ -378,7 +396,7 @@ export default function LocationScopePicker({
         </div>
       ) : null}
 
-      {(candidates.length || error) ? (
+      {candidates.length ? (
         <div className="location-scope-picker-actions">
           <button
             type="button"
@@ -393,7 +411,7 @@ export default function LocationScopePicker({
             onClick={handleConfirm}
             disabled={!checkedIds.length}
           >
-            Add To Layers
+            Add
           </button>
         </div>
       ) : null}

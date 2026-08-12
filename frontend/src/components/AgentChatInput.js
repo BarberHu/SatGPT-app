@@ -80,7 +80,15 @@ function AgentChatInput({
   const [sendError, setSendError] = useState('');
 
   const { interrupt } = useCopilotChatInternal();
-  const { businessLayers, agentSessionId } = useAppContext();
+  const { businessLayers, agentSessionId, agentModule } = useAppContext();
+  const placeholderText = {
+    wildfire: 'Ask about wildfire readiness or a fire event. Use @ only when selecting a spatial scope.',
+    landslide: 'Ask about landslide readiness or a slope-related event. Use @ only when selecting a spatial scope.',
+    context: 'Ask about common context layers. Use @ when selecting a spatial scope.',
+    imagery: 'Ask about optical or SAR imagery. Use @ when selecting a spatial scope.',
+    vector: 'Ask about AOI or vector layers. Use @ when selecting a spatial scope.',
+    flood: 'Ask about a flood event. Use @ only when selecting a spatial scope.',
+  }[agentModule] || 'Ask about a flood event. Use @ only when selecting a spatial scope.';
 
   const mentionCandidates = useMemo(
     () => buildMentionCandidates({
@@ -313,7 +321,7 @@ function AgentChatInput({
               aria-hidden="true"
             >
               {text ? renderHighlightedText(text, mentions) : (
-                <span className="agent-chat-placeholder">Ask about a flood event. Use @ only when selecting a spatial scope.</span>
+                <span className="agent-chat-placeholder">{placeholderText}</span>
               )}
             </div>
             <textarea

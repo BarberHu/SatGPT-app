@@ -74,6 +74,10 @@ class FloodAgentState(CopilotKitState, total=False):
     # 当前选中的推荐图层 id 列表
     selected_layer_ids: List[str]
 
+    recommendation_strategy: str
+
+    recommendation_source: str
+
     # 用户在消息中显式 @ 的图层引用
     mentioned_layer_refs: List[Dict[str, Any]]
 
@@ -91,6 +95,9 @@ class FloodAgentState(CopilotKitState, total=False):
     
     # 搜索来源列表 [{"title": str, "url": str}]
     search_sources: List[Dict[str, str]]
+
+    # Full search materials, isolated by the LangGraph thread state.
+    search_contents: List[Dict[str, str]]
     
     # GEE JavaScript 代码（生成的可下载代码）
     gee_code: str

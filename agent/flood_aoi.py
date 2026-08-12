@@ -1,6 +1,9 @@
 import json
 import os
+import threading
 import time
+from collections import OrderedDict
+from copy import deepcopy
 from typing import Any, Dict, Optional
 
 import requests
@@ -10,6 +13,56 @@ from langchain_openai import ChatOpenAI
 
 AOI_STATUS_RESOLVED = "Boundary resolved"
 AOI_STATUS_APPROXIMATE = "Approximate boundary"
+NOMINATIM_MIN_INTERVAL_SECONDS = 1.0
+NOMINATIM_CACHE_MAX_ENTRIES = 256
+
+_NOMINATIM_LOCK = threading.Lock()
+_NOMINATIM_LAST_REQUEST_AT = 0.0
+_NOMINATIM_CACHE: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+
+
+def _query_nominatim(location_name: str) -> Dict[str, Any]:
+    """Query Nominatim through a process-local 1 RPS gate and bounded cache."""
+    global _NOMINATIM_LAST_REQUEST_AT
+
+    normalized_location = " ".join(str(location_name or "").strip().split())
+    cache_key = normalized_location.casefold()
+    if not cache_key:
+        return {}
+
+    with _NOMINATIM_LOCK:
+        cached = _NOMINATIM_CACHE.get(cache_key)
+        if cached is not None:
+            _NOMINATIM_CACHE.move_to_end(cache_key)
+            return deepcopy(cached)
+
+        elapsed = time.monotonic() - _NOMINATIM_LAST_REQUEST_AT
+        remaining_delay = NOMINATIM_MIN_INTERVAL_SECONDS - elapsed
+        if remaining_delay > 0:
+            time.sleep(remaining_delay)
+
+        _NOMINATIM_LAST_REQUEST_AT = time.monotonic()
+        response = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": normalized_location,
+                "format": "geojson",
+                "polygon_geojson": 1,
+                "limit": 5,
+                "accept-language": "en,zh-CN",
+            },
+            headers={"User-Agent": "FloodAgent/2.0"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        _NOMINATIM_CACHE[cache_key] = deepcopy(data)
+        _NOMINATIM_CACHE.move_to_end(cache_key)
+        while len(_NOMINATIM_CACHE) > NOMINATIM_CACHE_MAX_ENTRIES:
+            _NOMINATIM_CACHE.popitem(last=False)
+
+        return deepcopy(data)
 
 
 def get_chat_model() -> ChatOpenAI:
@@ -199,21 +252,7 @@ Return JSON only:
 
 def _get_location_from_nominatim(location_name: str) -> Optional[Dict[str, Any]]:
     try:
-        time.sleep(1)
-        response = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={
-                "q": location_name,
-                "format": "geojson",
-                "polygon_geojson": 1,
-                "limit": 1,
-                "accept-language": "en,zh-CN",
-            },
-            headers={"User-Agent": "FloodAgent/2.0"},
-            timeout=15,
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = _query_nominatim(location_name)
         features = data.get("features") or []
         if not features:
             return None
@@ -242,21 +281,7 @@ def search_location_candidates(location_name: str, limit: int = 5) -> list[Dict[
     safe_limit = max(1, min(int(limit or 5), 5))
 
     try:
-        time.sleep(1)
-        response = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={
-                "q": location,
-                "format": "geojson",
-                "polygon_geojson": 1,
-                "limit": safe_limit,
-                "accept-language": "en,zh-CN",
-            },
-            headers={"User-Agent": "FloodAgent/2.0"},
-            timeout=15,
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = _query_nominatim(location)
     except Exception:
         return []
 
