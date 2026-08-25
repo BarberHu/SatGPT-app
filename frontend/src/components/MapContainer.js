@@ -1266,14 +1266,13 @@ function MapContainer() {
       handled = true;
       removeLayerAndSource(map, `${sourceId}-layer`, sourceId);
       resetAskSession();
-      showTransientWarning('The previous GEE map tiles expired. Please reload the layer to continue.');
     };
 
     map.on('error', onAskTileError);
     return () => {
       map.off('error', onAskTileError);
     };
-  }, [appMode, layerData, removeLayerAndSource, resetAskSession, showTransientWarning]);
+  }, [appMode, layerData, removeLayerAndSource, resetAskSession]);
 
   // Update layer visibility and opacity
   useEffect(() => {
