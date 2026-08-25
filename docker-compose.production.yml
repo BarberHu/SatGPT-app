@@ -1,0 +1,65 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      AGENT_HOST: 0.0.0.0
+      AGENT_PORT: 8000
+      AGENT_DEBUG: "False"
+      AGENT_WORKERS: ${AGENT_WORKERS}
+      SATGPT_HEAVY_CONCURRENCY: ${SATGPT_HEAVY_CONCURRENCY}
+      SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS: ${SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS}
+      FORWARDED_ALLOW_IPS: "*"
+      HTTP_PROXY: ${HTTP_PROXY}
+      HTTPS_PROXY: ${HTTPS_PROXY}
+      NO_PROXY: localhost,127.0.0.1,agent,runtime,frontend
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gee-service-account.json
+    volumes:
+      - ./.private-key.json:/run/secrets/gee-service-account.json:ro
+    expose:
+      - "8000"
+    restart: unless-stopped
+    init: true
+
+  runtime:
+    build:
+      context: ./runtime
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      RUNTIME_HOST: 0.0.0.0
+      RUNTIME_PORT: 5000
+      SATGPT_SERVICE_HOST: agent
+      AGENT_PORT: 8000
+      HTTP_PROXY: ${HTTP_PROXY}
+      HTTPS_PROXY: ${HTTPS_PROXY}
+      NO_PROXY: localhost,127.0.0.1,agent,runtime,frontend
+    depends_on:
+      agent:
+        condition: service_healthy
+    expose:
+      - "5000"
+    restart: unless-stopped
+    init: true
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_MAPBOX_ACCESS_TOKEN: ${REACT_APP_MAPBOX_ACCESS_TOKEN}
+        REACT_APP_MAPBOX_STYLE_URL: ${REACT_APP_MAPBOX_STYLE_URL}
+    depends_on:
+      agent:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT}:8080"
+    restart: unless-stopped
+    init: true

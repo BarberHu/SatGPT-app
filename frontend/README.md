@@ -25,6 +25,8 @@ npm start
 ```
 
 The frontend reads public variables from `frontend\.env.local`, which is generated from the repository root `.env` by `scripts\windows\helpers\sync_frontend_env.ps1`.
+Browser API calls always use same-origin `/api`, `/health`, `/agent`, and
+`/copilotkit` paths, so separate frontend API URL variables are not needed.
 
 ## API Routes
 

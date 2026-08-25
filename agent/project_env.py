@@ -19,8 +19,9 @@ def _resolve_project_relative_path(raw_value: str | None) -> str | None:
 
 
 def load_project_env() -> Path:
-    """Load the repository root .env as the single source of truth."""
-    load_dotenv(PROJECT_ENV_PATH, override=False)
+    """Load a local .env when present; containers may inject the same values."""
+    if PROJECT_ENV_PATH.is_file():
+        load_dotenv(PROJECT_ENV_PATH, override=False)
 
     # Normalize repo-relative credential paths so services still work when
     # launched from nested directories like "agent/".
@@ -30,3 +31,11 @@ def load_project_env() -> Path:
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = resolved
 
     return PROJECT_ENV_PATH
+
+
+def required_env(name: str) -> str:
+    """Return one explicitly configured environment value or fail clearly."""
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value.strip()

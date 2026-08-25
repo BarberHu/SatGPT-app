@@ -1,11 +1,14 @@
 import json
-import os
 import time
 from typing import Any, Dict, Optional
 
 import requests
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from project_env import load_project_env, required_env
+
+
+load_project_env()
 
 
 AOI_STATUS_RESOLVED = "Boundary resolved"
@@ -14,9 +17,9 @@ AOI_STATUS_APPROXIMATE = "Approximate boundary"
 
 def get_chat_model() -> ChatOpenAI:
     return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        base_url=os.getenv("OPENAI_API_BASE"),
+        model=required_env("LLM_MODEL"),
+        api_key=required_env("OPENAI_API_KEY"),
+        base_url=required_env("OPENAI_API_BASE"),
         temperature=0.2,
     )
 

@@ -32,17 +32,9 @@ from gee_code_generator import generate_flood_gee_code
 from flood_aoi import aoi_to_geo_fields
 from flood_dataset_service import build_confirmation_context
 from mention_context import resolve_mention_context
-from project_env import load_project_env
+from project_env import load_project_env, required_env
 
 load_project_env()
-
-# 配置代理
-http_proxy = os.getenv("HTTP_PROXY")
-https_proxy = os.getenv("HTTPS_PROXY")
-if http_proxy:
-    os.environ["HTTP_PROXY"] = http_proxy
-if https_proxy:
-    os.environ["HTTPS_PROXY"] = https_proxy
 
 
 # ============== 内部函数 ==============
@@ -384,14 +376,14 @@ User message:
 {message_content or ""}
 """
     try:
-        client_kwargs = {"api_key": os.getenv("OPENAI_API_KEY", "")}
-        base_url = os.getenv("OPENAI_API_BASE")
-        if base_url:
-            client_kwargs["base_url"] = base_url
+        client_kwargs = {
+            "api_key": required_env("OPENAI_API_KEY"),
+            "base_url": required_env("OPENAI_API_BASE"),
+        }
 
         client = AsyncOpenAI(**client_kwargs)
         response = await client.chat.completions.create(
-            model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+            model=required_env("LLM_MODEL"),
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -554,9 +546,9 @@ def _get_location_coordinates_internal(location_name: str) -> Optional[Dict[str,
 def _get_model() -> ChatOpenAI:
     """获取 LLM 模型实例"""
     return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        base_url=os.getenv("OPENAI_API_BASE"),
+        model=required_env("LLM_MODEL"),
+        api_key=required_env("OPENAI_API_KEY"),
+        base_url=required_env("OPENAI_API_BASE"),
         temperature=0.7
     )
 

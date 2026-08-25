@@ -17,13 +17,8 @@ import {
   logAgentDiagnostic,
   updateAgentDiagnosticsContext,
 } from './utils/agentDiagnostics';
-import { resolveBrowserEndpoint } from './utils/runtimeUrls';
-
-// CopilotKit 运行时地址，支持本机与局域网访问时自动纠正。
-const COPILOTKIT_URL = resolveBrowserEndpoint(
-  process.env.REACT_APP_COPILOTKIT_URL,
-  '/copilotkit'
-);
+// 浏览器始终通过当前站点的反向代理访问 CopilotKit Runtime。
+const COPILOTKIT_URL = '/copilotkit';
 
 function App() {
   const { appMode, agentSidebarCollapsed } = useAppContext();

@@ -12,7 +12,8 @@
 
 - `scripts\windows\start_windows.bat`
   - Treat the repository root `.env` as the actual runtime config file.
-  - Read Agent / Runtime / Frontend ports from the root `.env`.
+  - Read each launch setting by its single documented name from the root `.env`.
+  - Stop with a clear error when a required setting is missing; no hidden defaults or aliases are used.
   - Sync public `REACT_APP_*` variables from the root `.env` into `frontend\.env.local`.
   - Fail fast when Agent / Runtime / Frontend ports are already occupied, and print the owning PID / command.
   - Start FastAPI agent on `8000`.
@@ -43,9 +44,12 @@ After changing ports, rerun `scripts\windows\start_windows.bat` so `frontend\.en
 
 If Google Earth Engine or other services require a proxy, set:
 
-`set SATGPT_HTTP_PROXY=http://127.0.0.1:7890`
+```env
+HTTP_PROXY=http://127.0.0.1:7890
+HTTPS_PROXY=http://127.0.0.1:7890
+```
 
-before launching `start_windows.bat`.
+in the repository root `.env` before launching `start_windows.bat`.
 
 When proxy is enabled, local service-to-service calls should bypass the proxy:
 

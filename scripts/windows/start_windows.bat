@@ -80,12 +80,10 @@ if errorlevel 1 (
     goto :Fail
 )
 
-if not "%SATGPT_HTTP_PROXY%"=="" (
-    set "HTTP_PROXY=%SATGPT_HTTP_PROXY%"
-    set "HTTPS_PROXY=%SATGPT_HTTP_PROXY%"
-    set "NO_PROXY=localhost,127.0.0.1,::1,%SATGPT_SERVICE_HOST%,%SATGPT_PUBLIC_HOST%"
-    set "no_proxy=localhost,127.0.0.1,::1,%SATGPT_SERVICE_HOST%,%SATGPT_PUBLIC_HOST%"
-    echo Proxy: %SATGPT_HTTP_PROXY%
+if not "%HTTP_PROXY%%HTTPS_PROXY%"=="" (
+    set "NO_PROXY=localhost,127.0.0.1,::1,%SATGPT_SERVICE_HOST%"
+    set "no_proxy=localhost,127.0.0.1,::1,%SATGPT_SERVICE_HOST%"
+    echo Outbound proxy configured through HTTP_PROXY / HTTPS_PROXY
 )
 echo Agent port: %AGENT_PORT%
 echo Runtime port: %RUNTIME_PORT%
@@ -118,9 +116,10 @@ start "React Frontend" cmd /k cd /d "%ROOT_DIR%\frontend" ^&^& call npm start
 echo.
 echo ==========================================
 echo Startup commands dispatched.
-echo FastAPI Agent:      http://%SATGPT_PUBLIC_HOST%:%AGENT_PORT%
-echo CopilotKit Runtime: http://%SATGPT_PUBLIC_HOST%:%RUNTIME_PORT%
-echo React Frontend:     http://%SATGPT_PUBLIC_HOST%:%FRONTEND_PORT%
+echo FastAPI Agent:      http://localhost:%AGENT_PORT%
+echo CopilotKit Runtime: http://localhost:%RUNTIME_PORT%
+echo React Frontend:     http://localhost:%FRONTEND_PORT%
+echo LAN users may use this server's current IP or DNS name with port %FRONTEND_PORT%.
 echo ==========================================
 set "EXIT_CODE=0"
 goto :PauseAndExit

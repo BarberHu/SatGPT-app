@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP_DIR="${SATGPT_APP_DIR:-/opt/satgpt}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$APP_DIR/.env"
 RUN_DIR="$APP_DIR/run"
 LOG_DIR="$APP_DIR/logs"
-MIHOMO_CONFIG_DIR="${MIHOMO_CONFIG_DIR:-$HOME/.config/mihomo}"
+MIHOMO_CONFIG_DIR="$HOME/.config/mihomo"
 
 mkdir -p "$RUN_DIR" "$LOG_DIR"
 
@@ -31,12 +32,40 @@ set -a
 source "$ENV_FILE"
 set +a
 
-AGENT_PORT="${AGENT_PORT:-8000}"
-RUNTIME_PORT="${RUNTIME_PORT:-5000}"
-FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-SATGPT_SERVICE_HOST="${SATGPT_SERVICE_HOST:-127.0.0.1}"
-FRONTEND_HOST="${FRONTEND_HOST:-0.0.0.0}"
-REACT_APP_COPILOTKIT_URL="${REACT_APP_COPILOTKIT_URL:-/copilotkit}"
+require_env() {
+  local name="$1"
+  [[ -v "$name" ]] || fail "Missing required environment variable: $name"
+  [[ -n "${!name}" ]] || fail "Environment variable must not be empty: $name"
+}
+
+required_vars=(
+  GOOGLE_APPLICATION_CREDENTIALS
+  REACT_APP_MAPBOX_ACCESS_TOKEN
+  REACT_APP_MAPBOX_STYLE_URL
+  OPENAI_API_KEY
+  GEE_PROJECT_ID
+  SATGPT_SERVICE_HOST
+  AGENT_HOST
+  AGENT_PORT
+  AGENT_DEBUG
+  AGENT_WORKERS
+  FORWARDED_ALLOW_IPS
+  SATGPT_HEAVY_CONCURRENCY
+  SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS
+  RUNTIME_HOST
+  RUNTIME_PORT
+  FRONTEND_HOST
+  FRONTEND_PORT
+  PROXY_TIMEOUT_MS
+  PROXY_MAX_SOCKETS
+  OPENAI_API_BASE
+  LLM_MODEL
+  GENERATE_SOURCEMAP
+)
+
+for variable_name in "${required_vars[@]}"; do
+  require_env "$variable_name"
+done
 
 is_port_listening() {
   local port="$1"
@@ -46,7 +75,7 @@ is_port_listening() {
 wait_for_port() {
   local name="$1"
   local port="$2"
-  local attempts="${3:-30}"
+  local attempts="$3"
 
   for _ in $(seq 1 "$attempts"); do
     if is_port_listening "$port"; then
@@ -81,7 +110,7 @@ start_process() {
 }
 
 ensure_nvm_node() {
-  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  export NVM_DIR="$HOME/.nvm"
   [[ -s "$NVM_DIR/nvm.sh" ]] || fail "nvm not found at $NVM_DIR/nvm.sh"
   # shellcheck disable=SC1090
   source "$NVM_DIR/nvm.sh"
@@ -96,10 +125,9 @@ PORT=$FRONTEND_PORT
 SATGPT_SERVICE_HOST=$SATGPT_SERVICE_HOST
 AGENT_PORT=$AGENT_PORT
 RUNTIME_PORT=$RUNTIME_PORT
-GENERATE_SOURCEMAP=${GENERATE_SOURCEMAP:-false}
-REACT_APP_MAPBOX_ACCESS_KEY=${REACT_APP_MAPBOX_ACCESS_KEY:-}
-REACT_APP_API_URL=${REACT_APP_API_URL:-}
-REACT_APP_COPILOTKIT_URL=$REACT_APP_COPILOTKIT_URL
+GENERATE_SOURCEMAP=$GENERATE_SOURCEMAP
+REACT_APP_MAPBOX_ACCESS_TOKEN=$REACT_APP_MAPBOX_ACCESS_TOKEN
+REACT_APP_MAPBOX_STYLE_URL=$REACT_APP_MAPBOX_STYLE_URL
 EOF
 }
 
@@ -151,5 +179,6 @@ start_process \
 wait_for_port "frontend" "$FRONTEND_PORT" 45
 
 log "All services started."
-log "Frontend: http://${SATGPT_PUBLIC_HOST:-127.0.0.1}:$FRONTEND_PORT"
+log "Frontend: http://localhost:$FRONTEND_PORT"
+log "LAN users may use this server's current IP or DNS name with port $FRONTEND_PORT"
 log "Health:   curl http://127.0.0.1:$AGENT_PORT/health"

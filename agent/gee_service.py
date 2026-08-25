@@ -13,7 +13,7 @@ import time
 import ee
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
-from project_env import load_project_env
+from project_env import load_project_env, required_env
 
 load_project_env()
 
@@ -30,44 +30,32 @@ def _round_coord(value: Any) -> Any:
     except (TypeError, ValueError):
         return value
 
-# 设置代理（如果配置了的话）
-http_proxy = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
-if http_proxy:
-    os.environ["HTTP_PROXY"] = http_proxy
-    os.environ["HTTPS_PROXY"] = http_proxy
-    print(f"[INFO] Using proxy: {http_proxy}")
-
-
 class GEEService:
     """Google Earth Engine 服务类"""
     
     def __init__(self):
         self.initialized = False
-        self.project_id = os.getenv("GEE_PROJECT_ID", "flood-agent")
+        self.project_id = required_env("GEE_PROJECT_ID")
         self._initialize_ee()
     
     def _initialize_ee(self):
         """初始化 Earth Engine - 与 test.ipynb 保持一致"""
         try:
-            credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            
-            if credentials_path and os.path.exists(credentials_path):
-                # 使用服务账户凭证
-                credentials = ee.ServiceAccountCredentials(
-                    email=None,
-                    key_file=credentials_path
-                )
-                ee.Initialize(credentials, project=self.project_id)
-                print(f"[INFO] Earth Engine initialized with service account (project: {self.project_id})")
-            else:
-                # 使用默认认证 (需要先运行 ee.Authenticate())
-                ee.Initialize(project=self.project_id)
-                print(f"[INFO] Earth Engine initialized with default credentials (project: {self.project_id})")
+            credentials_path = required_env("GOOGLE_APPLICATION_CREDENTIALS")
+            if not os.path.exists(credentials_path):
+                raise FileNotFoundError(f"GEE credentials not found: {credentials_path}")
+
+            credentials = ee.ServiceAccountCredentials(
+                email=None,
+                key_file=credentials_path
+            )
+            ee.Initialize(credentials, project=self.project_id)
+            print(f"[INFO] Earth Engine initialized with service account (project: {self.project_id})")
             
             self.initialized = True
         except Exception as e:
             print(f"[ERROR] Earth Engine initialization failed: {e}")
-            print("[HINT] Set GOOGLE_APPLICATION_CREDENTIALS or run ee.Authenticate() first.")
+            print("[HINT] Check GOOGLE_APPLICATION_CREDENTIALS and GEE_PROJECT_ID in .env.")
             self.initialized = False
     
     def _get_collection_date_range(self, collection: ee.ImageCollection) -> Dict[str, Any]:

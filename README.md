@@ -43,6 +43,10 @@ requirements.txt       Root pointer to agent/requirements.txt
 
 The setup script creates `flood-venv`, installs the FastAPI backend dependencies, installs frontend/runtime npm dependencies, creates `.env` from `.env.example` when missing, and syncs public frontend variables into `frontend\.env.local`.
 
+The root `.env` is the only editable configuration source. Required values use
+one documented name and are validated at build/startup; the application does
+not silently substitute legacy aliases or deployment defaults.
+
 Fill in `.env` after setup:
 
 ```env
@@ -50,7 +54,8 @@ OPENAI_API_KEY=your-openai-key
 TAVILY_API_KEY=your-tavily-key
 GOOGLE_APPLICATION_CREDENTIALS=.\your-service-account.json
 GEE_PROJECT_ID=your-gcp-project
-REACT_APP_MAPBOX_ACCESS_KEY=your-mapbox-token
+REACT_APP_MAPBOX_ACCESS_TOKEN=your-mapbox-token
+REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/your-account/your-style-id
 ```
 
 ## Start
@@ -68,6 +73,13 @@ React Frontend:     http://localhost:3000
 ```
 
 Open http://localhost:3000.
+
+## Production
+
+For an optimized production build and deployment workflow, see
+[PRODUCTION.md](PRODUCTION.md). The production entry point serves compiled React
+assets and compiled Runtime JavaScript; it does not use development servers or
+FastAPI hot reload.
 
 ## API
 

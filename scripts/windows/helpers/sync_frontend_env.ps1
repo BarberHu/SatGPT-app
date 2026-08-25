@@ -18,35 +18,33 @@ Get-Content $rootEnvPath | ForEach-Object {
     }
 }
 
-function Get-EnvValue {
+function Get-RequiredEnvValue {
     param(
-        [string[]]$Names,
-        [string]$Default = ""
+        [Parameter(Mandatory = $true)]
+        [string]$Name
     )
 
-    foreach ($name in $Names) {
-        if ($envMap.ContainsKey($name) -and $envMap[$name] -ne "") {
-            return $envMap[$name]
-        }
+    if (-not $envMap.ContainsKey($Name) -or [string]::IsNullOrWhiteSpace($envMap[$Name])) {
+        throw "Missing required environment variable: $Name"
     }
 
-    return $Default
+    return $envMap[$Name].Trim().Trim("'`"")
 }
 
-$frontendHost = Get-EnvValue -Names @("FRONTEND_HOST") -Default "0.0.0.0"
-$frontendPort = Get-EnvValue -Names @("FRONTEND_PORT") -Default "3000"
-
-$defaultCopilotkitUrl = "/copilotkit"
+$frontendHost = Get-RequiredEnvValue -Name "FRONTEND_HOST"
+$frontendPort = Get-RequiredEnvValue -Name "FRONTEND_PORT"
 
 $content = @(
     "# Auto-generated from the repository root .env",
     "# Edit the root .env, then rerun scripts\windows\start_windows.bat",
     "HOST=${frontendHost}",
     "PORT=${frontendPort}",
-    "GENERATE_SOURCEMAP=$(Get-EnvValue -Names @('GENERATE_SOURCEMAP') -Default 'false')",
-    "REACT_APP_MAPBOX_ACCESS_KEY=$(Get-EnvValue -Names @('REACT_APP_MAPBOX_ACCESS_KEY'))",
-    "REACT_APP_API_URL=$(Get-EnvValue -Names @('REACT_APP_API_URL'))",
-    "REACT_APP_COPILOTKIT_URL=$(Get-EnvValue -Names @('REACT_APP_COPILOTKIT_URL') -Default $defaultCopilotkitUrl)"
+    "SATGPT_SERVICE_HOST=$(Get-RequiredEnvValue -Name 'SATGPT_SERVICE_HOST')",
+    "AGENT_PORT=$(Get-RequiredEnvValue -Name 'AGENT_PORT')",
+    "RUNTIME_PORT=$(Get-RequiredEnvValue -Name 'RUNTIME_PORT')",
+    "GENERATE_SOURCEMAP=$(Get-RequiredEnvValue -Name 'GENERATE_SOURCEMAP')",
+    "REACT_APP_MAPBOX_ACCESS_TOKEN=$(Get-RequiredEnvValue -Name 'REACT_APP_MAPBOX_ACCESS_TOKEN')",
+    "REACT_APP_MAPBOX_STYLE_URL=$(Get-RequiredEnvValue -Name 'REACT_APP_MAPBOX_STYLE_URL')"
 )
 
 [System.IO.File]::WriteAllLines(

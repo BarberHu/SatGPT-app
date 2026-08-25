@@ -76,7 +76,8 @@ OPENAI_API_KEY=你的 OpenAI API Key
 TAVILY_API_KEY=你的 Tavily API Key
 GOOGLE_APPLICATION_CREDENTIALS=你的 GEE 服务账号 json 路径
 GEE_PROJECT_ID=你的 Google Cloud Project ID
-REACT_APP_MAPBOX_ACCESS_KEY=你的 Mapbox Token
+REACT_APP_MAPBOX_ACCESS_TOKEN=你的 Mapbox Token
+REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/你的账号/你的样式ID
 ```
 
 默认端口：

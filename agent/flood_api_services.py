@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import threading
 from io import BytesIO
@@ -19,6 +18,11 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+from project_env import load_project_env, required_env
+
+
+load_project_env()
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -687,28 +691,20 @@ def get_water_regime_change_map_payload(payload: Dict[str, Any]) -> Dict[str, An
 
 
 def _configure_openai() -> None:
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    api_base = os.getenv("OPENAI_API_BASE")
-    if api_base:
-        openai.api_base = api_base
+    openai.api_key = required_env("OPENAI_API_KEY")
+    openai.api_base = required_env("OPENAI_API_BASE")
 
 
 def _get_llm_model() -> str:
-    return os.getenv("LLM_MODEL", "gpt-4o-mini")
+    return required_env("LLM_MODEL")
 
 
 def _create_chat_completion(model: str, messages: list[dict[str, str]], functions: Optional[list[dict[str, Any]]] = None):
-    api_key = os.getenv("OPENAI_API_KEY")
-    api_base = os.getenv("OPENAI_API_BASE")
+    api_key = required_env("OPENAI_API_KEY")
+    api_base = required_env("OPENAI_API_BASE")
 
     if OpenAI is not None:
-        client_kwargs: Dict[str, Any] = {}
-        if api_key:
-            client_kwargs["api_key"] = api_key
-        if api_base:
-            client_kwargs["base_url"] = api_base
-
-        client = OpenAI(**client_kwargs)
+        client = OpenAI(api_key=api_key, base_url=api_base)
         request_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": messages,
