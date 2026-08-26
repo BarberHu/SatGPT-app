@@ -1,6 +1,6 @@
 # SatGPT - Flood Analysis Platform
 
-SatGPT is a flood event analysis platform that combines a React map UI, a CopilotKit runtime, a FastAPI backend, LangGraph, Google Earth Engine, and OpenAI/Tavily integrations.
+SatGPT is a flood event analysis platform that combines a React map UI, a CopilotKit runtime, a FastAPI backend, LangGraph, Google Earth Engine, and OpenAI integrations.
 
 ## Demo
 
@@ -20,8 +20,11 @@ React Frontend :3000
 agent/                 FastAPI + LangGraph backend
 frontend/              React frontend
 runtime/               CopilotKit runtime
-scripts/windows/       Windows setup/start scripts
-start_all.bat          Root wrapper for scripts/windows/start_windows.bat
+scripts/               Deployment setup/build/start/validation scripts
+  windows/             Windows local test and production-like deployment
+  docker/              Docker formal server deployment
+  performance/         Pre-release capacity validation
+experiments/            Non-deployment prototypes and presentation tools
 requirements.txt       Root pointer to agent/requirements.txt
 ```
 
@@ -35,51 +38,78 @@ requirements.txt       Root pointer to agent/requirements.txt
 - Google Earth Engine credentials
 - Mapbox access token
 
-## Setup
+## Deployment and Startup
+
+Run all commands from a PowerShell or terminal window opened in the project root. Do not double-click the scripts directly.
+
+### Windows Local Deployment
+
+1. Right-click an empty area in the project folder, select **Open in Terminal**, and install the runtime environment:
 
 ```powershell
-.\scripts\windows\setup_windows.bat
+.\scripts\windows\satgpt.bat setup
 ```
 
-The setup script creates `flood-venv`, installs the FastAPI backend dependencies, installs frontend/runtime npm dependencies, creates `.env` from `.env.example` when missing, and syncs public frontend variables into `frontend\.env.local`.
-
-The root `.env` is the only editable configuration source. Required values use
-one documented name and are validated at build/startup; the application does
-not silently substitute legacy aliases or deployment defaults.
-
-Fill in `.env` after setup:
+2. Open `.env` in the project root and complete the following settings:
 
 ```env
-OPENAI_API_KEY=your-openai-key
-TAVILY_API_KEY=your-tavily-key
-GOOGLE_APPLICATION_CREDENTIALS=.\your-service-account.json
-GEE_PROJECT_ID=your-gcp-project
+OPENAI_API_KEY=your-openai-api-key
+GOOGLE_APPLICATION_CREDENTIALS=.private-key.json
+GEE_PROJECT_ID=your-google-cloud-project-id
 REACT_APP_MAPBOX_ACCESS_TOKEN=your-mapbox-token
-REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/your-account/your-style-id
+REACT_APP_MAPBOX_STYLE_URL=your-mapbox-style-url
 ```
 
-## Start
+3. Build and start the production version:
 
 ```powershell
-.\start_all.bat
+.\scripts\windows\satgpt.bat deploy
 ```
 
-This starts:
+4. After the services start, open http://localhost:3000 on this computer or `http://MACHINE_IP:3000` from the local network.
 
-```text
-FastAPI Agent:      http://localhost:8000
-CopilotKit Runtime: http://localhost:5000
-React Frontend:     http://localhost:3000
+To start the existing production build again later, run:
+
+```powershell
+.\scripts\windows\satgpt.bat prod
 ```
 
-Open http://localhost:3000.
+After changing code or frontend environment variables, run `deploy` again.
 
-## Production
+5. To use development mode, run:
 
-For an optimized production build and deployment workflow, see
-[PRODUCTION.md](PRODUCTION.md). The production entry point serves compiled React
-assets and compiled Runtime JavaScript; it does not use development servers or
-FastAPI hot reload.
+```powershell
+.\scripts\windows\satgpt.bat dev
+```
+
+### Docker Production Server Deployment
+
+1. Install Docker and Docker Compose on the server, then upload the project to the server.
+2. Prepare `.env` and `.private-key.json` in the project root.
+3. Open a terminal in the project root and run:
+
+```bash
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml up -d --build
+```
+
+4. After deployment, open `http://SERVER_IP:3000` in a browser. If you changed
+   `FRONTEND_PORT`, replace 3000 with the configured port.
+
+Check the service status and logs:
+
+```bash
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml ps
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml logs --tail 100 -f
+```
+
+Stop the project:
+
+```bash
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml down
+```
+
+Docker publishes only the frontend port. Agent port 8000 and Runtime port 5000 remain inside the container network.
+See [PRODUCTION.md](PRODUCTION.md) for additional go-live configuration and capacity guidance.
 
 ## API
 
@@ -101,7 +131,7 @@ FastAPI hot reload.
 
 ## Troubleshooting
 
-If startup reports a port conflict, stop the printed PID first or change `FRONTEND_PORT`, `RUNTIME_PORT`, or `AGENT_PORT` in the repository root `.env`.
+If a service reports a port conflict in its terminal window, stop the process using that port or change `FRONTEND_PORT`, `RUNTIME_PORT`, or `AGENT_PORT` in the repository root `.env`.
 
 If GEE reports `initialized=false`, check `GOOGLE_APPLICATION_CREDENTIALS` and `GEE_PROJECT_ID` in `.env`.
 

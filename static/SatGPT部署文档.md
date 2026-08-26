@@ -52,19 +52,18 @@ v22.16.0
 在仓库根目录执行：
 
 ```powershell
-.\scripts\windows\setup_windows.bat
+.\scripts\windows\satgpt.bat setup
 ```
 
 脚本会完成：
 
 ```text
-1. 检查 Python 3.12.10
-2. 检查 Node.js 22.16.0 和 npm
-3. 创建或复用 flood-venv
-4. 升级 pip 并安装 setuptools<81
-5. 安装 FastAPI 后端依赖
-6. 安装 frontend 和 runtime 的 npm 依赖
-7. 创建 .env 并同步 frontend\.env.local
+1. 检查 Python、Node.js 和 npm 是否可用
+2. 创建或复用 Python 虚拟环境
+3. 安装 Python 后端依赖
+4. 安装 frontend 和 runtime 的 npm 依赖
+5. 缺少 .env 时从 .env.example 创建
+6. 同步 frontend\.env.local
 ```
 
 ## 环境变量
@@ -91,7 +90,7 @@ FRONTEND_PORT=3000
 ## 启动
 
 ```powershell
-.\start_all.bat
+.\scripts\windows\satgpt.bat dev
 ```
 
 成功后访问：

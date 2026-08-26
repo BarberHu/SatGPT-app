@@ -59,11 +59,12 @@ store. Multiple workers currently create inconsistent user sessions.
 
 ## Container deployment
 
-```powershell
-docker compose -f docker-compose.production.yml build --pull
-docker compose -f docker-compose.production.yml up -d
-docker compose -f docker-compose.production.yml ps
-docker compose -f docker-compose.production.yml logs --tail 100
+Run from the repository root on the deployment server:
+
+```bash
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml up -d --build
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml ps
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml logs --tail 100 -f
 ```
 
 Verify the public entry point:
@@ -75,8 +76,8 @@ curl http://127.0.0.1:3000/health
 
 Terminate with:
 
-```powershell
-docker compose -f docker-compose.production.yml down
+```bash
+docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.yml down
 ```
 
 Put a managed load balancer, ingress controller, or reverse proxy with a valid
@@ -87,8 +88,7 @@ TLS certificate in front of port 3000. Do not expose ports 5000 or 8000.
 For a single Windows host without containers:
 
 ```powershell
-.\scripts\windows\build_production.bat
-.\start_production.bat
+.\scripts\windows\satgpt.bat deploy
 ```
 
 This path is useful for acceptance testing. Containers behind a managed TLS

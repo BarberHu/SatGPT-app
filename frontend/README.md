@@ -10,11 +10,11 @@ React Frontend :3000
   -> CopilotKit Runtime :5000 for /copilotkit
 ```
 
-Use the repository root setup and start scripts for normal development:
+From the repository root, use the Windows launcher for normal development:
 
 ```powershell
-..\scripts\windows\setup_windows.bat
-..\scripts\windows\start_windows.bat
+..\scripts\windows\satgpt.bat setup
+..\scripts\windows\satgpt.bat dev
 ```
 
 When running only the frontend:

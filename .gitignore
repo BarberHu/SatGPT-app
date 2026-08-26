@@ -72,8 +72,6 @@ Transfer.md
 E
 
 # Legacy local launcher scripts
-start_*.bat
-stop_*.bat
-!start_all.bat
-!start_production.bat
-scripts/local/
+/start_*.bat
+/stop_*.bat
+/scripts/local/
