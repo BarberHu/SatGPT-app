@@ -6,11 +6,10 @@ import {
   createAgentSessionId,
   getStoredAgentSessionId,
   isBusinessLayerAoiSource,
-  listBusinessLayerRecords,
   persistAgentSessionId,
-  saveBusinessLayerRecords,
 } from '../utils/businessLayerStore';
-import { syncBusinessLayers } from '../services/agentApi';
+import businessLayerRepository from '../repositories/businessLayerRepository';
+import useBusinessLayerPersistence from '../hooks/useBusinessLayerPersistence';
 import {
   buildDefaultAgentLayerOrder,
   buildDefaultAgentRasterLayerVisibility,
@@ -389,7 +388,7 @@ export const AppProvider = ({ children }) => {
 
     setBusinessLayers(seededLayers);
     setBusinessLayersReady(false);
-    saveBusinessLayerRecords(nextSessionId, seededLayers).catch((error) => {
+    businessLayerRepository.saveLocal(nextSessionId, seededLayers).catch((error) => {
       console.error('Failed to seed business layers for new agent session:', error);
     });
 
@@ -497,7 +496,7 @@ export const AppProvider = ({ children }) => {
     let cancelled = false;
     setBusinessLayersReady(false);
 
-    listBusinessLayerRecords(agentSessionId)
+    businessLayerRepository.load(agentSessionId)
       .then((records) => {
         if (cancelled) {
           return;
@@ -521,8 +520,9 @@ export const AppProvider = ({ children }) => {
         if (cancelled) {
           return;
         }
-        setBusinessLayers([]);
-        setBusinessLayersReady(true);
+        // Keep the current in-memory records and block persistence. Treating a
+        // read failure as an empty store would overwrite recoverable user data.
+        setBusinessLayersReady(false);
       });
 
     return () => {
@@ -530,23 +530,16 @@ export const AppProvider = ({ children }) => {
     };
   }, [agentSessionId]);
 
-  useEffect(() => {
-    if (!businessLayersReady) {
-      return;
-    }
+  const handleBusinessLayerPersistenceError = useCallback((error) => {
+    console.error('Failed to persist business layers:', error);
+  }, []);
 
-    saveBusinessLayerRecords(agentSessionId, businessLayers).catch((error) => {
-      console.error('Failed to persist business layers to IndexedDB:', error);
-    });
-
-    syncBusinessLayers({
-      store_key: agentSessionId,
-      store_namespace: 'business_layer_store',
-      layers: businessLayers,
-    }).catch((error) => {
-      console.error('Failed to sync business layers to backend cache:', error);
-    });
-  }, [agentSessionId, businessLayers, businessLayersReady]);
+  useBusinessLayerPersistence({
+    namespace: agentSessionId,
+    records: businessLayers,
+    ready: businessLayersReady,
+    onError: handleBusinessLayerPersistenceError,
+  });
 
   useEffect(() => {
     if (!selectedAOI?.id || !isBusinessLayerAoiSource(selectedAOI?.source)) {
