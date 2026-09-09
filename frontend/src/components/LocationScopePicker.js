@@ -104,7 +104,7 @@ export default function LocationScopePicker({
     setBusinessLayerActive,
     clearAgentVisualState,
     setWarning,
-    floodAgentState,
+    agentAnalysisContext,
     appMode,
   } = useAppContext();
 
@@ -265,7 +265,7 @@ export default function LocationScopePicker({
       return;
     }
 
-    const shouldActivateImportedScope = !(appMode === 'agent' && floodAgentState?.confirmation_version);
+      const shouldActivateImportedScope = !(appMode === 'agent' && agentAnalysisContext?.confirmation_version);
     if (shouldActivateImportedScope) {
       clearAgentVisualState();
     }
@@ -317,7 +317,7 @@ export default function LocationScopePicker({
     clearAgentVisualState,
     embedded,
     appMode,
-    floodAgentState,
+    agentAnalysisContext,
     onClose,
     registerBusinessLayerFromAoi,
     setBusinessLayerActive,

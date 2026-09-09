@@ -28,3 +28,21 @@ export const createDefaultFloodAgentState = () => ({
   recommended_layers: [],
   selected_layer_ids: [],
 });
+
+export const createDefaultAgentAnalysisContext = () => ({
+  pre_date: null,
+  after_date: null,
+  peek_date: null,
+  location: null,
+  coordinates: null,
+  bounds: null,
+  geojson: null,
+  resolved_aoi: null,
+  aoi_resolution_meta: null,
+  confirmed_aoi: null,
+  recommended_layers: [],
+  selected_layer_ids: [],
+  recommendation_strategy: null,
+  recommendation_source: null,
+  confirmation_version: 0,
+});

@@ -251,7 +251,7 @@ function MapContainer() {
     isBuildingsEnabled,
     appMode,
     agentImagery,
-    floodAgentState,
+    agentAnalysisContext,
     // Agent control states
     agentSelectedPeriod,
     agentShowBaseImagery,
@@ -277,7 +277,7 @@ function MapContainer() {
   } = useAppContext();
 
   const shouldPreserveAgentActiveScope = appMode === 'agent'
-    && Boolean(floodAgentState?.confirmation_version)
+    && Boolean(agentAnalysisContext?.confirmation_version)
     && aoiEditorMode !== 'edit';
 
   // Track if map is initialized
@@ -2142,10 +2142,10 @@ function MapContainer() {
     }
 
     const confirmedAoi = selectedAOI
-      || floodAgentState?.confirmed_aoi
-      || floodAgentState?.resolved_aoi
+      || agentAnalysisContext?.confirmed_aoi
+      || agentAnalysisContext?.resolved_aoi
       || null;
-    const confirmationVersion = floodAgentState?.confirmation_version || 0;
+    const confirmationVersion = agentAnalysisContext?.confirmation_version || 0;
 
     if (!confirmedAoi?.bounds || !confirmationVersion) {
       return;
@@ -2163,7 +2163,7 @@ function MapContainer() {
   }, [
     appMode,
     fitAoiBounds,
-    floodAgentState,
+    agentAnalysisContext,
     isAoiEditing,
     selectedAOI,
   ]);

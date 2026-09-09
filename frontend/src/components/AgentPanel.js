@@ -9,18 +9,20 @@ import React, { Profiler, startTransition, useState, useEffect, useCallback, use
 import { flushSync } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
+import AgentGeeCodeDownload from './AgentGeeCodeDownload';
 import EventConfirmation from './EventConfirmation';
 import LayerManager from './LayerManager';
-import {
-  getFloodImages,
-  getFloodImpact,
-  getFloodLayerCatalog,
-  renderRecommendedLayer,
-} from '../services/agentApi';
+import { getFloodLayerCatalog } from '../services/agentApi';
 import useAgentRasterDownload from '../hooks/useAgentRasterDownload';
 import useAgentRasterLayerRequest from '../hooks/useAgentRasterLayerRequest';
+import useFloodAnalysisRequests from '../hooks/useFloodAnalysisRequests';
+import useFloodAgentStateAdapter, {
+  areAoiScopesEquivalent,
+  buildLayerSignature,
+  buildRecommendedLayerContextKey,
+} from '../hooks/useFloodAgentStateAdapter';
+import useRecommendedLayerRenderer from '../hooks/useRecommendedLayerRenderer';
 import {
-  buildAoiBoundsSignature as buildBoundsSignature,
   buildAoiFromAgentState,
   buildAoiSignature,
   buildAskMapRequestParams,
@@ -33,7 +35,6 @@ import {
   sortCatalogLayers,
 } from '../utils/catalogLayers';
 import { buildCatalogLayerContextKey } from '../utils/catalogLayerContext';
-import { finalizeLatestRequest } from '../utils/latestRequest';
 import {
   resolveDefaultCatalogHistoryRange,
   resolveDefaultCatalogPointSelection,
@@ -45,60 +46,12 @@ import { FLOOD_RASTER_LAYER_CONFIG } from '../config/agentRasterLayerConfig';
 import { DEFAULT_FLOOD_AGENT_STATE } from '../config/floodAgentState';
 import {
   createReactProfilerHandler,
-  startAgentDiagnosticSpan,
   updateAgentDiagnosticsContext,
   useRenderDiagnostics,
 } from '../utils/agentDiagnostics';
 import 'rc-slider/assets/index.css';
 import './AgentPanel.css';
 
-const formatCoordinatePart = (value) => {
-  const numericValue = Number(value);
-  return Number.isFinite(numericValue) ? numericValue.toFixed(6) : '';
-};
-
-const buildLayerSignature = (layers = []) => (layers || [])
-  .map((layer) => [
-    layer?.id || '',
-    layer?.layer_family || '',
-    layer?.title || '',
-    layer?.default_selected ? '1' : '0',
-  ].join('~'))
-  .join('|');
-
-const buildSelectedLayerSignature = (layerIds = []) => (layerIds || []).join('|');
-
-const buildRecommendedLayerContextKey = ({
-  confirmationVersion,
-  preDate,
-  peekDate,
-  afterDate,
-  aoiSignature,
-  layerSignature,
-  timeOverrideSignature,
-}) => [
-  confirmationVersion || 0,
-  preDate || '',
-  peekDate || '',
-  afterDate || '',
-  aoiSignature || 'no-aoi',
-  layerSignature || 'no-layers',
-  timeOverrideSignature || 'default-time',
-].join('|');
-
-const areAoiScopesEquivalent = (left, right) => {
-  if (!left || !right) {
-    return false;
-  }
-
-  if (left.id && right.id) {
-    return left.id === right.id;
-  }
-
-  return buildBoundsSignature(left.bounds) === buildBoundsSignature(right.bounds);
-};
-
-const RECOMMENDED_LAYER_MAX_CONCURRENCY = 2;
 const EMPTY_ARRAY = [];
 const JRC_YEARLY_MIN_YEAR = 1984;
 const JRC_YEARLY_MAX_YEAR = 2021;
@@ -315,109 +268,6 @@ const FIELD_LABELS = {
   temporal_type: 'Temporal type',
 };
 
-const formatCoordinatePair = (pair) => [
-  formatCoordinatePart(pair?.[0]),
-  formatCoordinatePart(pair?.[1]),
-].join(':');
-
-const buildRingSampleSignature = (ring = []) => {
-  const pointCount = Array.isArray(ring) ? ring.length : 0;
-  const middleIndex = pointCount ? Math.floor(pointCount / 2) : -1;
-
-  return [
-    pointCount,
-    formatCoordinatePair(pointCount ? ring[0] : null),
-    formatCoordinatePair(pointCount ? ring[middleIndex] : null),
-    formatCoordinatePair(pointCount ? ring[pointCount - 1] : null),
-  ].join('~');
-};
-
-const buildGeometrySampleSignature = (geometry) => {
-  if (!geometry || typeof geometry !== 'object') {
-    return 'no-geometry';
-  }
-
-  switch (geometry.type) {
-    case 'Feature':
-      return ['Feature', buildGeometrySampleSignature(geometry.geometry)].join('|');
-    case 'FeatureCollection':
-      return [
-        'FeatureCollection',
-        Array.isArray(geometry.features) ? geometry.features.length : 0,
-        buildGeometrySampleSignature(geometry.features?.[0]),
-      ].join('|');
-    case 'GeometryCollection':
-      return [
-        'GeometryCollection',
-        Array.isArray(geometry.geometries) ? geometry.geometries.length : 0,
-        buildGeometrySampleSignature(geometry.geometries?.[0]),
-      ].join('|');
-    case 'Polygon':
-      return [
-        'Polygon',
-        Array.isArray(geometry.coordinates) ? geometry.coordinates.length : 0,
-        buildRingSampleSignature(geometry.coordinates?.[0]),
-      ].join('|');
-    case 'MultiPolygon':
-      return [
-        'MultiPolygon',
-        Array.isArray(geometry.coordinates) ? geometry.coordinates.length : 0,
-        Array.isArray(geometry.coordinates?.[0]) ? geometry.coordinates[0].length : 0,
-        buildRingSampleSignature(geometry.coordinates?.[0]?.[0]),
-      ].join('|');
-    default:
-      return geometry.type || 'unknown-geometry';
-  }
-};
-
-const buildGeojsonSignature = (geojson, fallbackBounds = null) => {
-  const geometry = geojson?.geometry || geojson;
-  return [
-    buildBoundsSignature(fallbackBounds),
-    buildGeometrySampleSignature(geometry),
-  ].join('|');
-};
-
-const buildAoiObjectSignature = (aoi, fallbackBounds = null) => {
-  if (!aoi) {
-    return 'no-aoi';
-  }
-
-  const bounds = aoi?.bounds || fallbackBounds || null;
-  return [
-    aoi?.id || '',
-    aoi?.label || '',
-    aoi?.source || '',
-    buildBoundsSignature(bounds),
-    buildGeojsonSignature(aoi?.geojson, bounds),
-  ].join('|');
-};
-
-const buildResolutionMetaSignature = (meta) => {
-  if (!meta) {
-    return 'no-aoi-resolution-meta';
-  }
-
-  return [
-    meta.location || '',
-    meta.source || '',
-    Number.isFinite(Number(meta.confidence)) ? Number(meta.confidence).toFixed(3) : '',
-    meta.status || '',
-    meta.resolution_rank ?? '',
-    buildBoundsSignature(meta.bounds),
-  ].join('|');
-};
-
-const useStableReference = (value, signature) => {
-  const reference = useRef({ signature, value });
-
-  if (reference.current.signature !== signature) {
-    reference.current = { signature, value };
-  }
-
-  return reference.current.value;
-};
-
 const titleCaseKey = (key) => String(key || '')
   .replace(/[_-]+/g, ' ')
   .replace(/\b\w/g, (char) => char.toUpperCase());
@@ -517,19 +367,6 @@ const formatRenderMode = (mode) => {
   return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : null;
 };
 
-// Download GEE JavaScript code file
-function downloadGEECode(code, eventName) {
-  const blob = new Blob([code], { type: 'text/javascript;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${(eventName || 'flood_analysis').replace(/\s+/g, '_')}_GEE_${new Date().toISOString().split('T')[0]}.js`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
 /**
  * Layer data source metadata (static info for each analysis layer)
  */
@@ -546,8 +383,8 @@ const LAYER_META = {
 
 function AgentPanel() {
   const { 
-    setFloodAgentState, 
-    floodAgentState,
+    setAgentAnalysisContext,
+    agentAnalysisContext,
     setWarning,
     setAgentImagery,
     setAgentImageryLoading,
@@ -620,146 +457,20 @@ function AgentPanel() {
     initialState: DEFAULT_FLOOD_AGENT_STATE,
   });
 
-  const imageryRequestKeyRef = useRef(null);
-  const impactRequestKeyRef = useRef(null);
-  const imageryAbortControllerRef = useRef(null);
-  const impactAbortControllerRef = useRef(null);
-  const pendingRecommendedLayerRequestsRef = useRef(new Set());
-  const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
   const previousSelectedAoiSignatureRef = useRef('no-aoi');
-
-  useEffect(() => () => {
-    imageryAbortControllerRef.current?.abort();
-    imageryAbortControllerRef.current = null;
-    impactAbortControllerRef.current?.abort();
-    impactAbortControllerRef.current = null;
-  }, []);
-  const hasCoAgentState = Boolean(state);
-  const rawState = hasCoAgentState ? state : floodAgentState;
-  const rawEvent = rawState?.event || null;
-  const rawPreDate = rawState?.pre_date || null;
-  const rawAfterDate = rawState?.after_date || null;
-  const rawPeekDate = rawState?.peek_date || null;
-  const rawLocation = rawState?.location || null;
-  const rawCoordinates = rawState?.coordinates || null;
-  const rawBounds = rawState?.bounds || null;
-  const rawGeojson = rawState?.geojson || null;
-  const rawResolvedAoi = rawState?.resolved_aoi || null;
-  const rawAoiResolutionMeta = rawState?.aoi_resolution_meta || null;
-  const rawConfirmedAoi = rawState?.confirmed_aoi || null;
-  const rawRecommendedLayers = Array.isArray(rawState?.recommended_layers)
-    ? rawState.recommended_layers
-    : EMPTY_ARRAY;
-  const rawSelectedLayerIds = Array.isArray(rawState?.selected_layer_ids)
-    ? rawState.selected_layer_ids
-    : EMPTY_ARRAY;
-  const rawRecommendationStrategy = rawState?.recommendation_strategy || null;
-  const rawRecommendationSource = rawState?.recommendation_source || null;
-  const rawConfirmationVersion = rawState?.confirmation_version || 0;
-  const rawGeeCode = rawState?.gee_code || null;
-  const rawPreferredAoi = rawState?.confirmed_aoi || rawState?.resolved_aoi || null;
-  const rawBoundsSignature = buildBoundsSignature(rawPreferredAoi?.bounds || rawState?.bounds);
-  const rawGeojsonSignature = buildGeojsonSignature(rawGeojson, rawBounds);
-  const rawResolvedAoiSignature = buildAoiObjectSignature(rawResolvedAoi, rawBounds);
-  const rawConfirmedAoiSignature = buildAoiObjectSignature(rawConfirmedAoi, rawBounds);
-  const rawAoiResolutionMetaSignature = buildResolutionMetaSignature(rawAoiResolutionMeta);
-  const rawRecommendedLayerSignature = buildLayerSignature(rawRecommendedLayers);
-  const rawSelectedLayerSignature = buildSelectedLayerSignature(rawSelectedLayerIds);
-  const rawCoordinatesSignature = [
-    formatCoordinatePart(rawCoordinates?.[0]),
-    formatCoordinatePart(rawCoordinates?.[1]),
-  ].join(':');
-  const stableCoordinates = useStableReference(rawCoordinates, rawCoordinatesSignature);
-  const stableBounds = useStableReference(rawBounds, rawBoundsSignature);
-  const stableGeojson = useStableReference(rawGeojson, rawGeojsonSignature);
-  const stableResolvedAoi = useStableReference(rawResolvedAoi, rawResolvedAoiSignature);
-  const stableAoiResolutionMeta = useStableReference(rawAoiResolutionMeta, rawAoiResolutionMetaSignature);
-  const stableConfirmedAoi = useStableReference(rawConfirmedAoi, rawConfirmedAoiSignature);
-  const stableRecommendedLayers = useStableReference(rawRecommendedLayers, rawRecommendedLayerSignature);
-  const stableSelectedLayerIds = useStableReference(rawSelectedLayerIds, rawSelectedLayerSignature);
-  const currentState = useMemo(
-    () => ({
-      ...DEFAULT_FLOOD_AGENT_STATE,
-      event: rawEvent,
-      pre_date: rawPreDate,
-      after_date: rawAfterDate,
-      peek_date: rawPeekDate,
-      location: rawLocation,
-      coordinates: stableCoordinates,
-      bounds: stableBounds,
-      geojson: stableGeojson,
-      resolved_aoi: stableResolvedAoi,
-      confirmed_aoi: stableConfirmedAoi,
-      recommended_layers: stableRecommendedLayers,
-      selected_layer_ids: stableSelectedLayerIds,
-      recommendation_strategy: rawRecommendationStrategy,
-      recommendation_source: rawRecommendationSource,
-      confirmation_version: rawConfirmationVersion,
-      gee_code: rawGeeCode,
-    }),
-    [
-      rawEvent,
-      rawPreDate,
-      rawAfterDate,
-      rawPeekDate,
-      rawLocation,
-      stableCoordinates,
-      stableBounds,
-      stableGeojson,
-      stableResolvedAoi,
-      stableConfirmedAoi,
-      stableRecommendedLayers,
-      stableSelectedLayerIds,
-      rawRecommendationStrategy,
-      rawRecommendationSource,
-      rawGeeCode,
-      rawConfirmationVersion,
-    ]
-  );
-
-  const sharedAgentState = useMemo(
-    () => ({
-      ...DEFAULT_FLOOD_AGENT_STATE,
-      location: rawLocation,
-      coordinates: stableCoordinates,
-      bounds: stableBounds,
-      geojson: stableGeojson,
-      resolved_aoi: stableResolvedAoi,
-      aoi_resolution_meta: stableAoiResolutionMeta,
-      confirmed_aoi: stableConfirmedAoi,
-      recommended_layers: stableRecommendedLayers,
-      selected_layer_ids: stableSelectedLayerIds,
-      recommendation_strategy: rawRecommendationStrategy,
-      recommendation_source: rawRecommendationSource,
-      confirmation_version: rawConfirmationVersion,
-    }),
-    [
-      rawLocation,
-      stableCoordinates,
-      stableBounds,
-      stableGeojson,
-      stableResolvedAoi,
-      stableAoiResolutionMeta,
-      stableConfirmedAoi,
-      stableRecommendedLayers,
-      stableSelectedLayerIds,
-      rawRecommendationStrategy,
-      rawRecommendationSource,
-      rawConfirmationVersion,
-    ]
-  );
+  const {
+    currentState,
+    hasCoAgentState,
+    viewState: sharedAgentState,
+  } = useFloodAgentStateAdapter({ state, fallbackState: agentAnalysisContext });
 
   useEffect(() => {
     if (hasCoAgentState) {
       startTransition(() => {
-        setFloodAgentState(sharedAgentState);
+        setAgentAnalysisContext(sharedAgentState);
       });
     }
-  }, [hasCoAgentState, setFloodAgentState, sharedAgentState]);
-
-  useEffect(() => {
-    agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
-  }, [agentRecommendedLayerData]);
+  }, [hasCoAgentState, setAgentAnalysisContext, sharedAgentState]);
 
   const currentConfirmedAoi = currentState?.confirmed_aoi || null;
   const currentResolvedAoi = currentState?.resolved_aoi || null;
@@ -980,6 +691,42 @@ function AgentPanel() {
     layer,
     dateWindow: getCatalogLayerDateWindow(layer),
   }), [getCatalogLayerDateWindow, recommendedLayerBaseContextKey]);
+  useFloodAnalysisRequests({
+    analysisDisplayEnabled,
+    currentAfterDate,
+    currentBounds,
+    currentCoordinates,
+    currentGeojson,
+    currentPeekDate,
+    currentPreDate,
+    effectiveAoi,
+    effectiveAoiSignature,
+    impactLayerVisible: agentShowPopulationLayer || agentShowUrbanLayer || agentShowLandcoverLayer,
+    agentImpactData,
+    agentImpactLoading,
+    setAgentImagery,
+    setAgentImageryLoading,
+    setAgentImpactData,
+    setAgentImpactLoading,
+    setAgentTileError,
+    setWarning,
+  });
+  useRecommendedLayerRenderer({
+    agentRecommendedLayerData,
+    agentRecommendedLayerVisibility,
+    canRenderCatalogLayer,
+    catalogRenderAoi,
+    controlPanelCatalogLayers,
+    currentAfterDate,
+    currentPeekDate,
+    currentPreDate,
+    getCatalogLayerDateWindow,
+    getRecommendedLayerContextKey,
+    recommendedLayerBaseContextKey,
+    setAgentLayerLoading,
+    setAgentRecommendedLayerData,
+    setWarning,
+  });
   const panelProfiler = useMemo(
     () => createReactProfilerHandler('AgentPanel', () => ({
       analysisDisplayEnabled,
@@ -1723,406 +1470,6 @@ function AgentPanel() {
     setAgentShowUrbanLayer,
   ]);
 
-  useEffect(() => {
-    const catalogLayersById = new Map(
-      controlPanelCatalogLayers.map((layer) => [layer.id, layer])
-    );
-
-    setAgentRecommendedLayerData((previous) => {
-      let changed = false;
-      const next = {};
-
-      Object.entries(previous || {}).forEach(([layerId, descriptor]) => {
-        const layer = catalogLayersById.get(layerId);
-        if (layer && descriptor?.context_key === getRecommendedLayerContextKey(layer)) {
-          next[layerId] = descriptor;
-        } else {
-          changed = true;
-        }
-      });
-
-      return changed ? next : previous;
-    });
-  }, [controlPanelCatalogLayers, getRecommendedLayerContextKey, setAgentRecommendedLayerData]);
-
-  useEffect(() => {
-    pendingRecommendedLayerRequestsRef.current.clear();
-  }, [recommendedLayerBaseContextKey]);
-
-  const fetchAgentImagery = useCallback(async (agentState, aoi) => {
-    const requestKey = [
-      agentState.pre_date || '',
-      agentState.peek_date || '',
-      agentState.after_date || '',
-      buildAoiSignature(aoi, agentState.bounds),
-      formatCoordinatePart(agentState.coordinates?.[0]),
-      formatCoordinatePart(agentState.coordinates?.[1]),
-    ].join('|');
-
-    if (imageryRequestKeyRef.current === requestKey) {
-      return;
-    }
-
-    const previousController = imageryAbortControllerRef.current;
-    const requestController = new AbortController();
-    imageryRequestKeyRef.current = requestKey;
-    imageryAbortControllerRef.current = requestController;
-    previousController?.abort();
-    impactAbortControllerRef.current?.abort();
-    impactAbortControllerRef.current = null;
-    impactRequestKeyRef.current = null;
-    setAgentImpactLoading(false);
-    setAgentImagery(null);
-    setAgentImpactData(null);
-    setAgentTileError(null);
-    setAgentImageryLoading(true);
-    setWarning('');
-
-    const finishImagerySpan = startAgentDiagnosticSpan('network', 'flood_images', {
-      requestKey,
-      aoiSource: aoi?.source || 'agent',
-      hasBounds: Boolean(aoi?.bounds || agentState.bounds),
-      hasGeojson: Boolean(aoi?.geojson?.geometry || agentState.geojson?.geometry),
-      preDate: agentState.pre_date || null,
-      peekDate: agentState.peek_date || null,
-      afterDate: agentState.after_date || null,
-    });
-    let releaseRequestKeyForRetry = false;
-
-    try {
-      const result = await getFloodImages({
-        pre_date: agentState.pre_date,
-        peek_date: agentState.peek_date,
-        after_date: agentState.after_date,
-        longitude: agentState.coordinates?.[0] || 0,
-        latitude: agentState.coordinates?.[1] || 0,
-        bounds: aoi?.bounds || agentState.bounds || null,
-        geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
-      }, { signal: requestController.signal });
-
-      if (imageryRequestKeyRef.current !== requestKey) {
-        finishImagerySpan({ status: 'stale' });
-        return;
-      }
-
-      if (result?.success) {
-        setAgentImagery(result.data);
-        setWarning('');
-        finishImagerySpan({
-          status: 'success',
-          hasFloodDetection: Boolean(result?.data?.flood_detection),
-          periods: Object.keys(result?.data || {}).filter((key) => key.endsWith('_date')),
-        });
-        trackUxEvent('imagery_request_success', {
-          source: aoi?.source || 'agent',
-          mode: 'agent',
-        });
-      } else {
-        throw new Error('Flood imagery response was not successful.');
-      }
-    } catch (error) {
-      if (error?.isCanceled) {
-        finishImagerySpan({ status: 'cancelled' });
-        return;
-      }
-      if (imageryRequestKeyRef.current !== requestKey) {
-        return;
-      }
-      console.error('Failed to fetch imagery:', error);
-      releaseRequestKeyForRetry = true;
-      finishImagerySpan({
-        status: 'error',
-        error: error?.message || 'unknown',
-      });
-      setWarning(error?.message || 'Flood imagery request failed.');
-      trackUxEvent('imagery_request_fail', {
-        mode: 'agent',
-        error: error?.message || 'Unknown imagery error',
-      });
-    } finally {
-      if (imageryAbortControllerRef.current === requestController) {
-        imageryAbortControllerRef.current = null;
-      }
-      finalizeLatestRequest({
-        requestKeyRef: imageryRequestKeyRef,
-        requestKey,
-        setLoading: setAgentImageryLoading,
-        releaseForRetry: releaseRequestKeyForRetry,
-      });
-    }
-  }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentImpactLoading, setAgentTileError, setWarning]);
-
-  useEffect(() => {
-    if (!analysisDisplayEnabled || !currentPreDate || !currentPeekDate || !currentAfterDate) {
-      imageryAbortControllerRef.current?.abort();
-      imageryAbortControllerRef.current = null;
-      impactAbortControllerRef.current?.abort();
-      impactAbortControllerRef.current = null;
-      imageryRequestKeyRef.current = null;
-      impactRequestKeyRef.current = null;
-      setAgentImageryLoading(false);
-      setAgentImpactLoading(false);
-      return;
-    }
-
-    if (effectiveAoi || currentCoordinates) {
-      fetchAgentImagery({
-        pre_date: currentPreDate,
-        peek_date: currentPeekDate,
-        after_date: currentAfterDate,
-        coordinates: currentCoordinates,
-        bounds: currentBounds,
-        geojson: currentGeojson,
-      }, effectiveAoi);
-    }
-  }, [
-    analysisDisplayEnabled,
-    currentAfterDate,
-    currentBounds,
-    currentCoordinates,
-    currentGeojson,
-    currentPeekDate,
-    currentPreDate,
-    effectiveAoi,
-    fetchAgentImagery,
-    setAgentImageryLoading,
-    setAgentImpactLoading,
-  ]);
-
-  // Fetch flood impact assessment data
-  const fetchImpactData = useCallback(async () => {
-    if (!analysisDisplayEnabled || !currentPreDate || !currentPeekDate) return;
-
-    const requestKey = [
-      currentPreDate || '',
-      currentPeekDate || '',
-      effectiveAoiSignature,
-    ].join('|');
-
-    if (impactRequestKeyRef.current === requestKey) {
-      return;
-    }
-
-    const previousController = impactAbortControllerRef.current;
-    const requestController = new AbortController();
-    impactRequestKeyRef.current = requestKey;
-    impactAbortControllerRef.current = requestController;
-    previousController?.abort();
-    setAgentImpactLoading(true);
-    setWarning('');
-    const finishImpactSpan = startAgentDiagnosticSpan('network', 'flood_impact', {
-      requestKey,
-      aoiSource: effectiveAoi?.source || 'agent',
-      hasBounds: Boolean(effectiveAoi?.bounds || currentBounds),
-      hasGeojson: Boolean(effectiveAoi?.geojson?.geometry || currentGeojson),
-      preDate: currentPreDate || null,
-      peekDate: currentPeekDate || null,
-    });
-    let releaseRequestKeyForRetry = false;
-    try {
-      const result = await getFloodImpact({
-        pre_date: currentPreDate,
-        peek_date: currentPeekDate,
-        bounds: effectiveAoi?.bounds || currentBounds || null,
-        geojson: effectiveAoi?.geojson?.geometry || currentGeojson || null,
-      }, { signal: requestController.signal });
-
-      if (impactRequestKeyRef.current !== requestKey) {
-        finishImpactSpan({ status: 'stale' });
-        return;
-      }
-
-      if (result.success) {
-        setAgentImpactData(result.data);
-        setWarning('');
-        finishImpactSpan({
-          status: 'success',
-          keys: Object.keys(result?.data || {}),
-        });
-        trackUxEvent('impact_request_success', {
-          mode: 'agent',
-          source: effectiveAoi?.source || 'agent',
-        });
-      }
-    } catch (error) {
-      if (error?.isCanceled) {
-        finishImpactSpan({ status: 'cancelled' });
-        return;
-      }
-      if (impactRequestKeyRef.current !== requestKey) {
-        return;
-      }
-      console.error('Failed to fetch impact data:', error);
-      releaseRequestKeyForRetry = true;
-      finishImpactSpan({
-        status: 'error',
-        error: error?.message || 'unknown',
-      });
-      setWarning(error?.message || 'Flood impact request failed.');
-      trackUxEvent('impact_request_fail', {
-        mode: 'agent',
-        error: error?.message || 'Unknown impact error',
-      });
-    } finally {
-      if (impactAbortControllerRef.current === requestController) {
-        impactAbortControllerRef.current = null;
-      }
-      finalizeLatestRequest({
-        requestKeyRef: impactRequestKeyRef,
-        requestKey,
-        setLoading: setAgentImpactLoading,
-        releaseForRetry: releaseRequestKeyForRetry,
-      });
-    }
-  }, [
-    analysisDisplayEnabled,
-    currentBounds,
-    currentGeojson,
-    currentPeekDate,
-    currentPreDate,
-    effectiveAoi,
-    effectiveAoiSignature,
-    setAgentImpactData,
-    setAgentImpactLoading,
-    setWarning,
-  ]);
-
-  // Also fetch if user enables an impact layer before data arrived
-  useEffect(() => {
-    if (!analysisDisplayEnabled) {
-      return;
-    }
-
-    if ((agentShowPopulationLayer || agentShowUrbanLayer || agentShowLandcoverLayer) && !agentImpactData && !agentImpactLoading) {
-      fetchImpactData();
-    }
-  }, [agentShowPopulationLayer, agentShowUrbanLayer, agentShowLandcoverLayer, agentImpactData, agentImpactLoading, analysisDisplayEnabled, fetchImpactData]);
-
-  useEffect(() => {
-    const visibleCatalogLayers = controlPanelCatalogLayers.filter((layer) => (
-      agentRecommendedLayerVisibility[layer.id] && canRenderCatalogLayer(layer)
-    ));
-    if (!catalogRenderAoi || !visibleCatalogLayers.length) {
-      return;
-    }
-
-    let cancelled = false;
-    const requestController = new AbortController();
-    const pendingRecommendedLayerRequests = pendingRecommendedLayerRequestsRef.current;
-    const layerRequestsToRender = visibleCatalogLayers.map((layer) => {
-      const contextKey = getRecommendedLayerContextKey(layer);
-      return {
-        layer,
-        contextKey,
-        requestToken: `${contextKey}:${layer.id}`,
-      };
-    }).filter(({ layer, contextKey, requestToken }) => {
-      const cached = agentRecommendedLayerDataRef.current?.[layer.id];
-      return !(
-        (cached?.tile_url && cached?.context_key === contextKey)
-        || pendingRecommendedLayerRequests.has(requestToken)
-      );
-    });
-
-    if (!layerRequestsToRender.length) {
-      return undefined;
-    }
-
-    const processLayer = async ({ layer, contextKey, requestToken }) => {
-      const finishLayerSpan = startAgentDiagnosticSpan('layer', 'render_recommended_layer', {
-        requestToken,
-        layerId: layer.id,
-        layerTitle: layer.title || layer.id,
-      });
-
-      pendingRecommendedLayerRequests.add(requestToken);
-      setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: true }));
-
-      try {
-        const layerDateWindow = getCatalogLayerDateWindow(layer);
-        const result = await renderRecommendedLayer({
-          layer_id: layer.id,
-          recommended_layers: controlPanelCatalogLayers,
-          confirmed_aoi: catalogRenderAoi,
-          pre_date: layerDateWindow.start_date || currentPreDate,
-          peek_date: currentPeekDate || layerDateWindow.start_date,
-          after_date: layerDateWindow.end_date || currentAfterDate,
-        }, { signal: requestController.signal });
-
-        if (cancelled || !result?.success) {
-          finishLayerSpan({ status: cancelled ? 'cancelled' : 'unsuccessful' });
-          return;
-        }
-
-        setAgentRecommendedLayerData((previous) => ({
-          ...previous,
-          [layer.id]: {
-            ...result.data,
-            context_key: contextKey,
-          },
-        }));
-        finishLayerSpan({
-          status: 'success',
-          hasTileUrl: Boolean(result?.data?.tile_url),
-        });
-      } catch (error) {
-        if (!cancelled && !error?.isCanceled) {
-          setWarning(error?.message || 'Failed to render recommended layer.');
-        }
-        finishLayerSpan({
-          status: cancelled || error?.isCanceled ? 'cancelled' : 'error',
-          error: error?.message || 'unknown',
-        });
-      } finally {
-        pendingRecommendedLayerRequests.delete(requestToken);
-        if (!cancelled) {
-          setAgentLayerLoading((previous) => ({ ...previous, [layer.id]: false }));
-        }
-      }
-    };
-
-    const runRenderQueue = async () => {
-      for (let index = 0; index < layerRequestsToRender.length && !cancelled; index += RECOMMENDED_LAYER_MAX_CONCURRENCY) {
-        const batch = layerRequestsToRender.slice(index, index + RECOMMENDED_LAYER_MAX_CONCURRENCY);
-        await Promise.allSettled(batch.map((request) => processLayer(request)));
-      }
-    };
-
-    runRenderQueue();
-    
-    return () => {
-      cancelled = true;
-      requestController.abort();
-      layerRequestsToRender.forEach(({ requestToken }) => {
-        pendingRecommendedLayerRequests.delete(requestToken);
-      });
-      setAgentLayerLoading((previous) => {
-        let changed = false;
-        const next = { ...previous };
-        layerRequestsToRender.forEach(({ layer }) => {
-          if (next[layer.id]) {
-            next[layer.id] = false;
-            changed = true;
-          }
-        });
-        return changed ? next : previous;
-      });
-    };
-  }, [
-    agentRecommendedLayerVisibility,
-    canRenderCatalogLayer,
-    catalogRenderAoi,
-    controlPanelCatalogLayers,
-    currentAfterDate,
-    currentPeekDate,
-    currentPreDate,
-    getCatalogLayerDateWindow,
-    getRecommendedLayerContextKey,
-    setAgentLayerLoading,
-    setAgentRecommendedLayerData,
-    setWarning,
-  ]);
-
   // Human-in-the-Loop: Handle LangGraph interrupt events
   useLangGraphInterrupt({
     enabled: ({ eventValue }) => eventValue?.type === "confirm_flood_event",
@@ -2166,33 +1513,7 @@ function AgentPanel() {
           </div>
         </section>
 
-        {/* GEE Code Download - bottom of panel, same style as Ask mode */}
-        <div className="download-btn-div">
-          <button
-            type="button"
-            className={`submit btn download ${!downloadableGeeCode ? 'disabled' : ''}`}
-            onClick={() => {
-              if (!downloadableGeeCode) {
-                return;
-              }
-              trackUxEvent('export_gee_code', {
-                event: currentEvent || null,
-                mode: 'agent',
-                source: 'agent_state',
-              });
-              downloadGEECode(downloadableGeeCode, currentEvent);
-            }}
-            disabled={!downloadableGeeCode}
-            style={{
-              cursor: downloadableGeeCode ? 'pointer' : 'not-allowed',
-              opacity: downloadableGeeCode ? 1 : 0.5,
-              pointerEvents: downloadableGeeCode ? 'auto' : 'none',
-            }}
-            title={downloadableGeeCode ? 'Download Google Earth Engine JavaScript' : 'GEE code is available after event dates and AOI are resolved'}
-          >
-            DOWNLOAD GEE CODE
-          </button>
-        </div>
+        <AgentGeeCodeDownload code={downloadableGeeCode} eventName={currentEvent} />
       </div>
     </Profiler>
   );

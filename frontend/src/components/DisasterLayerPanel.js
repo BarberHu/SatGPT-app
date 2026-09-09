@@ -143,7 +143,7 @@ function DisasterLayerPanel({
     agentLayerProgress,
     mergeLayerData,
     setWarning,
-    floodAgentState,
+    agentAnalysisContext,
     agentImagery,
     setAgentImagery,
     agentImageryLoading,
@@ -191,8 +191,8 @@ function DisasterLayerPanel({
     imageryAbortControllerRef.current = null;
   }, []);
   const resolvedImageryDateWindow = useMemo(
-    () => normalizeImageryDateWindow(agentImageryDateWindow, floodAgentState),
-    [agentImageryDateWindow, floodAgentState]
+    () => normalizeImageryDateWindow(agentImageryDateWindow, agentAnalysisContext),
+    [agentAnalysisContext, agentImageryDateWindow]
   );
   const hasValidImageryDateWindow = isValidImageryDateWindow(resolvedImageryDateWindow);
   const appliedImageryWindow = agentImagery?.imagery_window || null;
@@ -203,7 +203,7 @@ function DisasterLayerPanel({
   );
 
   const handleImageryDateChange = useCallback((fieldKey, nextValue) => {
-    const current = normalizeImageryDateWindow(agentImageryDateWindow, floodAgentState);
+    const current = normalizeImageryDateWindow(agentImageryDateWindow, agentAnalysisContext);
     let nextStart = fieldKey === 'start_date' ? nextValue : current.start_date;
     let nextEnd = fieldKey === 'end_date' ? nextValue : current.end_date;
     if (nextStart && nextEnd && nextStart > nextEnd) {
@@ -214,7 +214,7 @@ function DisasterLayerPanel({
       }
     }
     setAgentImageryDateWindow({ start_date: nextStart, end_date: nextEnd });
-  }, [agentImageryDateWindow, floodAgentState, setAgentImageryDateWindow]);
+  }, [agentAnalysisContext, agentImageryDateWindow, setAgentImageryDateWindow]);
 
   const fetchImageryWindow = useCallback(async () => {
     if (!activeAnalysisAoi) {

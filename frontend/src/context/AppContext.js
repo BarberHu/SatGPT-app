@@ -15,7 +15,7 @@ import {
   buildDefaultAgentLayerOrder,
   buildDefaultAgentRasterLayerVisibility,
 } from '../config/agentRasterLayerConfig';
-import { createDefaultFloodAgentState } from '../config/floodAgentState';
+import { createDefaultAgentAnalysisContext } from '../config/floodAgentState';
 import { createEmptyLayerData, normalizeLayerData } from '../api/adapters/layerDataAdapter';
 import { appModeReducer, planAppModeTransition } from '../app/appModeReducer';
 
@@ -144,8 +144,8 @@ export const AppProvider = ({ children }) => {
   const [agentVisualResetVersion, setAgentVisualResetVersion] = useState(0);
   const selectedAOIRef = useRef(null);
   
-  // ========== Flood Agent 分析上下文（事件、时间、AOI、推荐图层） ==========
-  const [floodAgentState, setFloodAgentState] = useState(createDefaultFloodAgentState);
+  // CopilotKit owns conversation state; this projection only feeds map and view components.
+  const [agentAnalysisContext, setAgentAnalysisContext] = useState(createDefaultAgentAnalysisContext);
   
   // Flood Agent 当前加载的影像结果，用于地图渲染与图层面板显示。
   const [agentImagery, setAgentImagery] = useState(null);
@@ -176,29 +176,6 @@ export const AppProvider = ({ children }) => {
   const [agentLayerProgress, setAgentLayerProgress] = useState({});
   const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
   
-  // 更新 Flood Agent 单个字段，避免在组件里散落手写对象合并逻辑。
-  const updateFloodAgentField = useCallback((field, value) => {
-    setFloodAgentState(prev => ({
-      ...prev,
-      [field]: value,
-    }));
-  }, []);
-  
-  // 重置 Flood Agent 共享状态，并清空相关影像与推荐图层缓存。
-  const resetFloodAgentState = useCallback(() => {
-    setFloodAgentState(createDefaultFloodAgentState());
-    setAgentImagery(null);
-    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
-    setAgentRecommendedLayerData({});
-    setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
-    setAgentRasterExpectedRequestKeys({});
-    setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
-    setAgentLayerOrder(buildDefaultAgentLayerOrder());
-    setAgentLayerLoading({});
-    setAgentLayerProgress({});
-  }, []);
-
   const clearAgentVisualState = useCallback(() => {
     setAgentImagery(null);
     setAgentImageryLoading(false);
@@ -425,7 +402,7 @@ export const AppProvider = ({ children }) => {
   }, [selectedAOI]);
 
   const resetAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
-    setFloodAgentState(createDefaultFloodAgentState());
+    setAgentAnalysisContext(createDefaultAgentAnalysisContext());
     setAgentImagery(null);
     setAgentImageryLoading(false);
     setAgentImageryDateWindow(defaultAgentImageryDateWindow);
@@ -669,9 +646,9 @@ export const AppProvider = ({ children }) => {
   }, []);
 
   const startAoiEdit = useCallback(() => {
-    const editableAoi = selectedAOI || buildAoiFromAgentState(floodAgentState, {
+    const editableAoi = selectedAOI || buildAoiFromAgentState(agentAnalysisContext, {
       source: 'agent_geocode',
-      label: floodAgentState?.location || 'Agent-derived scope',
+      label: agentAnalysisContext?.location || 'Agent-derived scope',
     });
 
     if (!editableAoi) {
@@ -683,7 +660,7 @@ export const AppProvider = ({ children }) => {
     setAoiEditorMode('edit');
     setWarning('');
     return true;
-  }, [floodAgentState, selectedAOI]);
+  }, [agentAnalysisContext, selectedAOI]);
 
   const applyDraftAoi = useCallback(() => {
     if (!draftAOI?.geojson) {
@@ -829,11 +806,9 @@ export const AppProvider = ({ children }) => {
     agentModule,
     setAgentModule,
     
-    // FloodAgent State
-    floodAgentState,
-    setFloodAgentState,
-    updateFloodAgentField,
-    resetFloodAgentState,
+    // Read-only projection of CopilotKit agent state for map/view consumers.
+    agentAnalysisContext,
+    setAgentAnalysisContext,
     resetAgentSession,
     agentImagery,
     setAgentImagery,

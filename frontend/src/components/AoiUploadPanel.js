@@ -58,7 +58,7 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
     setSelectedAOI,
     setSelectedGridCords,
     setWarning,
-    floodAgentState,
+    agentAnalysisContext,
     appMode,
     isAoiEditing,
     startAoiDraw,
@@ -73,9 +73,9 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
     fitAoiBoundsOnMap,
   } = useAppContext();
 
-  const effectiveAoi = selectedAOI || buildAoiFromAgentState(floodAgentState, {
+  const effectiveAoi = selectedAOI || buildAoiFromAgentState(agentAnalysisContext, {
     source: 'agent_geocode',
-    label: floodAgentState?.location || 'Agent-derived scope',
+    label: agentAnalysisContext?.location || 'Agent-derived scope',
   });
   const hasEditableAoi = Boolean(effectiveAoi);
 
@@ -116,7 +116,7 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
         throw new Error('The file does not contain a valid Polygon or MultiPolygon scope.');
       }
 
-      const shouldActivateUploadedScope = !(appMode === 'agent' && floodAgentState?.confirmation_version);
+      const shouldActivateUploadedScope = !(appMode === 'agent' && agentAnalysisContext?.confirmation_version);
 
       registerBusinessLayerFromAoi(aoi, {
         id: aoi.id,
