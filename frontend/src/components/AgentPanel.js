@@ -33,6 +33,7 @@ import {
   sortCatalogLayers,
 } from '../utils/catalogLayers';
 import { buildCatalogLayerContextKey } from '../utils/catalogLayerContext';
+import { finalizeLatestRequest } from '../utils/latestRequest';
 import {
   resolveDefaultCatalogHistoryRange,
   resolveDefaultCatalogPointSelection,
@@ -1768,6 +1769,7 @@ function AgentPanel() {
       peekDate: agentState.peek_date || null,
       afterDate: agentState.after_date || null,
     });
+    let releaseRequestKeyForRetry = false;
 
     try {
       const result = await getFloodImages({
@@ -1805,9 +1807,7 @@ function AgentPanel() {
       if (imageryRequestKeyRef.current !== requestKey) {
         return;
       }
-      if (imageryRequestKeyRef.current === requestKey) {
-        imageryRequestKeyRef.current = null;
-      }
+      releaseRequestKeyForRetry = true;
       finishImagerySpan({
         status: 'error',
         error: error?.message || 'unknown',
@@ -1818,9 +1818,12 @@ function AgentPanel() {
         error: error?.message || 'Unknown imagery error',
       });
     } finally {
-      if (imageryRequestKeyRef.current === requestKey) {
-        setAgentImageryLoading(false);
-      }
+      finalizeLatestRequest({
+        requestKeyRef: imageryRequestKeyRef,
+        requestKey,
+        setLoading: setAgentImageryLoading,
+        releaseForRetry: releaseRequestKeyForRetry,
+      });
     }
   }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentTileError, setWarning]);
 
@@ -1877,6 +1880,7 @@ function AgentPanel() {
       preDate: currentPreDate || null,
       peekDate: currentPeekDate || null,
     });
+    let releaseRequestKeyForRetry = false;
     try {
       const result = await getFloodImpact({
         pre_date: currentPreDate,
@@ -1907,9 +1911,7 @@ function AgentPanel() {
       if (impactRequestKeyRef.current !== requestKey) {
         return;
       }
-      if (impactRequestKeyRef.current === requestKey) {
-        impactRequestKeyRef.current = null;
-      }
+      releaseRequestKeyForRetry = true;
       finishImpactSpan({
         status: 'error',
         error: error?.message || 'unknown',
@@ -1920,9 +1922,12 @@ function AgentPanel() {
         error: error?.message || 'Unknown impact error',
       });
     } finally {
-      if (impactRequestKeyRef.current === requestKey) {
-        setAgentImpactLoading(false);
-      }
+      finalizeLatestRequest({
+        requestKeyRef: impactRequestKeyRef,
+        requestKey,
+        setLoading: setAgentImpactLoading,
+        releaseForRetry: releaseRequestKeyForRetry,
+      });
     }
   }, [
     agentImpactData,
