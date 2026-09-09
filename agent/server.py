@@ -27,7 +27,7 @@ from ag_ui.core import RunStartedEvent
 from flood_agent import graph
 from gee_service import gee_service, get_flood_images
 from gee_code_generator import generate_flood_gee_code
-from flood_dataset_service import build_confirmation_context, renderer
+from flood_dataset_service import build_confirmation_context, get_default_flood_layer_catalog, renderer
 from flood_aoi import search_location_candidates
 from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
 from flood_api_services import (
@@ -741,6 +741,15 @@ async def refresh_flood_confirmation(request: FloodConfirmationRefreshRequest):
             confirmation_version=request.confirmation_version or 1,
         )
         return {"success": True, "data": context}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/flood-layer-catalog")
+async def get_flood_layer_catalog():
+    try:
+        catalog = await run_in_threadpool(get_default_flood_layer_catalog)
+        return {"success": True, "data": catalog}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

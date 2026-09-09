@@ -505,6 +505,7 @@ def recommend_flood_layers(
     *,
     location: Optional[str],
     dates: Dict[str, Optional[str]],
+    use_llm: bool = True,
 ) -> Dict[str, Any]:
     descriptors: List[Dict[str, Any]] = [dict(item) for item in CORE_LAYER_DEFS]
 
@@ -545,15 +546,27 @@ def recommend_flood_layers(
         for score, asset, entry in ranked_assets[:MAX_RECOMMENDED_CATALOG_LAYERS]
     ]
     all_descriptors = descriptors + catalog_descriptors
-    llm_recommendation = _recommend_layers_with_llm(
-        location=location,
-        dates=dates,
-        layers=all_descriptors,
+    llm_recommendation = (
+        _recommend_layers_with_llm(
+            location=location,
+            dates=dates,
+            layers=all_descriptors,
+        )
+        if use_llm
+        else None
     )
 
     return _apply_recommendation_explanations(
         layers=all_descriptors,
         llm_recommendation=llm_recommendation,
+    )
+
+
+def get_default_flood_layer_catalog() -> Dict[str, Any]:
+    return recommend_flood_layers(
+        location=None,
+        dates={"pre_date": None, "peek_date": None, "after_date": None},
+        use_llm=False,
     )
 
 

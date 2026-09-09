@@ -74,6 +74,16 @@ export const refreshFloodConfirmation = async (params) => {
   }
 };
 
+export const getFloodLayerCatalog = async () => {
+  try {
+    const response = await axios.get(`${AGENT_API_BASE}/api/flood-layer-catalog`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch the flood layer catalog:', error);
+    throw normalizeAgentApiError(error, 'Failed to fetch the flood layer catalog.');
+  }
+};
+
 export const renderRecommendedLayer = async (params) => {
   try {
     const response = await axios.post(`${AGENT_API_BASE}/api/recommended-layer-render`, params);
@@ -191,6 +201,7 @@ export const checkAgentHealth = async () => {
 const agentApi = {
   getFloodImages,
   getFloodImpact,
+  getFloodLayerCatalog,
   refreshFloodConfirmation,
   downloadAgentRasterFile,
   renderRecommendedLayer,

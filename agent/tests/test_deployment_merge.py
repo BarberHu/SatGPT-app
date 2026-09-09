@@ -26,7 +26,7 @@ def load_handlers():
     tree = ast.parse(path.read_text(encoding='utf-8'))
     names = {
         '_run_heavy_operation', 'GeoBounds', 'FloodImageRequest', 'ScriptPdfRequest',
-        'get_default_map', 'get_flood_imagery', 'get_pdf',
+        'get_default_map', 'get_flood_imagery', 'get_flood_layer_catalog', 'get_pdf',
     }
     definitions = [node for node in tree.body if getattr(node, 'name', None) in names]
     namespace = {
@@ -37,6 +37,10 @@ def load_handlers():
         '_ensure_gee_ready': lambda: None, '_summarize_flood_image_request': lambda request: {},
         '_duration_ms': lambda started: 0,
         'get_default_map_payload': lambda: {'ok': True},
+        'get_default_flood_layer_catalog': lambda: {
+            'recommended_layers': [{'id': 'asset:catalog', 'layer_family': 'catalog'}],
+            'selected_layer_ids': [],
+        },
         'build_script_pdf': lambda script: script.encode(),
     }
     namespace['gee_service'] = SimpleNamespace(
@@ -111,6 +115,11 @@ class DeploymentMergeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()['data']['kind'], 'event-geojson')
         self.assertEqual(self.ns['gee_service'].get_flood_imagery_by_geojson.call_args.kwargs['peek_date'], payload['peek_date'])
+
+    async def test_flood_layer_catalog_is_available_before_agent_confirmation(self):
+        response = await self.client.get('/api/flood-layer-catalog')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['data']['recommended_layers'][0]['id'], 'asset:catalog')
 
     async def test_pdf_content_is_owned_by_each_request(self):
         first, second = await asyncio.gather(

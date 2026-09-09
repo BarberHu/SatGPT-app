@@ -11,7 +11,12 @@ import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import LayerManager from './LayerManager';
-import { getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
+import {
+  getFloodImages,
+  getFloodImpact,
+  getFloodLayerCatalog,
+  renderRecommendedLayer,
+} from '../services/agentApi';
 import useAgentRasterDownload from '../hooks/useAgentRasterDownload';
 import useAgentRasterLayerRequest from '../hooks/useAgentRasterLayerRequest';
 import {
@@ -581,6 +586,31 @@ function AgentPanel() {
   const [hotspotYearRange, setHotspotYearRange] = useState(DEFAULT_HOTSPOT_YEAR_RANGE);
   const [singleInundationTimeWindow, setSingleInundationTimeWindow] = useState({});
   const [catalogLayerTimeOverrides, setCatalogLayerTimeOverrides] = useState({});
+  const [defaultCatalogLayers, setDefaultCatalogLayers] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getFloodLayerCatalog()
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        const layers = result?.data?.recommended_layers || [];
+        setDefaultCatalogLayers(sortCatalogLayers(
+          layers.filter((layer) => layer.layer_family === 'catalog')
+        ));
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error('Flood layer catalog initialization failed:', error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const { state } = useCoAgent({
     name: "flood_agent",
@@ -912,7 +942,9 @@ function AgentPanel() {
     ),
     [currentRecommendedLayers]
   );
-  const controlPanelCatalogLayers = recommendedCatalogLayers;
+  const controlPanelCatalogLayers = recommendedCatalogLayers.length
+    ? recommendedCatalogLayers
+    : defaultCatalogLayers;
   const controlPanelCatalogLayerSignature = buildLayerSignature(controlPanelCatalogLayers);
   const effectiveAoiSignature = buildAoiSignature(effectiveAoi, currentBounds);
   const recommendedLayerBaseContextKey = useMemo(() => buildRecommendedLayerContextKey({
