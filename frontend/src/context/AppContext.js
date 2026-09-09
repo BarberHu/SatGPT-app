@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useReducer, useRef } from 'react';
 import { buildAoiFromAgentState, isFishnetAoi } from '../utils/aoi';
 import {
   buildBusinessLayerRecordFromAoi,
@@ -17,6 +17,7 @@ import {
 } from '../config/agentRasterLayerConfig';
 import { createDefaultFloodAgentState } from '../config/floodAgentState';
 import { createEmptyLayerData, normalizeLayerData } from '../api/adapters/layerDataAdapter';
+import { appModeReducer, planAppModeTransition } from '../app/appModeReducer';
 
 const AppContext = createContext();
 
@@ -81,12 +82,9 @@ export const AppProvider = ({ children }) => {
   const [warning, setWarning] = useState('');
   
   // 应用主模式：`ask` 表示传统问答流，`agent` 表示 Flood Agent 工作流。
-  const [appMode, setAppMode] = useState('ask');
+  const [appMode, dispatchAppMode] = useReducer(appModeReducer, 'ask');
   const [agentSidebarCollapsed, setAgentSidebarCollapsed] = useState(false);
   const [agentModule, setAgentModule] = useState('flood');
-  
-  // ChatBox 独立维护的聊天模式，用于兼容 `appMode` 切换中的过渡状态。
-  const [chatMode, setChatMode] = useState('ask');
   
   // Modal State
   const [activeModal, setActiveModal] = useState(null); // 'prompt', '3d', 'error', 'contact', 'help', null
@@ -145,7 +143,6 @@ export const AppProvider = ({ children }) => {
   const [businessLayersReady, setBusinessLayersReady] = useState(false);
   const [agentVisualResetVersion, setAgentVisualResetVersion] = useState(0);
   const selectedAOIRef = useRef(null);
-  const previousAppModeRef = useRef('ask');
   
   // ========== Flood Agent 分析上下文（事件、时间、AOI、推荐图层） ==========
   const [floodAgentState, setFloodAgentState] = useState(createDefaultFloodAgentState);
@@ -476,29 +473,30 @@ export const AppProvider = ({ children }) => {
     });
   }, []);
 
-  useEffect(() => {
-    const previousMode = previousAppModeRef.current;
+  const switchAppMode = useCallback((nextMode) => {
+    const transition = planAppModeTransition({
+      currentMode: appMode,
+      nextMode,
+      hasFishnetAoi: isFishnetAoi(selectedAOI),
+    });
 
-    if (previousMode !== appMode) {
-      if (isFishnetAoi(selectedAOI)) {
-        resetAskSession();
-        setSelectedGridCords(null);
-        setSelectedAOI(null);
-        setDraftAOI(null);
-        setWarning('');
-        previousAppModeRef.current = appMode;
-        return;
-      }
+    if (!transition) {
+      return false;
     }
 
-    if (
-      previousMode === 'ask'
-      && appMode === 'agent'
-    ) {
+    if (transition.resetAsk) {
       resetAskSession();
+    }
+    if (transition.resetAgent) {
+      resetAgentSession({ preserveSelectedAoi: true });
+    }
 
+    if (transition.clearFishnetAoi) {
+      setSelectedGridCords(null);
+      setSelectedAOI(null);
+      setDraftAOI(null);
+    } else if (transition.restoreBusinessScope) {
       const nextScopeAoi = resolveCurrentBusinessScopeAoi(businessLayers, selectedAOI);
-
       if (
         nextScopeAoi
         && (
@@ -509,19 +507,14 @@ export const AppProvider = ({ children }) => {
       ) {
         setSelectedAOI(nextScopeAoi);
         setDraftAOI(null);
-        setWarning('');
       }
     }
 
-    if (
-      previousMode === 'agent'
-      && appMode === 'ask'
-    ) {
-      resetAgentSession({ preserveSelectedAoi: true });
-    }
-
-    previousAppModeRef.current = appMode;
-  }, [appMode, agentLayerOrder, businessLayers, resetAgentSession, resetAskSession, selectedAOI, setDraftAOI, setWarning]);
+    setChatInput('');
+    setWarning('');
+    dispatchAppMode({ type: 'switch', mode: transition.nextMode });
+    return true;
+  }, [appMode, businessLayers, resetAgentSession, resetAskSession, selectedAOI]);
 
   useEffect(() => {
     let cancelled = false;
@@ -830,13 +823,11 @@ export const AppProvider = ({ children }) => {
 
     // App Mode (ask/agent)
     appMode,
-    setAppMode,
+    switchAppMode,
     agentSidebarCollapsed,
     setAgentSidebarCollapsed,
     agentModule,
     setAgentModule,
-    chatMode,
-    setChatMode,
     
     // FloodAgent State
     floodAgentState,

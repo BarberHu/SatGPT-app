@@ -32,13 +32,8 @@ function ControlPanel() {
     selectedAOI,
     appMode,
     agentModule,
-    chatMode,
-    setAppMode,
-    setChatMode,
-    setChatInput,
-    setWarning,
+    switchAppMode,
     resetAskSession,
-    resetAgentSession,
   } = useAppContext();
 
   const [selectedLayer, setSelectedLayer] = useState('');
@@ -74,28 +69,13 @@ function ControlPanel() {
   };
 
   const handleModeToggle = () => {
-    const nextMode = chatMode === 'ask' ? 'agent' : 'ask';
-
-    if (nextMode !== chatMode) {
-      trackUxEvent('mode_switch', {
-        from: chatMode,
-        to: nextMode,
-        entry: 'control_panel_header',
-      });
-
-      if (nextMode === 'agent') {
-        resetAskSession();
-      }
-
-      if (chatMode === 'agent' || nextMode === 'agent') {
-        resetAgentSession({ preserveSelectedAoi: true });
-      }
-    }
-
-    setChatMode(nextMode);
-    setAppMode(nextMode);
-    setChatInput('');
-    setWarning('');
+    const nextMode = appMode === 'ask' ? 'agent' : 'ask';
+    trackUxEvent('mode_switch', {
+      from: appMode,
+      to: nextMode,
+      entry: 'control_panel_header',
+    });
+    switchAppMode(nextMode);
   };
 
   const handleDataTypeChange = (type) => {
@@ -166,10 +146,10 @@ function ControlPanel() {
         <div className="control-panel-header-actions">
           <button
             type="button"
-            className={`panel-mode-toggle-btn ${chatMode === 'agent' ? 'is-agent' : ''}`}
+            className={`panel-mode-toggle-btn ${appMode === 'agent' ? 'is-agent' : ''}`}
             onClick={handleModeToggle}
-            title={`Switch to ${chatMode === 'ask' ? 'Agent' : 'Ask'} mode`}
-            aria-label={`Switch to ${chatMode === 'ask' ? 'Agent' : 'Ask'} mode`}
+            title={`Switch to ${appMode === 'ask' ? 'Agent' : 'Ask'} mode`}
+            aria-label={`Switch to ${appMode === 'ask' ? 'Agent' : 'Ask'} mode`}
           >
             <ArrowLeftRight size={13} strokeWidth={2.1} />
           </button>

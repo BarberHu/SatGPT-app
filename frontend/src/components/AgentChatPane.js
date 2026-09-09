@@ -74,7 +74,7 @@ function AgentChatPane() {
   const uploadPanelRef = useRef(null);
   const {
     agentModule,
-    chatMode,
+    appMode,
   } = useAppContext();
   const chatCopy = useMemo(() => (
     {
@@ -210,17 +210,17 @@ function AgentChatPane() {
     }
   ), [agentModule]);
   const paneProfiler = useMemo(
-    () => createReactProfilerHandler('AgentChatPane', () => ({ agentModule, chatMode })),
-    [agentModule, chatMode]
+    () => createReactProfilerHandler('AgentChatPane', () => ({ agentModule, appMode })),
+    [agentModule, appMode]
   );
   const copilotChatProfiler = useMemo(
-    () => createReactProfilerHandler('CopilotChat', () => ({ agentModule, chatMode })),
-    [agentModule, chatMode]
+    () => createReactProfilerHandler('CopilotChat', () => ({ agentModule, appMode })),
+    [agentModule, appMode]
   );
 
   useRenderDiagnostics('AgentChatPane', () => ({
     agentModule,
-    chatMode,
+    appMode,
   }));
 
   const handleOpenSpatialUpload = useCallback(() => {
@@ -268,7 +268,7 @@ function AgentChatPane() {
                 logAgentDiagnostic('copilot', 'chat_error', {
                   message: copilotError?.message || 'unknown',
                   agentModule,
-                  chatMode,
+                  appMode,
                 });
               }}
             />

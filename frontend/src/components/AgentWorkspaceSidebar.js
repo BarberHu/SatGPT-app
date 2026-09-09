@@ -18,7 +18,6 @@ function AgentWorkspaceSidebar() {
   const {
     appMode,
     agentModule,
-    chatMode,
     agentSidebarCollapsed,
     setAgentSidebarCollapsed,
     resetAgentSession,
@@ -33,8 +32,8 @@ function AgentWorkspaceSidebar() {
     startNewAgentSession({ preserveSelectedAoi: true });
     resetAgentSession({ preserveSelectedAoi: true });
     setWarning('');
-    trackUxEvent('agent_new_chat', { mode: chatMode, module: agentModule, entry: 'workspace_header' });
-  }, [agentModule, chatMode, resetAgentSession, setThreadId, setWarning, startNewAgentSession]);
+    trackUxEvent('agent_new_chat', { mode: appMode, module: agentModule, entry: 'workspace_header' });
+  }, [agentModule, appMode, resetAgentSession, setThreadId, setWarning, startNewAgentSession]);
 
   useEffect(() => {
     if (appMode !== 'agent') {
