@@ -1,8 +1,7 @@
 import axios from 'axios';
-import { resolveBrowserEndpoint } from '../utils/runtimeUrls';
 
-const AGENT_API_BASE =
-  resolveBrowserEndpoint(process.env.REACT_APP_API_URL, '');
+// 浏览器始终通过当前站点的反向代理访问 Agent API。
+const AGENT_API_BASE = '';
 
 const normalizeAgentApiError = (error, fallbackMessage) => {
   const detail =

@@ -1,11 +1,17 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
+const requireEnv = (name) => {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+};
+
 module.exports = function(app) {
-  const serviceHost = process.env.SATGPT_SERVICE_HOST || '127.0.0.1';
-  const agentPort = process.env.AGENT_PORT || '8000';
-  const runtimePort = process.env.RUNTIME_PORT || '5000';
-  const agentTarget = `http://${serviceHost}:${agentPort}`;
-  const runtimeTarget = `http://${serviceHost}:${runtimePort}`;
+  const serviceHost = requireEnv('SATGPT_SERVICE_HOST');
+  const agentTarget = `http://${serviceHost}:${requireEnv('AGENT_PORT')}`;
+  const runtimeTarget = `http://${serviceHost}:${requireEnv('RUNTIME_PORT')}`;
 
   // Proxy FloodAgent API requests to FastAPI.
   app.use(

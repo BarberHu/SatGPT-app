@@ -26,14 +26,19 @@ import {
   TILE_PROGRESS_START,
 } from '../utils/layerLoadProgress';
 
-// Mapbox access token - should be set via environment variable
-mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_KEY || '';
+// Public Mapbox values are provided directly through CRA environment variables.
+const MAPBOX_ACCESS_TOKEN = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
+const MAPBOX_STYLE_URL = process.env.REACT_APP_MAPBOX_STYLE_URL;
+
+if (!MAPBOX_ACCESS_TOKEN || !MAPBOX_STYLE_URL) {
+  throw new Error('Missing required Mapbox environment variables');
+}
+
+mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
 const DEFAULT_CENTER = [102.0, 16.5];
 const DEFAULT_ZOOM = 5;
 
-// Custom Mapbox style (same as original project)
-const MAPBOX_STYLE = 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp';
 const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
 const AGENT_BASE_LAYER_IDS = [
   'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
@@ -995,7 +1000,7 @@ function MapContainer() {
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: MAPBOX_STYLE,
+      style: MAPBOX_STYLE_URL,
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
     });
@@ -1541,14 +1546,13 @@ function MapContainer() {
       handled = true;
       removeLayerAndSource(map, `${sourceId}-layer`, sourceId);
       resetAskSession();
-      showTransientWarning('The previous GEE map tiles expired. Please reload the layer to continue.');
     };
 
     map.on('error', onAskTileError);
     return () => {
       map.off('error', onAskTileError);
     };
-  }, [appMode, layerData, removeLayerAndSource, resetAskSession, showTransientWarning]);
+  }, [appMode, layerData, removeLayerAndSource, resetAskSession]);
 
   // Update layer visibility and opacity
   useEffect(() => {
