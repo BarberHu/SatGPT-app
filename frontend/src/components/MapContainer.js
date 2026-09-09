@@ -25,6 +25,12 @@ import {
   calculateTileLoadPercent,
   TILE_PROGRESS_START,
 } from '../utils/layerLoadProgress';
+import {
+  bindMapEvents,
+  reconcileRasterLayer,
+  removeMapLayerAndSource,
+} from '../utils/mapLifecycle';
+import useMapboxInitialization from '../hooks/useMapboxInitialization';
 
 // Public Mapbox values are provided directly through CRA environment variables.
 const MAPBOX_ACCESS_TOKEN = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
@@ -288,6 +294,9 @@ function MapContainer() {
   const layerDataRef = useRef(layerData);
   const syncAgentRasterLayersRef = useRef(null);
   const agentRasterTileLifecycleRef = useRef({});
+  const askRasterTileUrlRef = useRef({});
+  const agentAnalysisTileUrlRef = useRef({});
+  const agentAnalysisTileLifecycleRef = useRef({});
 
   agentLayerOrderRef.current = agentLayerOrder;
   agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
@@ -318,14 +327,7 @@ function MapContainer() {
     }, timeoutMs);
   }, [clearTransientWarningTimer, setWarning]);
 
-  const removeLayerAndSource = useCallback((map, layerId, sourceId = layerId) => {
-    if (map.getLayer(layerId)) {
-      map.removeLayer(layerId);
-    }
-    if (map.getSource(sourceId)) {
-      map.removeSource(sourceId);
-    }
-  }, []);
+  const removeLayerAndSource = useCallback(removeMapLayerAndSource, []);
 
   // Tracks the real client-side lifecycle of one Mapbox raster source. Earth Engine
   // does not expose server computation percentages for map tiles, so this progress
@@ -562,6 +564,7 @@ function MapContainer() {
     ASK_LAYER_NAMES.forEach((id) => {
       removeLayerAndSource(map, `${id}-layer`, id);
     });
+    askRasterTileUrlRef.current = {};
   }, [removeLayerAndSource]);
 
   const removeAskRasterSiblings = useCallback((map, layerNames = []) => {
@@ -575,6 +578,9 @@ function MapContainer() {
       removeLayerAndSource(map, id, id);
     });
 
+    Object.values(agentAnalysisTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
+    agentAnalysisTileLifecycleRef.current = {};
+    agentAnalysisTileUrlRef.current = {};
     agentRasterTileUrlRef.current = {};
   }, [removeLayerAndSource]);
 
@@ -911,6 +917,8 @@ function MapContainer() {
   }, [syncAgentRasterLayers]);
 
   useEffect(() => () => {
+    Object.values(agentAnalysisTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
+    agentAnalysisTileLifecycleRef.current = {};
     Object.values(agentRasterTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
     agentRasterTileLifecycleRef.current = {};
     Object.values(agentRecommendedTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
@@ -957,8 +965,7 @@ function MapContainer() {
       },
     });
 
-    // Grid cell click handler
-    map.on('click', 'grid_cell-layer', (e) => {
+    const handleGridClick = (e) => {
       if (appModeRef.current === 'agent' || !gridClickEnabledRef.current || isAoiEditingRef.current) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['grid_cell-layer'] });
       if (features.length > 0 && features[0].geometry) {
@@ -976,41 +983,27 @@ function MapContainer() {
         resetAgentSession({ preserveSelectedAoi: true });
         reconcileLayerOrder(map);
       }
-    });
+    };
 
-    // Change cursor on hover
-    map.on('mouseenter', 'grid_cell-layer', () => {
+    const handleGridMouseEnter = () => {
       if (appModeRef.current === 'agent' || !gridClickEnabledRef.current || isAoiEditingRef.current) return;
       map.getCanvas().style.cursor = 'pointer';
-    });
+    };
 
-    map.on('mouseleave', 'grid_cell-layer', () => {
+    const handleGridMouseLeave = () => {
       map.getCanvas().style.cursor = '';
-    });
+    };
+
+    return bindMapEvents(map, [
+      { event: 'click', layerId: 'grid_cell-layer', handler: handleGridClick },
+      { event: 'mouseenter', layerId: 'grid_cell-layer', handler: handleGridMouseEnter },
+      { event: 'mouseleave', layerId: 'grid_cell-layer', handler: handleGridMouseLeave },
+    ]);
   }, [reconcileLayerOrder, removeAgentLayers, removeAskLayers, resetAgentSession, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords]);
 
-  // Initialize map
-  useEffect(() => {
-    if (mapInitialized.current || mapRef.current) return;
-    mapInitialized.current = true;
-
-    if (mapContainerRef.current) {
-      mapContainerRef.current.innerHTML = '';
-    }
-
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: MAPBOX_STYLE_URL,
-      center: DEFAULT_CENTER,
-      zoom: DEFAULT_ZOOM,
-    });
-
-    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-
-    map.on('load', () => {
-      mapRef.current = map;
-      setMapInstance(map);
-      drawRef.current = new MapboxDraw({
+  const initializeLoadedMap = useCallback((map) => {
+    setMapInstance(map);
+    drawRef.current = new MapboxDraw({
         displayControlsDefault: false,
         defaultMode: 'simple_select',
         controls: {
@@ -1019,83 +1012,99 @@ function MapContainer() {
         },
         styles: DRAW_STYLES,
       });
-      map.addControl(drawRef.current, 'top-right');
+    map.addControl(drawRef.current, 'top-right');
 
-      const utilityControl = {
-        onAdd() {
-          const container = document.createElement('div');
-          container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group satgpt-map-utility-group';
+    const utilityControl = {
+      onAdd() {
+        const container = document.createElement('div');
+        container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group satgpt-map-utility-group';
 
-          const gridButton = document.createElement('button');
-          gridButton.type = 'button';
-          gridButton.className = 'satgpt-map-toggle-btn';
-          gridButton.innerHTML = '<i class="fa fa-crosshairs" aria-hidden="true"></i>';
-          gridButton.setAttribute('aria-label', 'Toggle map click loading');
-          gridButton.setAttribute('title', 'Toggle map click loading');
-          gridButton.onclick = (event) => {
-            event.preventDefault();
-            event.stopPropagation();
+        const gridButton = document.createElement('button');
+        gridButton.type = 'button';
+        gridButton.className = 'satgpt-map-toggle-btn';
+        gridButton.innerHTML = '<i class="fa fa-crosshairs" aria-hidden="true"></i>';
+        gridButton.setAttribute('aria-label', 'Toggle map click loading');
+        gridButton.setAttribute('title', 'Toggle map click loading');
+        gridButton.onclick = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
 
-            if (
-              appModeRef.current === 'agent'
-              || isAoiEditingRef.current
-              || drawRef.current?.getMode?.() === 'draw_polygon'
-            ) {
-              return;
-            }
-
-            setGridClickEnabled((previous) => !previous);
-          };
-
-          const disabled = appModeRef.current === 'agent'
+          if (
+            appModeRef.current === 'agent'
             || isAoiEditingRef.current
-            || drawRef.current?.getMode?.() === 'draw_polygon';
-          gridButton.disabled = disabled;
-          gridButton.classList.toggle('active', gridClickEnabledRef.current && !disabled);
-          gridButton.classList.toggle('disabled', disabled);
-          gridButton.setAttribute('aria-pressed', gridClickEnabledRef.current && !disabled ? 'true' : 'false');
-
-          container.appendChild(gridButton);
-          gridClickButtonRef.current = gridButton;
-          return container;
-        },
-        onRemove() {
-          if (gridClickButtonRef.current) {
-            gridClickButtonRef.current.onclick = null;
+            || drawRef.current?.getMode?.() === 'draw_polygon'
+          ) {
+            return;
           }
-          gridClickButtonRef.current = null;
-        },
-      };
 
-      map.addControl(utilityControl, 'top-right');
-      utilityControlRef.current = utilityControl;
-      loadGridLayer(map);
-      window.requestAnimationFrame(() => reconcileLayerOrder(map));
-    });
+          setGridClickEnabled((previous) => !previous);
+        };
 
-    const handleStyleData = () => {
-      syncAgentRasterLayersRef.current?.(map);
-      window.requestAnimationFrame(() => {
-        reconcileLayerOrder(map);
-        promoteDrawLayers(map);
-      });
+        const disabled = appModeRef.current === 'agent'
+          || isAoiEditingRef.current
+          || drawRef.current?.getMode?.() === 'draw_polygon';
+        gridButton.disabled = disabled;
+        gridButton.classList.toggle('active', gridClickEnabledRef.current && !disabled);
+        gridButton.classList.toggle('disabled', disabled);
+        gridButton.setAttribute('aria-pressed', gridClickEnabledRef.current && !disabled ? 'true' : 'false');
+
+        container.appendChild(gridButton);
+        gridClickButtonRef.current = gridButton;
+        return container;
+      },
+      onRemove() {
+        if (gridClickButtonRef.current) {
+          gridClickButtonRef.current.onclick = null;
+        }
+        gridClickButtonRef.current = null;
+      },
     };
-    map.on('styledata', handleStyleData);
+
+    map.addControl(utilityControl, 'top-right');
+    utilityControlRef.current = utilityControl;
+    const cleanupGridEvents = loadGridLayer(map);
+    window.requestAnimationFrame(() => reconcileLayerOrder(map));
 
     return () => {
-      map.off('styledata', handleStyleData);
-      if (mapRef.current) {
-        if (utilityControlRef.current) {
-          map.removeControl(utilityControlRef.current);
-          utilityControlRef.current = null;
+      cleanupGridEvents?.();
+      if (utilityControlRef.current === utilityControl) {
+        try {
+          map.removeControl(utilityControl);
+        } catch {
+          // The map may already be tearing down its controls.
+        }
+        utilityControlRef.current = null;
+      }
+      if (drawRef.current) {
+        try {
+          map.removeControl(drawRef.current);
+        } catch {
+          // The map may already be tearing down its controls.
         }
         drawRef.current = null;
-        mapRef.current.remove();
-        mapRef.current = null;
-        mapInitialized.current = false;
       }
+      setMapInstance(null);
     };
-  }, [loadGridLayer, promoteDrawLayers, reconcileLayerOrder, setGridClickEnabled, setMapInstance]);
+  }, [loadGridLayer, reconcileLayerOrder, setGridClickEnabled, setMapInstance]);
+
+  const handleMapStyleData = useCallback((map) => {
+    syncAgentRasterLayersRef.current?.(map);
+    window.requestAnimationFrame(() => {
+      reconcileLayerOrder(map);
+      promoteDrawLayers(map);
+    });
+  }, [promoteDrawLayers, reconcileLayerOrder]);
+
+  useMapboxInitialization({
+    containerRef: mapContainerRef,
+    mapRef,
+    initializedRef: mapInitialized,
+    styleUrl: MAPBOX_STYLE_URL,
+    center: DEFAULT_CENTER,
+    zoom: DEFAULT_ZOOM,
+    onLoad: initializeLoadedMap,
+    onStyleData: handleMapStyleData,
+  });
 
   const fitAoiBounds = useCallback((aoi, { force = false, padding = 50, duration = 600 } = {}) => {
     const map = mapRef.current;
@@ -1488,7 +1497,7 @@ function MapContainer() {
     }
   }, [aoiEditorMode, reconcileLayerOrder, runProgrammaticDrawMutation, schedulePromoteDrawLayers, setDraftAOI, setWarning]);
 
-  // Update EE layers when layer data changes
+  // Reconcile Ask raster layers without rebuilding sources for paint/layout changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -1501,32 +1510,16 @@ function MapContainer() {
 
     ASK_LAYER_NAMES.forEach((layerName) => {
       const data = layerData[layerName];
-      
-      // Remove existing layer and source
-      if (map.getLayer(`${layerName}-layer`)) {
-        map.removeLayer(`${layerName}-layer`);
-      }
-      if (map.getSource(layerName)) {
-        map.removeSource(layerName);
-      }
-
-      // Add new layer if data exists
-      if (data && data.tileUrl) {
-        map.addSource(layerName, {
-          type: 'raster',
-          tiles: [data.tileUrl],
-          tileSize: 256,
-        });
-
-        map.addLayer({
-          id: `${layerName}-layer`,
-          type: 'raster',
-          source: layerName,
-          paint: {
-            'raster-opacity': layerVisibility[layerName] ? layerOpacity[layerName] : 0,
-          },
-        });
-      }
+      const nextTileUrl = data?.tileUrl || null;
+      reconcileRasterLayer(map, {
+        layerId: `${layerName}-layer`,
+        sourceId: layerName,
+        tileUrl: nextTileUrl,
+        previousTileUrl: askRasterTileUrlRef.current[layerName] || null,
+        visible: Boolean(layerVisibility[layerName]),
+        opacity: layerOpacity[layerName] ?? 1,
+      });
+      askRasterTileUrlRef.current[layerName] = nextTileUrl;
     });
 
     reconcileLayerOrder(map);
@@ -1553,24 +1546,6 @@ function MapContainer() {
       map.off('error', onAskTileError);
     };
   }, [appMode, layerData, removeLayerAndSource, resetAskSession]);
-
-  // Update layer visibility and opacity
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-
-    if (appMode !== 'ask') {
-      removeAskLayers(map);
-      return;
-    }
-
-    ASK_LAYER_NAMES.forEach((layerName) => {
-      if (map.getLayer(`${layerName}-layer`)) {
-        const opacity = layerVisibility[layerName] ? layerOpacity[layerName] : 0;
-        map.setPaintProperty(`${layerName}-layer`, 'raster-opacity', opacity);
-      }
-    });
-  }, [appMode, layerVisibility, layerOpacity, removeAskLayers]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1790,137 +1765,87 @@ function MapContainer() {
     };
   }, [agentBaseImageryVisibility, agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder, removeLayerAndSource, setAgentTileError]);
 
-  // ========== Effect B: Flood Detection Overlay ==========
+  // Reconcile the four analysis overlays through one raster lifecycle.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
-
-    if (map.getLayer('agent-flood-detection')) map.removeLayer('agent-flood-detection');
-    if (map.getSource('agent-flood-detection')) map.removeSource('agent-flood-detection');
-
-    if (!agentShowFloodDetection || !agentImagery?.flood_detection?.tile_url) return;
-
-    map.addSource('agent-flood-detection', {
-      type: 'raster',
-      tiles: [agentImagery.flood_detection.tile_url],
-      tileSize: 256,
-    });
-    const floodLayerDefinition = {
-      id: 'agent-flood-detection',
-      type: 'raster',
-      source: 'agent-flood-detection',
-      paint: { 'raster-opacity': 0.7 },
-    };
-    const floodBeforeId = getInsertBeforeId(map, 'agent-flood-detection');
-    if (floodBeforeId) {
-      map.addLayer(floodLayerDefinition, floodBeforeId);
-    } else {
-      map.addLayer(floodLayerDefinition);
+    if (!map || !map.isStyleLoaded()) {
+      return;
     }
-    reconcileLayerOrder(map);
 
-    const lifecycle = createLayerTileLifecycle(map, 'flood-detection', 'agent-flood-detection');
-    return lifecycle.cleanup;
-  }, [agentImagery, appMode, agentShowFloodDetection, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
+    const analysisLayers = [
+      {
+        layerKey: 'flood-detection',
+        mapLayerId: 'agent-flood-detection',
+        tileUrl: agentImagery?.flood_detection?.tile_url || null,
+        visible: agentShowFloodDetection,
+      },
+      {
+        layerKey: 'population',
+        mapLayerId: 'agent-population',
+        tileUrl: agentImpactData?.layers?.population?.tile_url || null,
+        visible: agentShowPopulationLayer,
+      },
+      {
+        layerKey: 'urban',
+        mapLayerId: 'agent-urban',
+        tileUrl: agentImpactData?.layers?.urban?.tile_url || null,
+        visible: agentShowUrbanLayer,
+      },
+      {
+        layerKey: 'landcover',
+        mapLayerId: 'agent-landcover',
+        tileUrl: agentImpactData?.layers?.landcover?.tile_url || null,
+        visible: agentShowLandcoverLayer,
+      },
+    ];
 
-  // ========== Effect C: Population Impact Overlay ==========
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
+    analysisLayers.forEach(({ layerKey, mapLayerId, tileUrl, visible }) => {
+      const nextTileUrl = appMode === 'agent' ? tileUrl : null;
+      const previousTileUrl = agentAnalysisTileUrlRef.current[mapLayerId] || null;
+      const result = reconcileRasterLayer(map, {
+        layerId: mapLayerId,
+        tileUrl: nextTileUrl,
+        previousTileUrl,
+        visible: Boolean(visible),
+        opacity: 0.7,
+        beforeId: getInsertBeforeId(map, mapLayerId),
+      });
 
-    if (map.getLayer('agent-population')) map.removeLayer('agent-population');
-    if (map.getSource('agent-population')) map.removeSource('agent-population');
+      const stopTileLifecycle = () => {
+        const cleanup = agentAnalysisTileLifecycleRef.current[mapLayerId];
+        if (cleanup) {
+          cleanup();
+          delete agentAnalysisTileLifecycleRef.current[mapLayerId];
+        }
+      };
 
-    if (!agentShowPopulationLayer || !agentImpactData?.layers?.population?.tile_url) return;
+      if (!nextTileUrl || !visible || result.sourceChanged) {
+        stopTileLifecycle();
+      }
+      if (nextTileUrl && visible && !agentAnalysisTileLifecycleRef.current[mapLayerId]) {
+        agentAnalysisTileLifecycleRef.current[mapLayerId] = createLayerTileLifecycle(
+          map,
+          layerKey,
+          mapLayerId
+        ).cleanup;
+      }
 
-    map.addSource('agent-population', {
-      type: 'raster',
-      tiles: [agentImpactData.layers.population.tile_url],
-      tileSize: 256,
+      agentAnalysisTileUrlRef.current[mapLayerId] = nextTileUrl;
     });
-    const populationLayerDefinition = {
-      id: 'agent-population',
-      type: 'raster',
-      source: 'agent-population',
-      paint: { 'raster-opacity': 0.7 },
-    };
-    const populationBeforeId = getInsertBeforeId(map, 'agent-population');
-    if (populationBeforeId) {
-      map.addLayer(populationLayerDefinition, populationBeforeId);
-    } else {
-      map.addLayer(populationLayerDefinition);
-    }
+
     reconcileLayerOrder(map);
-
-    const lifecycle = createLayerTileLifecycle(map, 'population', 'agent-population');
-    return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowPopulationLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
-
-  // ========== Effect D: Built-up Area Overlay ==========
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
-
-    if (map.getLayer('agent-urban')) map.removeLayer('agent-urban');
-    if (map.getSource('agent-urban')) map.removeSource('agent-urban');
-
-    if (!agentShowUrbanLayer || !agentImpactData?.layers?.urban?.tile_url) return;
-
-    map.addSource('agent-urban', {
-      type: 'raster',
-      tiles: [agentImpactData.layers.urban.tile_url],
-      tileSize: 256,
-    });
-    const urbanLayerDefinition = {
-      id: 'agent-urban',
-      type: 'raster',
-      source: 'agent-urban',
-      paint: { 'raster-opacity': 0.7 },
-    };
-    const urbanBeforeId = getInsertBeforeId(map, 'agent-urban');
-    if (urbanBeforeId) {
-      map.addLayer(urbanLayerDefinition, urbanBeforeId);
-    } else {
-      map.addLayer(urbanLayerDefinition);
-    }
-    reconcileLayerOrder(map);
-
-    const lifecycle = createLayerTileLifecycle(map, 'urban', 'agent-urban');
-    return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowUrbanLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
-
-  // ========== Effect E: Land Cover Overlay ==========
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
-
-    if (map.getLayer('agent-landcover')) map.removeLayer('agent-landcover');
-    if (map.getSource('agent-landcover')) map.removeSource('agent-landcover');
-
-    if (!agentShowLandcoverLayer || !agentImpactData?.layers?.landcover?.tile_url) return;
-
-    map.addSource('agent-landcover', {
-      type: 'raster',
-      tiles: [agentImpactData.layers.landcover.tile_url],
-      tileSize: 256,
-    });
-    const landcoverLayerDefinition = {
-      id: 'agent-landcover',
-      type: 'raster',
-      source: 'agent-landcover',
-      paint: { 'raster-opacity': 0.7 },
-    };
-    const landcoverBeforeId = getInsertBeforeId(map, 'agent-landcover');
-    if (landcoverBeforeId) {
-      map.addLayer(landcoverLayerDefinition, landcoverBeforeId);
-    } else {
-      map.addLayer(landcoverLayerDefinition);
-    }
-    reconcileLayerOrder(map);
-
-    const lifecycle = createLayerTileLifecycle(map, 'landcover', 'agent-landcover');
-    return lifecycle.cleanup;
-  }, [agentImpactData, appMode, agentShowLandcoverLayer, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder]);
+  }, [
+    agentImagery,
+    agentImpactData,
+    agentShowFloodDetection,
+    agentShowLandcoverLayer,
+    agentShowPopulationLayer,
+    agentShowUrbanLayer,
+    appMode,
+    createLayerTileLifecycle,
+    getInsertBeforeId,
+    reconcileLayerOrder,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
