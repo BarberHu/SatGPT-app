@@ -206,6 +206,16 @@ body,
   border-radius: var(--satgpt-control-radius);
   box-shadow: var(--satgpt-soft-shadow);
   cursor: pointer;
+  color: inherit;
+  line-height: normal;
+}
+
+.water .settings-button:focus-visible,
+.result-toggle-button:focus-visible,
+.icon-button:focus-visible,
+.close_3d:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .agent-disaster-rail {
@@ -704,6 +714,15 @@ p.error {
   width: 35px;
   height: 35px;
   padding: 25px;
+  border: 0;
+}
+
+.result-toggle-button {
+  border: 0;
+  padding: 4px 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
 .icon-button:hover i {
@@ -876,6 +895,9 @@ p.error {
   font-weight: bold;
   margin-top: -10px;
   cursor: pointer;
+  border: 0;
+  background: transparent;
+  line-height: 1;
 }
 
 .close_3d:hover {

@@ -27,22 +27,27 @@ function ResultBox() {
     <div className="pt-3 result-box">
       <div className="result-text-box">
         <h4 style={{ margin: 0 }}>Result</h4>
-        <i
+        <button
+          type="button"
           id="result-toggle"
-          className={`fa ${isResultVisible ? 'fa-angle-down' : 'fa-angle-up'}`}
-          aria-hidden="true"
+          className="result-toggle-button"
           onClick={handleToggle}
-        ></i>
+          aria-expanded={isResultVisible}
+          aria-controls="result-content"
+          aria-label={isResultVisible ? 'Collapse result' : 'Expand result'}
+        >
+          <i className={`fa ${isResultVisible ? 'fa-angle-down' : 'fa-angle-up'}`} aria-hidden="true" />
+        </button>
       </div>
       
       {isResultVisible && (
-        <div className="containerResult" style={{ opacity: 1 }}>
+        <div id="result-content" className="containerResult" style={{ opacity: 1 }}>
           <div className="text" id="myTextarea">
             {resultText}
           </div>
-          <div className="icon-button" onClick={handleRefresh}>
-            <i className="fa fa-refresh" style={{ fontSize: '32px', color: 'white' }}></i>
-          </div>
+          <button type="button" className="icon-button" onClick={handleRefresh} aria-label="Clear result">
+            <i className="fa fa-refresh" style={{ fontSize: '32px', color: 'white' }} aria-hidden="true" />
+          </button>
         </div>
       )}
     </div>

@@ -1,5 +1,4 @@
-import React, { Profiler, useEffect, useMemo } from 'react';
-import { CopilotKit } from "@copilotkit/react-core";
+import React, { lazy, Profiler, Suspense, useEffect, useMemo } from 'react';
 import MapContainer from './components/MapContainer';
 import ControlPanel from './components/ControlPanel';
 import ChatBox from './components/ChatBox';
@@ -7,9 +6,6 @@ import ResultBox from './components/ResultBox';
 import Legends from './components/Legends';
 import Modals from './components/Modals';
 import Spinner from './components/Spinner';
-import AgentWorkspaceSidebar from './components/AgentWorkspaceSidebar';
-import AgentDisasterRail from './components/AgentDisasterRail';
-import LocationScopePicker from './components/LocationScopePicker';
 import { useAppContext } from './context/AppContext';
 import useMapData from './hooks/useMapData';
 import {
@@ -18,8 +14,7 @@ import {
   logAgentDiagnostic,
   updateAgentDiagnosticsContext,
 } from './utils/agentDiagnostics';
-// 浏览器始终通过当前站点的反向代理访问 CopilotKit Runtime。
-const COPILOTKIT_URL = '/copilotkit';
+const AgentExperience = lazy(() => import('./components/AgentExperience'));
 
 function App() {
   const { appMode, agentSidebarCollapsed } = useAppContext();
@@ -66,43 +61,25 @@ function App() {
   };
   
   return (
-    <CopilotKit 
-      runtimeUrl={COPILOTKIT_URL} 
-      agent="flood_agent"
-      onError={handleCopilotError}
-    >
-      <div className={`water ${appMode === 'agent' ? 'water--agent' : ''} ${agentSidebarCollapsed ? 'water--agent-sidebar-collapsed' : ''}`}>
-        <Profiler id="MapContainer" onRender={mapProfiler}>
-          <MapContainer />
-        </Profiler>
-        <AgentDisasterRail />
-        <div className="ui">
-          <SettingsButton />
-          <Legends />
-          <ModeBasedChatBox />
-          <ModeBasedResultBox />
-          <ControlPanel />
-          <Warnings />
-        </div>
-        <Profiler id="AgentWorkspaceSidebar" onRender={sidebarProfiler}>
-          <AgentWorkspaceSidebar />
-        </Profiler>
-        <AgentLocationSearchDock />
-        <Modals />
-        <Spinner />
+    <div className={`water ${appMode === 'agent' ? 'water--agent' : ''} ${agentSidebarCollapsed ? 'water--agent-sidebar-collapsed' : ''}`}>
+      <Profiler id="MapContainer" onRender={mapProfiler}>
+        <MapContainer />
+      </Profiler>
+      <div className="ui">
+        <SettingsButton />
+        <Legends />
+        <ModeBasedChatBox />
+        <ModeBasedResultBox />
+        {appMode === 'ask' ? <ControlPanel /> : null}
+        <Warnings />
       </div>
-    </CopilotKit>
-  );
-}
-
-function AgentLocationSearchDock() {
-  const { appMode } = useAppContext();
-
-  if (appMode !== 'agent') return null;
-
-  return (
-    <div className="agent-location-search-dock">
-      <LocationScopePicker embedded showInlineNote={false} />
+      {appMode === 'agent' ? (
+        <Suspense fallback={<div className="agent-runtime-loading" role="status">Loading Agent workspace…</div>}>
+          <AgentExperience onError={handleCopilotError} sidebarProfiler={sidebarProfiler} />
+        </Suspense>
+      ) : null}
+      <Modals />
+      <Spinner />
     </div>
   );
 }
@@ -131,12 +108,15 @@ function SettingsButton() {
   if (isPanelVisible) return null;
   
   return (
-    <div 
+    <button
+      type="button"
       className="settings-button" 
       onClick={() => setIsPanelVisible(true)}
+      aria-label="Open control panel"
+      title="Open control panel"
     >
       &#9776;
-    </div>
+    </button>
   );
 }
 
@@ -146,7 +126,7 @@ function Warnings() {
   if (!warning) return null;
   
   return (
-    <div className="warnings">
+    <div className="warnings" role="status" aria-live="polite">
       <span>{warning}</span>
     </div>
   );

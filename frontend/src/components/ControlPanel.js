@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { ArrowLeftRight } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import AgentPanel from './AgentPanel';
-import WildfirePanel from './WildfirePanel';
-import LandslidePanel from './LandslidePanel';
-import ContextPanel from './ContextPanel';
-import ImageryPanel from './ImageryPanel';
-import VectorPanel from './VectorPanel';
 import { trackUxEvent } from '../utils/analytics';
+
+const AgentPanel = lazy(() => import('./AgentPanel'));
+const WildfirePanel = lazy(() => import('./WildfirePanel'));
+const LandslidePanel = lazy(() => import('./LandslidePanel'));
+const ContextPanel = lazy(() => import('./ContextPanel'));
+const ImageryPanel = lazy(() => import('./ImageryPanel'));
+const VectorPanel = lazy(() => import('./VectorPanel'));
 
 function ControlPanel() {
   const {
@@ -169,15 +170,17 @@ function ControlPanel() {
 
       <div className="panel-scroll">
         {appMode === 'agent' ? (
-          agentModule === 'wildfire'
-            ? <WildfirePanel />
-            : (agentModule === 'landslide'
-              ? <LandslidePanel />
-              : (agentModule === 'context'
-                ? <ContextPanel />
-                : (agentModule === 'imagery'
-                  ? <ImageryPanel />
-                  : (agentModule === 'vector' ? <VectorPanel /> : <AgentPanel />))))
+          <Suspense fallback={<div className="agent-panel-loading" role="status">Loading controls…</div>}>
+            {agentModule === 'wildfire'
+              ? <WildfirePanel />
+              : (agentModule === 'landslide'
+                ? <LandslidePanel />
+                : (agentModule === 'context'
+                  ? <ContextPanel />
+                  : (agentModule === 'imagery'
+                    ? <ImageryPanel />
+                    : (agentModule === 'vector' ? <VectorPanel /> : <AgentPanel />))))}
+          </Suspense>
         ) : (
         <>
           {/* Layer Control Section */}

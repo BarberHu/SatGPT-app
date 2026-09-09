@@ -5,7 +5,6 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import shp from 'shpjs';
 import { useAppContext } from '../context/AppContext';
 import { buildAoiFromAgentState, buildAoiFromGeoJSON } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
@@ -36,7 +35,8 @@ export async function parseSpatialScopeFile(file) {
 
   if (lowerName.endsWith('.zip')) {
     const buffer = await readFileAsArrayBuffer(file);
-    return shp(buffer);
+    const { default: parseShapefile } = await import('shpjs');
+    return parseShapefile(buffer);
   }
 
   throw new Error('Only GeoJSON (.geojson/.json) and zipped Shapefile (.zip) are supported.');
@@ -260,11 +260,17 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
       {presentation !== 'hidden' && (
         variant === 'agent' ? (
           <div className="control-section aoi-upload-inline-shell agent">
-            <div className="section-header" onClick={() => setIsExpanded((value) => !value)}>
+            <button
+              type="button"
+              className="section-header"
+              onClick={() => setIsExpanded((value) => !value)}
+              aria-expanded={isExpanded}
+              aria-controls="agent-spatial-scope-body"
+            >
               <span className="section-title">Spatial Scope</span>
               <span className={`expand-icon ${isExpanded ? 'expanded' : ''}`}>▼</span>
-            </div>
-            {isExpanded && <div className="section-body aoi-upload-inline-body">{actionRow}</div>}
+            </button>
+            {isExpanded && <div id="agent-spatial-scope-body" className="section-body aoi-upload-inline-body">{actionRow}</div>}
           </div>
         ) : (
           <section className="aoi-upload-inline-shell ask">

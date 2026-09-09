@@ -36,15 +36,23 @@ function Modals() {
   );
 }
 
+function ModalCloseButton({ onClose }) {
+  return (
+    <button type="button" className="close_3d" onClick={onClose} aria-label="Close dialog">
+      <span aria-hidden="true">&times;</span>
+    </button>
+  );
+}
+
 function PromptModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="modal" style={{ display: 'block' }}>
+    <div className="modal" style={{ display: 'block' }} role="dialog" aria-modal="true" aria-labelledby="prompt-modal-title">
       <div className="modal-dialog">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Select Grid for Flood Data Visualization</h5>
+            <h5 id="prompt-modal-title" className="modal-title">Select Grid for Flood Data Visualization</h5>
           </div>
           <div className="modal-body">
             <p>
@@ -63,10 +71,10 @@ function Modal3D({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="modal_3d" style={{ display: 'block' }}>
+    <div className="modal_3d" style={{ display: 'block' }} role="dialog" aria-modal="true" aria-labelledby="view-3d-modal-title">
       <div className="modal-content_3d">
-        <span className="close_3d" onClick={onClose}>&times;</span>
-        <h4>Switch to 3D view</h4>
+        <ModalCloseButton onClose={onClose} />
+        <h4 id="view-3d-modal-title">Switch to 3D view</h4>
         <p>Click and drag while holding CTRL to explore the 3D view.</p>
       </div>
     </div>
@@ -77,10 +85,10 @@ function ErrorModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="modal_3d" style={{ display: 'block' }}>
+    <div className="modal_3d" style={{ display: 'block' }} role="alertdialog" aria-modal="true" aria-labelledby="error-modal-title">
       <div className="modal-content_3d">
-        <span className="close_3d" onClick={onClose}>&times;</span>
-        <h4>No data Available</h4>
+        <ModalCloseButton onClose={onClose} />
+        <h4 id="error-modal-title">No data Available</h4>
         <hr />
         <p>Please change the year or location.</p>
       </div>
@@ -92,10 +100,10 @@ function ContactModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="modal_3d" style={{ display: 'flex' }}>
+    <div className="modal_3d" style={{ display: 'flex' }} role="dialog" aria-modal="true" aria-labelledby="contact-modal-title">
       <div className="modal-content_3d">
-        <span className="close_3d" onClick={onClose}>&times;</span>
-        <h4>Contact Us</h4>
+        <ModalCloseButton onClose={onClose} />
+        <h4 id="contact-modal-title">Contact Us</h4>
         <hr />
         <div className="contact-us-details">
           <p>Space Applications Section (SAS)</p>
@@ -119,12 +127,12 @@ function HelpModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="modal_3d_help" style={{ display: 'flex' }}>
+    <div className="modal_3d_help" style={{ display: 'flex' }} role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
       <div className="modal-content_3d_help">
-        <span className="close_3d" onClick={onClose}>&times;</span>
+        <ModalCloseButton onClose={onClose} />
         <hr />
         <div className="help-details">
-          <h2>SatGPT User Guide</h2>
+          <h2 id="help-modal-title">SatGPT User Guide</h2>
           <div className="help-download-row">
             {helpDocuments.map((document) => (
               <a
