@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
+import { getHistoricalMap, getFloodHotspotMap } from '../services/api';
+import { createCodeSnippet } from '../export/geeCodeGenerator';
 import { buildAskMapRequestParams, isFishnetAoi } from '../utils/aoi';
 
 const FLOOD_HOTSPOT_YEAR_FROM = 1988;
@@ -24,6 +25,7 @@ export const useMapData = () => {
   // Track previous grid coords to detect changes
   const prevAoiRef = useRef(null);
   const requestIdRef = useRef(0);
+  const requestControllerRef = useRef(null);
   const appModeRef = useRef(appMode);
   const previousModeRef = useRef(appMode);
 
@@ -39,6 +41,9 @@ export const useMapData = () => {
     }
 
     const requestId = ++requestIdRef.current;
+    requestControllerRef.current?.abort();
+    const requestController = new AbortController();
+    requestControllerRef.current = requestController;
 
     console.log('fetchMapData called with AOI:', aoi);
 
@@ -60,12 +65,12 @@ export const useMapData = () => {
       let data;
 
       if (dataType === 'historical') {
-        data = await getHistoricalMap(params);
+        data = await getHistoricalMap(params, { signal: requestController.signal });
       } else {
         // Flood hotspot
         params.year_from = FLOOD_HOTSPOT_YEAR_FROM;
         params.year_count = yearControl;
-        data = await getFloodHotspotMap(params);
+        data = await getFloodHotspotMap(params, { signal: requestController.signal });
       }
 
       if (requestIdRef.current !== requestId || appModeRef.current !== currentMode) {
@@ -96,10 +101,14 @@ export const useMapData = () => {
       if (requestIdRef.current !== requestId || appModeRef.current !== currentMode) {
         return;
       }
+      if (error?.isCanceled) {
+        return;
+      }
       console.error('Error fetching map data:', error);
-      setWarning('Error loading map data. Please try again.');
+      setWarning(error?.message || 'Error loading map data. Please try again.');
     } finally {
-      if (requestIdRef.current === requestId) {
+      if (requestControllerRef.current === requestController) {
+        requestControllerRef.current = null;
         setIsLoading(false);
       }
     }
@@ -112,6 +121,8 @@ export const useMapData = () => {
     previousModeRef.current = appMode;
 
     if (appMode !== 'ask') {
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
       prevAoiRef.current = null;
       requestIdRef.current += 1;
       setIsLoading(false);
@@ -139,6 +150,8 @@ export const useMapData = () => {
         fetchMapData(selectedAOI);
       }
     } else {
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
       prevAoiRef.current = null;
       requestIdRef.current += 1;
       setIsLoading(false);
@@ -146,10 +159,17 @@ export const useMapData = () => {
   }, [appMode, selectedAOI, fetchMapData, setIsLoading]);
 
   useEffect(() => {
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
     requestIdRef.current += 1;
     prevAoiRef.current = null;
     setIsLoading(false);
   }, [aoiClearVersion, setIsLoading]);
+
+  useEffect(() => () => {
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+  }, []);
 
   // Also refetch when dataType or yearControl changes (if grid is selected)
   useEffect(() => {

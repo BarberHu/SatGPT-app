@@ -2,9 +2,10 @@
  * ChatBox Component
  * Handles the Ask workflow. Agent chat is rendered by AgentWorkspaceSidebar.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { sendChatMessage, getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
+import { sendChatMessage, getHistoricalMap, getFloodHotspotMap } from '../services/api';
+import { createCodeSnippet } from '../export/geeCodeGenerator';
 import { buildAskMapRequestParams } from '../utils/aoi';
 
 const SUGGESTIONS = [
@@ -40,6 +41,12 @@ function ChatBox() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const requestControllerRef = useRef(null);
+
+  useEffect(() => () => {
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+  }, []);
 
   const suggestions =
     dataType === 'floodHotspot'
@@ -85,9 +92,12 @@ function ChatBox() {
     setIsLoading(true);
     setIsSubmitting(true);
     setError('');
+    requestControllerRef.current?.abort();
+    const requestController = new AbortController();
+    requestControllerRef.current = requestController;
 
     try {
-      const gptResult = await sendChatMessage(chatInput);
+      const gptResult = await sendChatMessage(chatInput, { signal: requestController.signal });
       const parsedResponse = JSON.parse(gptResult.message);
       const responseData = parsedResponse.response[0];
 
@@ -111,8 +121,6 @@ function ChatBox() {
 
       if (params.time_start > params.time_end) {
         setWarning('Warning! Start date should be less than end date!');
-        setIsLoading(false);
-        setIsSubmitting(false);
         return;
       }
 
@@ -120,9 +128,9 @@ function ChatBox() {
       if (dataType === 'floodHotspot') {
         params.year_from = 2000;
         params.year_count = yearControl;
-        mapData = await getFloodHotspotMap(params);
+        mapData = await getFloodHotspotMap(params, { signal: requestController.signal });
       } else {
-        mapData = await getHistoricalMap(params);
+        mapData = await getHistoricalMap(params, { signal: requestController.signal });
       }
 
       updateLayerData(mapData);
@@ -141,12 +149,18 @@ function ChatBox() {
       });
       setChatInput('');
     } catch (err) {
+      if (err?.isCanceled) {
+        return;
+      }
       console.error('Error:', err);
       setError('An error occurred. Please try again.');
       setActiveModal('error');
     } finally {
-      setIsLoading(false);
-      setIsSubmitting(false);
+      if (requestControllerRef.current === requestController) {
+        requestControllerRef.current = null;
+        setIsLoading(false);
+        setIsSubmitting(false);
+      }
     }
   };
 

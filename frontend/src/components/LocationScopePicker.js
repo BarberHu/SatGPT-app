@@ -116,12 +116,16 @@ export default function LocationScopePicker({
   const [previewId, setPreviewId] = useState(null);
   const previousSelectedAoiRef = useRef(null);
   const pickerRef = useRef(null);
+  const searchControllerRef = useRef(null);
 
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const isVisible = embedded || isOpen;
 
   useEffect(() => {
     if (!isVisible) {
+      searchControllerRef.current?.abort();
+      searchControllerRef.current = null;
+      setLoading(false);
       return;
     }
 
@@ -132,6 +136,11 @@ export default function LocationScopePicker({
     setPreviewId(null);
   }, [isVisible]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => () => {
+    searchControllerRef.current?.abort();
+    searchControllerRef.current = null;
+  }, []);
+
   const restorePreviousSelection = useCallback(() => {
     if (selectedAOI?.source !== PREVIEW_SOURCE) {
       return;
@@ -140,11 +149,17 @@ export default function LocationScopePicker({
   }, [selectedAOI, setSelectedAOI]);
 
   const handleClose = useCallback(() => {
+    searchControllerRef.current?.abort();
+    searchControllerRef.current = null;
+    setLoading(false);
     restorePreviousSelection();
     onClose?.();
   }, [onClose, restorePreviousSelection]);
 
   const clearSearchResults = useCallback(() => {
+    searchControllerRef.current?.abort();
+    searchControllerRef.current = null;
+    setLoading(false);
     restorePreviousSelection();
     setCandidates([]);
     setCheckedIds([]);
@@ -201,12 +216,15 @@ export default function LocationScopePicker({
     setCandidates([]);
     setCheckedIds([]);
     setPreviewId(null);
+    searchControllerRef.current?.abort();
+    const requestController = new AbortController();
+    searchControllerRef.current = requestController;
 
     try {
       const response = await searchLocationCandidates({
         query: trimmedQuery,
         limit: 5,
-      });
+      }, { signal: requestController.signal });
 
       const nextCandidates = response?.data || [];
       setCandidates(nextCandidates);
@@ -219,10 +237,16 @@ export default function LocationScopePicker({
 
       previewCandidateOnMap(nextCandidates[0]);
     } catch (searchError) {
+      if (searchError?.isCanceled) {
+        return;
+      }
       setError(searchError?.message || 'Place search failed.');
       restorePreviousSelection();
     } finally {
-      setLoading(false);
+      if (searchControllerRef.current === requestController) {
+        searchControllerRef.current = null;
+        setLoading(false);
+      }
     }
   }, [previewCandidateOnMap, query, restorePreviousSelection]);
 

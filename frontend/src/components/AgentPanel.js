@@ -591,8 +591,9 @@ function AgentPanel() {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
-    getFloodLayerCatalog()
+    getFloodLayerCatalog({ signal: controller.signal })
       .then((result) => {
         if (cancelled) {
           return;
@@ -603,13 +604,14 @@ function AgentPanel() {
         ));
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (!cancelled && !error?.isCanceled) {
           console.error('Flood layer catalog initialization failed:', error);
         }
       });
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 
@@ -620,9 +622,18 @@ function AgentPanel() {
 
   const imageryRequestKeyRef = useRef(null);
   const impactRequestKeyRef = useRef(null);
+  const imageryAbortControllerRef = useRef(null);
+  const impactAbortControllerRef = useRef(null);
   const pendingRecommendedLayerRequestsRef = useRef(new Set());
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
   const previousSelectedAoiSignatureRef = useRef('no-aoi');
+
+  useEffect(() => () => {
+    imageryAbortControllerRef.current?.abort();
+    imageryAbortControllerRef.current = null;
+    impactAbortControllerRef.current?.abort();
+    impactAbortControllerRef.current = null;
+  }, []);
   const hasCoAgentState = Boolean(state);
   const rawState = hasCoAgentState ? state : floodAgentState;
   const rawEvent = rawState?.event || null;
@@ -1752,8 +1763,15 @@ function AgentPanel() {
       return;
     }
 
+    const previousController = imageryAbortControllerRef.current;
+    const requestController = new AbortController();
     imageryRequestKeyRef.current = requestKey;
+    imageryAbortControllerRef.current = requestController;
+    previousController?.abort();
+    impactAbortControllerRef.current?.abort();
+    impactAbortControllerRef.current = null;
     impactRequestKeyRef.current = null;
+    setAgentImpactLoading(false);
     setAgentImagery(null);
     setAgentImpactData(null);
     setAgentTileError(null);
@@ -1780,7 +1798,7 @@ function AgentPanel() {
         latitude: agentState.coordinates?.[1] || 0,
         bounds: aoi?.bounds || agentState.bounds || null,
         geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
-      });
+      }, { signal: requestController.signal });
 
       if (imageryRequestKeyRef.current !== requestKey) {
         finishImagerySpan({ status: 'stale' });
@@ -1803,10 +1821,14 @@ function AgentPanel() {
         throw new Error('Flood imagery response was not successful.');
       }
     } catch (error) {
-      console.error('Failed to fetch imagery:', error);
+      if (error?.isCanceled) {
+        finishImagerySpan({ status: 'cancelled' });
+        return;
+      }
       if (imageryRequestKeyRef.current !== requestKey) {
         return;
       }
+      console.error('Failed to fetch imagery:', error);
       releaseRequestKeyForRetry = true;
       finishImagerySpan({
         status: 'error',
@@ -1818,6 +1840,9 @@ function AgentPanel() {
         error: error?.message || 'Unknown imagery error',
       });
     } finally {
+      if (imageryAbortControllerRef.current === requestController) {
+        imageryAbortControllerRef.current = null;
+      }
       finalizeLatestRequest({
         requestKeyRef: imageryRequestKeyRef,
         requestKey,
@@ -1825,11 +1850,18 @@ function AgentPanel() {
         releaseForRetry: releaseRequestKeyForRetry,
       });
     }
-  }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentTileError, setWarning]);
+  }, [setAgentImagery, setAgentImageryLoading, setAgentImpactData, setAgentImpactLoading, setAgentTileError, setWarning]);
 
   useEffect(() => {
     if (!analysisDisplayEnabled || !currentPreDate || !currentPeekDate || !currentAfterDate) {
+      imageryAbortControllerRef.current?.abort();
+      imageryAbortControllerRef.current = null;
+      impactAbortControllerRef.current?.abort();
+      impactAbortControllerRef.current = null;
       imageryRequestKeyRef.current = null;
+      impactRequestKeyRef.current = null;
+      setAgentImageryLoading(false);
+      setAgentImpactLoading(false);
       return;
     }
 
@@ -1853,6 +1885,8 @@ function AgentPanel() {
     currentPreDate,
     effectiveAoi,
     fetchAgentImagery,
+    setAgentImageryLoading,
+    setAgentImpactLoading,
   ]);
 
   // Fetch flood impact assessment data
@@ -1865,11 +1899,15 @@ function AgentPanel() {
       effectiveAoiSignature,
     ].join('|');
 
-    if (impactRequestKeyRef.current === requestKey && agentImpactData) {
+    if (impactRequestKeyRef.current === requestKey) {
       return;
     }
-    
+
+    const previousController = impactAbortControllerRef.current;
+    const requestController = new AbortController();
     impactRequestKeyRef.current = requestKey;
+    impactAbortControllerRef.current = requestController;
+    previousController?.abort();
     setAgentImpactLoading(true);
     setWarning('');
     const finishImpactSpan = startAgentDiagnosticSpan('network', 'flood_impact', {
@@ -1887,7 +1925,7 @@ function AgentPanel() {
         peek_date: currentPeekDate,
         bounds: effectiveAoi?.bounds || currentBounds || null,
         geojson: effectiveAoi?.geojson?.geometry || currentGeojson || null,
-      });
+      }, { signal: requestController.signal });
 
       if (impactRequestKeyRef.current !== requestKey) {
         finishImpactSpan({ status: 'stale' });
@@ -1907,10 +1945,14 @@ function AgentPanel() {
         });
       }
     } catch (error) {
-      console.error('Failed to fetch impact data:', error);
+      if (error?.isCanceled) {
+        finishImpactSpan({ status: 'cancelled' });
+        return;
+      }
       if (impactRequestKeyRef.current !== requestKey) {
         return;
       }
+      console.error('Failed to fetch impact data:', error);
       releaseRequestKeyForRetry = true;
       finishImpactSpan({
         status: 'error',
@@ -1922,6 +1964,9 @@ function AgentPanel() {
         error: error?.message || 'Unknown impact error',
       });
     } finally {
+      if (impactAbortControllerRef.current === requestController) {
+        impactAbortControllerRef.current = null;
+      }
       finalizeLatestRequest({
         requestKeyRef: impactRequestKeyRef,
         requestKey,
@@ -1930,7 +1975,6 @@ function AgentPanel() {
       });
     }
   }, [
-    agentImpactData,
     analysisDisplayEnabled,
     currentBounds,
     currentGeojson,
@@ -1963,6 +2007,7 @@ function AgentPanel() {
     }
 
     let cancelled = false;
+    const requestController = new AbortController();
     const pendingRecommendedLayerRequests = pendingRecommendedLayerRequestsRef.current;
     const layerRequestsToRender = visibleCatalogLayers.map((layer) => {
       const contextKey = getRecommendedLayerContextKey(layer);
@@ -2002,7 +2047,7 @@ function AgentPanel() {
           pre_date: layerDateWindow.start_date || currentPreDate,
           peek_date: currentPeekDate || layerDateWindow.start_date,
           after_date: layerDateWindow.end_date || currentAfterDate,
-        });
+        }, { signal: requestController.signal });
 
         if (cancelled || !result?.success) {
           finishLayerSpan({ status: cancelled ? 'cancelled' : 'unsuccessful' });
@@ -2021,11 +2066,11 @@ function AgentPanel() {
           hasTileUrl: Boolean(result?.data?.tile_url),
         });
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && !error?.isCanceled) {
           setWarning(error?.message || 'Failed to render recommended layer.');
         }
         finishLayerSpan({
-          status: cancelled ? 'cancelled' : 'error',
+          status: cancelled || error?.isCanceled ? 'cancelled' : 'error',
           error: error?.message || 'unknown',
         });
       } finally {
@@ -2047,6 +2092,7 @@ function AgentPanel() {
     
     return () => {
       cancelled = true;
+      requestController.abort();
       layerRequestsToRender.forEach(({ requestToken }) => {
         pendingRecommendedLayerRequests.delete(requestToken);
       });

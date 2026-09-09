@@ -184,6 +184,12 @@ function DisasterLayerPanel({
     downloadRaster: handleAgentRasterDownload,
   } = useAgentRasterDownload({ aoi: activeAnalysisAoi, setWarning });
   const imageryRequestKeyRef = useRef(null);
+  const imageryAbortControllerRef = useRef(null);
+
+  useEffect(() => () => {
+    imageryAbortControllerRef.current?.abort();
+    imageryAbortControllerRef.current = null;
+  }, []);
   const resolvedImageryDateWindow = useMemo(
     () => normalizeImageryDateWindow(agentImageryDateWindow, floodAgentState),
     [agentImageryDateWindow, floodAgentState]
@@ -229,7 +235,11 @@ function DisasterLayerPanel({
       return;
     }
 
+    const previousController = imageryAbortControllerRef.current;
+    const requestController = new AbortController();
     imageryRequestKeyRef.current = requestKey;
+    imageryAbortControllerRef.current = requestController;
+    previousController?.abort();
     setAgentSelectedPeriod('custom_range');
     setAgentImageryLoading(true);
     setWarning('');
@@ -242,7 +252,7 @@ function DisasterLayerPanel({
         latitude: activeAnalysisAoi.center?.lat || 0,
         bounds: activeAnalysisAoi.bounds || null,
         geojson: activeAnalysisAoi.geojson?.geometry || activeAnalysisAoi.geojson || null,
-      });
+      }, { signal: requestController.signal });
       if (imageryRequestKeyRef.current !== requestKey) {
         return;
       }
@@ -255,11 +265,12 @@ function DisasterLayerPanel({
         imagery_aoi_signature: selectedAoiSignature,
       }));
     } catch (error) {
-      if (imageryRequestKeyRef.current === requestKey) {
+      if (imageryRequestKeyRef.current === requestKey && !error?.isCanceled) {
         setWarning(error?.message || 'Imagery request failed.');
       }
     } finally {
-      if (imageryRequestKeyRef.current === requestKey) {
+      if (imageryAbortControllerRef.current === requestController) {
+        imageryAbortControllerRef.current = null;
         setAgentImageryLoading(false);
       }
     }

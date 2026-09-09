@@ -68,6 +68,9 @@ describe('useAgentRasterLayerRequest', () => {
       requestKey: 'new-request',
     });
 
+    expect(getAgentRasterLayers.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(getAgentRasterLayers.mock.calls[1][1].signal.aborted).toBe(false);
+
     first.resolve({ eeMapURLInundationHotspot: 'old' });
     await firstRequest;
     expect(options.mergeLayerData).not.toHaveBeenCalled();
