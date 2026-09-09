@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { getAgentRasterLayers } from '../services/api';
 import useAgentRasterLayerRequest from './useAgentRasterLayerRequest';
 
-jest.mock('../services/api', () => ({
-  getAgentRasterLayers: jest.fn(),
+vi.mock('../services/api', () => ({
+  getAgentRasterLayers: vi.fn(),
 }));
 
 const deferred = () => {
@@ -35,9 +35,9 @@ describe('useAgentRasterLayerRequest', () => {
     expose = { current: null };
     options = {
       aoiSignature: 'aoi-1',
-      mergeLayerData: jest.fn(),
-      setAgentLayerLoading: jest.fn(),
-      setWarning: jest.fn(),
+      mergeLayerData: vi.fn(),
+      setAgentLayerLoading: vi.fn(),
+      setWarning: vi.fn(),
     };
     act(() => {
       root.render(<HookHarness options={options} expose={expose} />);
@@ -47,7 +47,7 @@ describe('useAgentRasterLayerRequest', () => {
   afterEach(() => {
     act(() => root.unmount());
     delete global.IS_REACT_ACT_ENVIRONMENT;
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   test('ignores an older response for the same layer', async () => {

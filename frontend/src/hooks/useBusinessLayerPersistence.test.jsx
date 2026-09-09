@@ -15,15 +15,15 @@ describe('useBusinessLayerPersistence', () => {
 
   beforeEach(() => {
     global.IS_REACT_ACT_ENVIRONMENT = true;
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     container = document.createElement('div');
     root = createRoot(container);
-    repository = { save: jest.fn().mockResolvedValue({ success: true }) };
+    repository = { save: vi.fn().mockResolvedValue({ success: true }) };
   });
 
   afterEach(() => {
     act(() => root.unmount());
-    jest.useRealTimers();
+    vi.useRealTimers();
     delete global.IS_REACT_ACT_ENVIRONMENT;
   });
 
@@ -35,7 +35,7 @@ describe('useBusinessLayerPersistence', () => {
         ready: false,
         repository,
       }} />);
-      jest.runAllTimers();
+      vi.runAllTimers();
     });
 
     expect(repository.save).not.toHaveBeenCalled();
@@ -51,7 +51,7 @@ describe('useBusinessLayerPersistence', () => {
     act(() => root.render(<HookHarness options={{ ...base, records: [{ id: 'one' }] }} />));
     act(() => root.render(<HookHarness options={{ ...base, records: [{ id: 'one' }, { id: 'two' }] }} />));
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      vi.advanceTimersByTime(100);
       await Promise.resolve();
     });
 

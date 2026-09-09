@@ -32,9 +32,9 @@ import {
 } from '../utils/mapLifecycle';
 import useMapboxInitialization from '../hooks/useMapboxInitialization';
 
-// Public Mapbox values are provided directly through CRA environment variables.
-const MAPBOX_ACCESS_TOKEN = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
-const MAPBOX_STYLE_URL = process.env.REACT_APP_MAPBOX_STYLE_URL;
+// Keep the established public variable names while Vite injects them at build time.
+const MAPBOX_ACCESS_TOKEN = import.meta.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
+const MAPBOX_STYLE_URL = import.meta.env.REACT_APP_MAPBOX_STYLE_URL;
 
 if (!MAPBOX_ACCESS_TOKEN || !MAPBOX_STYLE_URL) {
   throw new Error('Missing required Mapbox environment variables');

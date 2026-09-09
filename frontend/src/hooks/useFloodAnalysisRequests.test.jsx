@@ -4,13 +4,13 @@ import { getFloodImages, getFloodImpact } from '../services/agentApi';
 import { startAgentDiagnosticSpan } from '../utils/agentDiagnostics';
 import useFloodAnalysisRequests from './useFloodAnalysisRequests';
 
-jest.mock('../services/agentApi', () => ({
-  getFloodImages: jest.fn(),
-  getFloodImpact: jest.fn(),
+vi.mock('../services/agentApi', () => ({
+  getFloodImages: vi.fn(),
+  getFloodImpact: vi.fn(),
 }));
-jest.mock('../utils/analytics', () => ({ trackUxEvent: jest.fn() }));
-jest.mock('../utils/agentDiagnostics', () => ({
-  startAgentDiagnosticSpan: jest.fn(() => jest.fn()),
+vi.mock('../utils/analytics', () => ({ trackUxEvent: vi.fn() }));
+vi.mock('../utils/agentDiagnostics', () => ({
+  startAgentDiagnosticSpan: vi.fn(() => vi.fn()),
 }));
 
 const deferred = () => {
@@ -41,12 +41,12 @@ const createOptions = (overrides = {}) => ({
   impactLayerVisible: false,
   agentImpactData: null,
   agentImpactLoading: false,
-  setAgentImagery: jest.fn(),
-  setAgentImageryLoading: jest.fn(),
-  setAgentImpactData: jest.fn(),
-  setAgentImpactLoading: jest.fn(),
-  setAgentTileError: jest.fn(),
-  setWarning: jest.fn(),
+  setAgentImagery: vi.fn(),
+  setAgentImageryLoading: vi.fn(),
+  setAgentImpactData: vi.fn(),
+  setAgentImpactLoading: vi.fn(),
+  setAgentTileError: vi.fn(),
+  setWarning: vi.fn(),
   ...overrides,
 });
 
@@ -63,15 +63,15 @@ describe('useFloodAnalysisRequests', () => {
     root = createRoot(container);
     expose = { current: null };
     options = createOptions();
-    startAgentDiagnosticSpan.mockImplementation(() => jest.fn());
-    consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    startAgentDiagnosticSpan.mockImplementation(() => vi.fn());
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     act(() => root.render(<HookHarness options={options} expose={expose} />));
   });
 
   afterEach(() => {
     act(() => root.unmount());
     consoleError.mockRestore();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     delete global.IS_REACT_ACT_ENVIRONMENT;
   });
 

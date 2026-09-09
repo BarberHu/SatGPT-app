@@ -3,17 +3,20 @@ import { createRoot } from 'react-dom/client';
 import mapboxgl from 'mapbox-gl';
 import useMapboxInitialization from './useMapboxInitialization';
 
-jest.mock('mapbox-gl', () => ({
-  Map: jest.fn(),
-  NavigationControl: jest.fn(() => ({ type: 'navigation' })),
-}));
+vi.mock('mapbox-gl', () => {
+  const mapboxgl = {
+    Map: vi.fn(),
+    NavigationControl: vi.fn(() => ({ type: 'navigation' })),
+  };
+  return { default: mapboxgl, ...mapboxgl };
+});
 
 const createMap = () => ({
-  addControl: jest.fn(),
-  off: jest.fn(),
-  on: jest.fn(),
-  remove: jest.fn(),
-  removeControl: jest.fn(),
+  addControl: vi.fn(),
+  off: vi.fn(),
+  on: vi.fn(),
+  remove: vi.fn(),
+  removeControl: vi.fn(),
 });
 
 function HookHarness({ onLoad, onStyleData }) {
@@ -52,14 +55,14 @@ describe('useMapboxInitialization', () => {
     if (container) {
       act(() => root.unmount());
     }
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     delete global.IS_REACT_ACT_ENVIRONMENT;
   });
 
   test('pairs load and style listeners and disposes the map', () => {
-    const cleanupLoadedMap = jest.fn();
-    const onLoad = jest.fn(() => cleanupLoadedMap);
-    const onStyleData = jest.fn();
+    const cleanupLoadedMap = vi.fn();
+    const onLoad = vi.fn(() => cleanupLoadedMap);
+    const onStyleData = vi.fn();
 
     act(() => {
       root.render(<HookHarness onLoad={onLoad} onStyleData={onStyleData} />);

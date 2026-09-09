@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   helpDocuments,
@@ -9,6 +9,15 @@ import {
 
 function Modals() {
   const { activeModal, setActiveModal } = useAppContext();
+
+  useEffect(() => {
+    if (!activeModal) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setActiveModal(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeModal, setActiveModal]);
 
   return (
     <>
@@ -38,7 +47,7 @@ function Modals() {
 
 function ModalCloseButton({ onClose }) {
   return (
-    <button type="button" className="close_3d" onClick={onClose} aria-label="Close dialog">
+    <button type="button" className="close_3d" onClick={onClose} aria-label="Close dialog" autoFocus>
       <span aria-hidden="true">&times;</span>
     </button>
   );
@@ -59,7 +68,7 @@ function PromptModal({ isOpen, onClose }) {
               Please select a grid on the map to view the Flood data from 
               Google Earth Engine (GEE).
             </p>
-            <button onClick={onClose} className="info-modal-btn">OK</button>
+            <button type="button" onClick={onClose} className="info-modal-btn" autoFocus>OK</button>
           </div>
         </div>
       </div>

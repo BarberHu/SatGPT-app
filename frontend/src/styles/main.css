@@ -1,6 +1,4 @@
 /* Font Awesome Icons */
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css');
-
 /********************/
 /* Universal Styles */
 /********************/
@@ -579,6 +577,27 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   align-items: center;
   cursor: pointer;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.pages:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.reset-opacity-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reset-opacity-button:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .pages p,

@@ -3,6 +3,7 @@ FROM node:22.16.0-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
+COPY index.html vite.config.mjs ./
 COPY public ./public
 COPY src ./src
 

@@ -7,29 +7,29 @@ const createMap = () => {
   const layers = new Map();
   const sources = new Map();
   return {
-    addLayer: jest.fn((definition) => layers.set(definition.id, definition)),
-    addSource: jest.fn((id, definition) => sources.set(id, {
+    addLayer: vi.fn((definition) => layers.set(definition.id, definition)),
+    addSource: vi.fn((id, definition) => sources.set(id, {
       ...definition,
-      setTiles: jest.fn((tiles) => {
+      setTiles: vi.fn((tiles) => {
         sources.get(id).tiles = tiles;
       }),
     })),
-    getLayer: jest.fn((id) => layers.get(id)),
-    getSource: jest.fn((id) => sources.get(id)),
-    off: jest.fn(),
-    on: jest.fn(),
-    removeLayer: jest.fn((id) => layers.delete(id)),
-    removeSource: jest.fn((id) => sources.delete(id)),
-    setLayoutProperty: jest.fn(),
-    setPaintProperty: jest.fn(),
+    getLayer: vi.fn((id) => layers.get(id)),
+    getSource: vi.fn((id) => sources.get(id)),
+    off: vi.fn(),
+    on: vi.fn(),
+    removeLayer: vi.fn((id) => layers.delete(id)),
+    removeSource: vi.fn((id) => sources.delete(id)),
+    setLayoutProperty: vi.fn(),
+    setPaintProperty: vi.fn(),
   };
 };
 
 describe('map lifecycle helpers', () => {
   test('unbinds every global and delegated event with the same handler', () => {
     const map = createMap();
-    const click = jest.fn();
-    const idle = jest.fn();
+    const click = vi.fn();
+    const idle = vi.fn();
     const cleanup = bindMapEvents(map, [
       { event: 'click', layerId: 'grid', handler: click },
       { event: 'idle', handler: idle },

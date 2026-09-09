@@ -1,10 +1,11 @@
-jest.mock('axios', () => {
-  const request = jest.fn();
-  return {
+vi.mock('axios', () => {
+  const request = vi.fn();
+  const axios = {
     __mockRequest: request,
-    create: jest.fn(() => ({ request })),
-    isCancel: jest.fn((error) => Boolean(error?.__CANCEL__)),
+    create: vi.fn(() => ({ request })),
+    isCancel: vi.fn((error) => Boolean(error?.__CANCEL__)),
   };
+  return { default: axios, ...axios };
 });
 
 import axios from 'axios';

@@ -4,9 +4,9 @@ import { renderRecommendedLayer } from '../services/agentApi';
 import { startAgentDiagnosticSpan } from '../utils/agentDiagnostics';
 import useRecommendedLayerRenderer from './useRecommendedLayerRenderer';
 
-jest.mock('../services/agentApi', () => ({ renderRecommendedLayer: jest.fn() }));
-jest.mock('../utils/agentDiagnostics', () => ({
-  startAgentDiagnosticSpan: jest.fn(() => jest.fn()),
+vi.mock('../services/agentApi', () => ({ renderRecommendedLayer: vi.fn() }));
+vi.mock('../utils/agentDiagnostics', () => ({
+  startAgentDiagnosticSpan: vi.fn(() => vi.fn()),
 }));
 
 const deferred = () => {
@@ -32,7 +32,7 @@ describe('useRecommendedLayerRenderer', () => {
     container = document.createElement('div');
     root = createRoot(container);
     requests = [deferred(), deferred(), deferred()];
-    startAgentDiagnosticSpan.mockImplementation(() => jest.fn());
+    startAgentDiagnosticSpan.mockImplementation(() => vi.fn());
     renderRecommendedLayer
       .mockReturnValueOnce(requests[0].promise)
       .mockReturnValueOnce(requests[1].promise)
@@ -54,17 +54,17 @@ describe('useRecommendedLayerRenderer', () => {
       getCatalogLayerDateWindow: () => ({ start_date: '2024-01-01', end_date: '2024-01-03' }),
       getRecommendedLayerContextKey: (layer) => `context:${layer.id}`,
       recommendedLayerBaseContextKey: 'context',
-      setAgentLayerLoading: jest.fn((update) => { loadingState = update(loadingState); }),
-      setAgentRecommendedLayerData: jest.fn((update) => {
+      setAgentLayerLoading: vi.fn((update) => { loadingState = update(loadingState); }),
+      setAgentRecommendedLayerData: vi.fn((update) => {
         if (typeof update === 'function') update({});
       }),
-      setWarning: jest.fn(),
+      setWarning: vi.fn(),
     };
   });
 
   afterEach(() => {
     if (container) act(() => root.unmount());
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     delete global.IS_REACT_ACT_ENVIRONMENT;
   });
 

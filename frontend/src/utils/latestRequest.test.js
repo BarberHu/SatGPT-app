@@ -3,7 +3,7 @@ import { finalizeLatestRequest } from './latestRequest';
 describe('finalizeLatestRequest', () => {
   test('stops loading and keeps a successful request key for deduplication', () => {
     const requestKeyRef = { current: 'request-1' };
-    const setLoading = jest.fn();
+    const setLoading = vi.fn();
 
     expect(finalizeLatestRequest({
       requestKeyRef,
@@ -32,7 +32,7 @@ describe('finalizeLatestRequest', () => {
 
   test('does not let an older request clear the current loading state', () => {
     const requestKeyRef = { current: 'request-2' };
-    const setLoading = jest.fn();
+    const setLoading = vi.fn();
 
     expect(finalizeLatestRequest({
       requestKeyRef,

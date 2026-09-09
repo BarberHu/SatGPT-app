@@ -334,13 +334,13 @@ function ControlPanel() {
           </div>
           
           <div style={{ paddingLeft: '10px' }}>
-            <h5 
-              className="blue" 
-              style={{ cursor: 'pointer' }}
+            <button
+              type="button"
+              className="blue reset-opacity-button"
               onClick={resetAllOpacity}
             >
               Reset Transparency for all
-            </h5>
+            </button>
           </div>
         </div>
 
@@ -361,20 +361,22 @@ function ControlPanel() {
 
         {/* Footer Links */}
         <div style={{ display: 'flex', justifyContent: 'space-around' }}>
-          <div 
+          <button
+            type="button"
             className="pages" 
             onClick={() => setActiveModal('contact')}
           >
-            <i className="fa fa-comment-o"></i>
+            <i className="fa fa-comment-o" aria-hidden="true"></i>
             <p>Contact Us</p>
-          </div>
-          <div 
+          </button>
+          <button
+            type="button"
             className="pages" 
             onClick={() => setActiveModal('help')}
           >
-            <i className="fa fa-external-link"></i>
+            <i className="fa fa-external-link" aria-hidden="true"></i>
             <p>Help</p>
-          </div>
+          </button>
         </div>
         </>
         )}
