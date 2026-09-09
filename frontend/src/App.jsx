@@ -65,8 +65,8 @@ function App() {
       <Profiler id="MapContainer" onRender={mapProfiler}>
         <MapContainer />
       </Profiler>
+      <SettingsButton />
       <div className="ui">
-        <SettingsButton />
         <Legends />
         <ModeBasedChatBox />
         <ModeBasedResultBox />

@@ -193,8 +193,10 @@ body,
 
 .water .settings-button {
   display: block;
-  position: absolute;
-  left: 0px;
+  position: fixed;
+  top: var(--satgpt-panel-gap);
+  left: var(--satgpt-panel-gap);
+  z-index: 12;
   background: var(--satgpt-surface-bg);
   width: 40px;
   font-size: 30px;
@@ -206,6 +208,10 @@ body,
   cursor: pointer;
   color: inherit;
   line-height: normal;
+}
+
+.water--agent .settings-button {
+  left: calc(var(--satgpt-disaster-rail-width) + var(--satgpt-panel-gap));
 }
 
 .water .settings-button:focus-visible,
@@ -1371,10 +1377,6 @@ a.mapboxgl-ctrl-logo {
     right: 12px;
   }
 
-  .water--agent .settings-button {
-    top: 120px;
-  }
-
   .chat-box {
     width: 95vw;
     left: 2.5vw;
@@ -1409,6 +1411,10 @@ a.mapboxgl-ctrl-logo {
     left: var(--satgpt-panel-gap);
     width: var(--satgpt-left-panel-width);
     max-width: calc(100vw - (var(--satgpt-panel-gap) * 2));
+  }
+
+  .water--agent .settings-button {
+    left: var(--satgpt-panel-gap);
   }
 }
 

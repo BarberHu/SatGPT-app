@@ -16,7 +16,9 @@ function AgentExperience({ onError, sidebarProfiler }) {
       onError={onError}
     >
       <AgentDisasterRail />
-      <ControlPanel />
+      <div className="ui agent-control-panel-ui">
+        <ControlPanel />
+      </div>
       <Profiler id="AgentWorkspaceSidebar" onRender={sidebarProfiler}>
         <AgentWorkspaceSidebar />
       </Profiler>
