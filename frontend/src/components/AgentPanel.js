@@ -6,20 +6,19 @@
  */
 
 import React, { Profiler, startTransition, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { createPortal, flushSync } from 'react-dom';
+import { flushSync } from 'react-dom';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import EventConfirmation from './EventConfirmation';
 import LayerManager from './LayerManager';
 import { getFloodImages, getFloodImpact, renderRecommendedLayer } from '../services/agentApi';
 import useAgentRasterDownload from '../hooks/useAgentRasterDownload';
-import { getAgentRasterLayers } from '../services/api';
+import useAgentRasterLayerRequest from '../hooks/useAgentRasterLayerRequest';
 import {
   buildAoiBoundsSignature as buildBoundsSignature,
   buildAoiFromAgentState,
   buildAoiSignature,
   buildAskMapRequestParams,
-  buildEarthEngineGeometryExpression,
   resolveAgentAnalysisAoi,
 } from '../utils/aoi';
 import { trackUxEvent } from '../utils/analytics';
@@ -36,41 +35,16 @@ import {
 } from '../utils/catalogTimeDefaults';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 import SOURCE_REFERENCES from '../config/agentLayerSourceReferences';
+import { FLOOD_RASTER_LAYER_CONFIG } from '../config/agentRasterLayerConfig';
+import { DEFAULT_FLOOD_AGENT_STATE } from '../config/floodAgentState';
 import {
   createReactProfilerHandler,
   startAgentDiagnosticSpan,
   updateAgentDiagnosticsContext,
   useRenderDiagnostics,
 } from '../utils/agentDiagnostics';
-import FLOOD_DEFAULT_CATALOG_LAYERS from '../config/floodDefaultCatalogLayers';
 import 'rc-slider/assets/index.css';
 import './AgentPanel.css';
-
-// Flood Agent 共享状态的本地默认值。
-const defaultAgentState = {
-  event: null,
-  event_description: null,
-  flood_report: null,
-  report_document: null,
-  pre_date: null,
-  after_date: null,
-  peek_date: null,
-  location: null,
-  coordinates: null,
-  bounds: null,
-  geojson: null,
-  resolved_aoi: null,
-  aoi_resolution_meta: null,
-  confirmed_aoi: null,
-  recommended_layers: [],
-  selected_layer_ids: [],
-  recommendation_strategy: null,
-  recommendation_source: null,
-  confirmation_version: 0,
-  search_sources: null,
-  gee_code: null,
-  is_valid_flood_query: false,
-};
 
 const formatCoordinatePart = (value) => {
   const numericValue = Number(value);
@@ -311,84 +285,10 @@ const resolveCatalogLayerDateWindow = (layer, override = {}, dates = {}) => {
 };
 
 const CORE_LAYER_LEGENDS = {
-  sentinel2: {
-    type: 'text',
-    label: 'True color RGB composite',
-  },
-  sentinel1: {
-    type: 'palette',
-    label: 'VV backscatter',
-    min: '-25 dB',
-    max: '0 dB',
-    palette: ['#111827', '#64748b', '#f8fafc'],
-  },
   flood_detection: {
     type: 'solid',
     label: 'Flood extent',
     color: '#ff0000',
-  },
-  population: {
-    type: 'palette',
-    label: 'Population density',
-    min: 0,
-    max: 1000,
-    palette: ['#ffffcc', '#fd8d3c', '#bd0026'],
-  },
-  urban: {
-    type: 'palette',
-    label: 'Built-up surface',
-    min: 0,
-    max: 10000,
-    palette: ['#ffeda0', '#feb24c', '#f03b20'],
-  },
-  landcover: {
-    type: 'classes',
-    label: 'ESA WorldCover',
-    items: [
-      { value: 'Tree', color: '#006400' },
-      { value: 'Shrub', color: '#ffbb22' },
-      { value: 'Grass', color: '#ffff4c' },
-      { value: 'Crop', color: '#f096ff' },
-      { value: 'Built', color: '#fa0000' },
-      { value: 'Water', color: '#0064c8' },
-    ],
-  },
-  lclu_raster: {
-    type: 'classes',
-    label: 'ESA WorldCover',
-    items: [
-      { value: 'Tree', color: '#006400' },
-      { value: 'Shrub', color: '#ffbb22' },
-      { value: 'Grass', color: '#ffff4c' },
-      { value: 'Crop', color: '#f096ff' },
-      { value: 'Built', color: '#fa0000' },
-      { value: 'Water', color: '#0064c8' },
-    ],
-  },
-  population_density: {
-    type: 'palette',
-    label: 'Population density',
-    min: 0,
-    max: 1000,
-    palette: ['#ffffe7', '#ffac1d', '#f2552c', '#9f0c21'],
-  },
-  soil_texture: {
-    type: 'classes',
-    label: 'Soil texture classes',
-    items: [
-      { value: 'Cl', color: '#d5c36b' },
-      { value: 'SiCl', color: '#b96947' },
-      { value: 'SaCl', color: '#9d3706' },
-      { value: 'ClLo', color: '#ae868f' },
-      { value: 'SiClLo', color: '#f86714' },
-      { value: 'SaClLo', color: '#46d143' },
-      { value: 'Lo', color: '#368f20' },
-      { value: 'SiLo', color: '#3e5a14' },
-      { value: 'SaLo', color: '#ffd557' },
-      { value: 'Si', color: '#fff72e' },
-      { value: 'LoSa', color: '#ff5a9d' },
-      { value: 'Sa', color: '#ff005b' },
-    ],
   },
 };
 
@@ -408,43 +308,6 @@ const FIELD_LABELS = {
   supports_tile: 'Supports tile',
   temporal_type: 'Temporal type',
 };
-
-const AGENT_RASTER_LAYER_CONFIG = [
-  {
-    key: 'singleInundationEvent',
-    orderId: 'agent-raster-singleInundationEvent',
-    title: 'Single Inundation Event',
-    infoText: 'JRC Global Surface Water yearly history clipped to the selected AOI for a single analysis time window.',
-    dataset: SOURCE_REFERENCES.jrcGswYearlyHistory.datasetId,
-    method: 'JRC YearlyHistory permanent water and seasonal inundation classes',
-    sourceRef: SOURCE_REFERENCES.jrcGswYearlyHistory,
-    legend: {
-      type: 'classes',
-      label: 'Water classification',
-      items: [
-        { value: 'Permanent water', color: '#00008B' },
-        { value: 'Inundated area', color: '#FD0303' },
-      ],
-    },
-  },
-  {
-    key: 'inundationHotspot',
-    orderId: 'agent-raster-inundationHotspot',
-    title: 'Inundation Hotspot',
-    infoText: 'Long-term inundation frequency from JRC yearly water history, excluding mapped permanent water.',
-    dataset: SOURCE_REFERENCES.jrcGswYearlyHistory.datasetId,
-    method: 'Flood frequency over configurable historical duration',
-    sourceRef: SOURCE_REFERENCES.jrcGswYearlyHistory,
-    legend: {
-      type: 'palette',
-      label: 'Inundation hotspot frequency',
-      min: '10%',
-      max: '80%',
-      palette: ['#ffa9bb', '#ff8f9e', '#ff6171', '#ff3b50', '#ff084a'],
-    },
-    hasDurationControl: true,
-  },
-];
 
 const formatCoordinatePair = (pair) => [
   formatCoordinatePart(pair?.[0]),
@@ -661,341 +524,6 @@ function downloadGEECode(code, eventName) {
   URL.revokeObjectURL(url);
 }
 
-function buildFallbackAgentGEECode({
-  eventName,
-  preDate,
-  peekDate,
-  afterDate,
-  aoi,
-}) {
-  if (!preDate || !peekDate || !aoi) {
-    return '';
-  }
-
-  let geometryExpression = '';
-  try {
-    geometryExpression = buildEarthEngineGeometryExpression(aoi);
-  } catch (error) {
-    return '';
-  }
-
-  return `// Flood Analysis - ${eventName || 'Flood Event'}
-// S1 SAR Otsu Change Detection | Generated by FloodAgent
-
-var pre_date = '${preDate}';
-var peak_date = '${peekDate}';
-var post_date = '${afterDate || ''}';
-var days_range = 15;
-var AOI = ${geometryExpression};
-
-Map.centerObject(AOI, 10);
-Map.addLayer(ee.FeatureCollection(AOI).style({
-  color: 'yellow',
-  fillColor: '00000000',
-  width: 2
-}), {}, 'AOI Boundary');
-
-var vv_pre = ee.ImageCollection('COPERNICUS/S1_GRD')
-  .filterDate(ee.Date(pre_date).advance(-days_range, 'day'), ee.Date(pre_date))
-  .filterBounds(AOI)
-  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-  .filter(ee.Filter.eq('instrumentMode', 'IW'))
-  .select('VV')
-  .median()
-  .clip(AOI);
-
-var vv_peak = ee.ImageCollection('COPERNICUS/S1_GRD')
-  .filterDate(ee.Date(peak_date), ee.Date(peak_date).advance(days_range, 'day'))
-  .filterBounds(AOI)
-  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-  .filter(ee.Filter.eq('instrumentMode', 'IW'))
-  .select('VV')
-  .median()
-  .clip(AOI);
-
-Map.addLayer(vv_pre, { min: -25, max: 0 }, 'S1 Pre-flood');
-Map.addLayer(vv_peak, { min: -25, max: 0 }, 'S1 Peak-flood');
-
-var change = vv_peak.subtract(vv_pre).rename('change');
-
-var hist = change.reduceRegion({
-  reducer: ee.Reducer.histogram(255, 0.2),
-  geometry: AOI,
-  scale: 30,
-  maxPixels: 1e9,
-  bestEffort: true
-});
-
-var counts = ee.Array(ee.Dictionary(hist.get('change')).get('histogram'));
-var means = ee.Array(ee.Dictionary(hist.get('change')).get('bucketMeans'));
-var size = means.length().get([0]);
-var total = counts.reduce(ee.Reducer.sum(), [0]).get([0]);
-var sumAll = counts.multiply(means).reduce(ee.Reducer.sum(), [0]).get([0]);
-
-var threshold = ee.Dictionary(ee.List.sequence(0, size.subtract(1)).iterate(function(i, state) {
-  state = ee.Dictionary(state);
-  i = ee.Number(i);
-  var w0 = state.getNumber('w0').add(counts.get([i]));
-  var sum0 = state.getNumber('sum0').add(counts.get([i]).multiply(means.get([i])));
-  var w1 = total.subtract(w0);
-  var valid = w0.gt(0).and(w1.gt(0));
-  var betweenVariance = valid.multiply(w0.multiply(w1).multiply(
-    sum0.divide(w0).subtract(sumAll.subtract(sum0).divide(w1)).pow(2)
-  ));
-  var isMax = betweenVariance.gt(state.getNumber('maxVar'));
-  return ee.Dictionary({
-    w0: w0,
-    sum0: sum0,
-    maxVar: isMax.multiply(betweenVariance).add(isMax.not().multiply(state.getNumber('maxVar'))),
-    bestT: isMax.multiply(means.get([i])).add(isMax.not().multiply(state.getNumber('bestT')))
-  });
-}, ee.Dictionary({ w0: 0, sum0: 0, maxVar: 0, bestT: -3 }))).getNumber('bestT');
-
-var floodChange = change.lt(threshold);
-var permanentWater = ee.Image('JRC/GSW1_4/GlobalSurfaceWater')
-  .select('occurrence')
-  .gte(95)
-  .clip(AOI);
-var floodExtent = floodChange.and(permanentWater.not());
-
-Map.addLayer(change, { min: -5, max: 5, palette: ['blue', 'white', 'red'] }, 'SAR Change Index');
-Map.addLayer(permanentWater.selfMask(), { palette: ['00008B'] }, 'Permanent Water');
-Map.addLayer(floodExtent.selfMask(), { palette: ['ff0000'] }, 'Flood Extent');
-
-var floodAreaKm2 = floodExtent.multiply(ee.Image.pixelArea().divide(1e6)).reduceRegion({
-  reducer: ee.Reducer.sum(),
-  geometry: AOI,
-  scale: 30,
-  maxPixels: 1e9,
-  bestEffort: true
-});
-
-print('Otsu threshold (dB):', threshold);
-print('Flood area (km2):', floodAreaKm2);
-print('Post-flood date:', post_date);`;
-}
-
-/**
- * 影像信息图标弹层。
- * 展示三个时段的影像来源、日期、轨道与拼接统计，方便判断分析底图是否可靠。
- */
-// eslint-disable-next-line no-unused-vars
-function ImageryInfoIcon({ imageryData, type, selectedPeriod }) {
-  const [showPopover, setShowPopover] = useState(false);
-  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
-  const [copiedId, setCopiedId] = useState(null);
-  const popoverRef = useRef(null);
-  const iconRef = useRef(null);
-
-  // 点击弹层外部区域时关闭 popover。
-  useEffect(() => {
-    if (!showPopover) return;
-    const handleClickOutside = (e) => {
-      if (
-        popoverRef.current && !popoverRef.current.contains(e.target) &&
-        iconRef.current && !iconRef.current.contains(e.target)
-      ) {
-        setShowPopover(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showPopover]);
-
-  // 复制影像 ID，优先使用 Clipboard API。
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedId(text);
-      setTimeout(() => setCopiedId(null), 1500);
-    }).catch(() => {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopiedId(text);
-      setTimeout(() => setCopiedId(null), 1500);
-    });
-  };
-
-  // 计算 popover 位置。
-  const handleTogglePopover = (e) => {
-    e.stopPropagation();
-    if (!showPopover && iconRef.current) {
-      const rect = iconRef.current.getBoundingClientRect();
-      const popoverWidth = 290;
-      const popoverHeight = 380;
-      // 默认优先显示在图标右侧。
-      let left = rect.right + 8;
-      let top = rect.top - 10;
-      // 右侧空间不足时切换到左侧。
-      if (left + popoverWidth > window.innerWidth - 10) {
-        left = rect.left - popoverWidth - 8;
-      }
-      // 如果左侧也放不下，就退化为视口内居中。
-      if (left < 10) {
-        left = Math.max(10, (window.innerWidth - popoverWidth) / 2);
-      }
-      // 垂直方向超出视口时向上收缩。
-      if (top + popoverHeight > window.innerHeight - 10) {
-        top = window.innerHeight - popoverHeight - 10;
-      }
-      if (top < 10) top = 10;
-      setPopoverPos({ top, left });
-    }
-    setShowPopover(!showPopover);
-  };
-
-  // 当前时段对应的影像信息。
-  const currentPeriodData = imageryData?.[selectedPeriod]?.[type];
-  const hasError = currentPeriodData?.error;
-
-  // 汇总三个时期的影像状态，用于弹层展示。
-  const allPeriodsInfo = [
-    { key: 'pre_date', label: 'Pre-Flood' },
-    { key: 'peek_date', label: 'Peak' },
-    { key: 'after_date', label: 'Post-Flood' },
-  ].map(({ key, label }) => ({
-    key,
-    label,
-    data: imageryData?.[key]?.[type],
-  }));
-
-  // 统计缺影像的时期数量，用于图标状态提示。
-  const missingCount = allPeriodsInfo.filter(p => p.data?.error || p.data?.image_count === 0).length;
-
-  const popoverContent = showPopover ? createPortal(
-    <div
-      className="imagery-info-popover"
-      ref={popoverRef}
-      style={{ top: popoverPos.top, left: popoverPos.left }}
-    >
-      <div className="popover-header">
-        <span className="popover-title">
-          {type === 'sentinel2' ? 'Sentinel-2 Optical' : 'Sentinel-1 SAR'}
-        </span>
-        <button className="popover-close" onClick={() => setShowPopover(false)}>x</button>
-      </div>
-      <div className="popover-body">
-        {allPeriodsInfo.map(({ key, label, data }) => (
-          <div key={key} className={`period-info-block ${selectedPeriod === key ? 'current' : ''}`}>
-            <div className="period-info-header">
-              <span className="period-info-label">{label}</span>
-              {data?.error ? (
-                <span className="period-status-badge error">N/A</span>
-              ) : (
-                <span className="period-status-badge success">Available</span>
-              )}
-            </div>
-            {data?.error ? (
-              <div className="no-imagery-detail">
-                <div className="no-imagery-msg">{data.error}</div>
-                {data.search_range && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Search Range</span>
-                    <span className="meta-value">{data.search_range}</span>
-                  </div>
-                )}
-              </div>
-            ) : data ? (
-              <div className="imagery-detail">
-                <div className="imagery-meta-row">
-                  <span className="meta-label">Date</span>
-                  <span className="meta-value">{data.date || '-'}</span>
-                </div>
-                {data.requested_date && data.date !== data.requested_date && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Requested</span>
-                    <span className="meta-value">{data.requested_date}</span>
-                  </div>
-                )}
-                <div className="imagery-meta-row">
-                  <span className="meta-label">Satellite</span>
-                  <span className="meta-value">{data.spacecraft || data.type || (type === 'sentinel2' ? 'Sentinel-2' : 'Sentinel-1')}</span>
-                </div>
-                <div className="imagery-meta-row">
-                  <span className="meta-label">Mosaic</span>
-                  <span className="meta-value">
-                    {data.mosaic ? `Yes (${data.image_count} tiles)` : 'Single scene'}
-                  </span>
-                </div>
-                {data.actual_date_range && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Date Range</span>
-                    <span className="meta-value">{data.actual_date_range}</span>
-                  </div>
-                )}
-                {data.cloud_cover !== undefined && data.cloud_cover !== null && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Cloud</span>
-                    <span className="meta-value">{Number(data.cloud_cover).toFixed(1)}%</span>
-                  </div>
-                )}
-                {data.polarization && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Polarization</span>
-                    <span className="meta-value">{data.polarization}</span>
-                  </div>
-                )}
-                {data.orbit_pass && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Orbit</span>
-                    <span className="meta-value">{data.orbit_pass}</span>
-                  </div>
-                )}
-                {data.resolution && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Resolution</span>
-                    <span className="meta-value">{data.resolution}m</span>
-                  </div>
-                )}
-                {data.mgrs_tile && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">MGRS Tile</span>
-                    <span className="meta-value">{data.mgrs_tile}</span>
-                  </div>
-                )}
-                {data.id && data.id !== 'unknown' && (
-                  <div className="imagery-meta-row">
-                    <span className="meta-label">Image ID</span>
-                    <span
-                      className={`meta-value id-value clickable ${copiedId === data.id ? 'copied' : ''}`}
-                      title={`${data.id}\nClick to copy`}
-                      onClick={() => copyToClipboard(data.id)}
-                    >
-                      {copiedId === data.id ? 'Copied!' : data.id}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="no-imagery-detail">
-                <div className="no-imagery-msg">No data available</div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>,
-    document.body
-  ) : null;
-
-  return (
-    <div className="imagery-info-wrapper">
-      <span
-        ref={iconRef}
-        className={`imagery-info-icon ${hasError ? 'warning' : missingCount > 0 ? 'caution' : 'ok'}`}
-        onClick={handleTogglePopover}
-        title={hasError ? 'No imagery available for this period. Click for details.' : 'Click to view imagery source info'}
-      >
-        {hasError ? '!' : missingCount > 0 ? '!' : 'i'}
-      </span>
-      {popoverContent}
-    </div>
-  );
-}
-
 /**
  * Layer data source metadata (static info for each analysis layer)
  */
@@ -1008,173 +536,7 @@ const LAYER_META = {
     auxiliary: 'JRC Global Surface Water v1.4',
     description: 'Detects newly flooded areas by comparing pre-flood and peak SAR backscatter, using Otsu thresholding on the change index. Permanent water bodies are excluded via JRC occurrence data.',
   },
-  population: {
-    title: 'Population Impact',
-    source: 'WorldPop - Global 100m Population',
-    method: 'Zonal Statistics',
-    resolution: '100m',
-    auxiliary: null,
-    description: 'Estimates affected population by overlaying the flood mask on WorldPop gridded population density.',
-  },
-  urban: {
-    title: 'Built-up Area',
-    source: 'GHSL Built-up Surface 2020 (JRC)',
-    method: 'Zonal Statistics',
-    resolution: '100m',
-    auxiliary: null,
-    description: 'Calculates the flooded built-up area using the Global Human Settlement Layer.',
-  },
-  landcover: {
-    title: 'Land Cover',
-    source: 'ESA WorldCover 2021 (v200)',
-    method: 'Per-class Area Calculation',
-    resolution: '10m',
-    auxiliary: null,
-    description: 'Breaks down flooded area by ESA WorldCover classes (cropland, forest, built-up, grassland, etc.).',
-  },
 };
-
-/**
- * Analysis Layer 信息图标，展示每个分析图层的数据来源与统计摘要。
- */
-// eslint-disable-next-line no-unused-vars
-function LayerInfoIcon({ layerType, floodDetectionData, impactData }) {
-  const [showPopover, setShowPopover] = useState(false);
-  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
-  const popoverRef = useRef(null);
-  const iconRef = useRef(null);
-
-  const meta = LAYER_META[layerType];
-
-  // Close popover on outside click
-  useEffect(() => {
-    if (!showPopover) return;
-    const handleClickOutside = (e) => {
-      if (
-        popoverRef.current && !popoverRef.current.contains(e.target) &&
-        iconRef.current && !iconRef.current.contains(e.target)
-      ) {
-        setShowPopover(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showPopover]);
-
-  if (!meta) return null;
-
-  // Compute popover position
-  const handleToggle = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!showPopover && iconRef.current) {
-      const rect = iconRef.current.getBoundingClientRect();
-      const pw = 300, ph = 320;
-      let left = rect.right + 8;
-      let top = rect.top - 10;
-      if (left + pw > window.innerWidth - 10) left = rect.left - pw - 8;
-      if (left < 10) left = Math.max(10, (window.innerWidth - pw) / 2);
-      if (top + ph > window.innerHeight - 10) top = window.innerHeight - ph - 10;
-      if (top < 10) top = 10;
-      setPopoverPos({ top, left });
-    }
-    setShowPopover(!showPopover);
-  };
-
-  // Build dynamic stats rows
-  const statsRows = [];
-  if (layerType === 'flood_detection' && floodDetectionData) {
-    if (floodDetectionData.stats?.flood_area_km2 != null) {
-      statsRows.push({ label: 'Flooded Area', value: `${floodDetectionData.stats.flood_area_km2} km²` });
-    }
-    if (floodDetectionData.pre_date) statsRows.push({ label: 'Pre-flood Date', value: floodDetectionData.pre_date });
-    if (floodDetectionData.peek_date) statsRows.push({ label: 'Peak Date', value: floodDetectionData.peek_date });
-  }
-  if (layerType === 'population' && impactData?.population && !impactData.population.error) {
-    const p = impactData.population;
-    statsRows.push({ label: 'Affected', value: `${(p.affected || 0).toLocaleString()} people` });
-    statsRows.push({ label: 'Total in Region', value: `${(p.total || 0).toLocaleString()} people` });
-    if (p.percentage != null) statsRows.push({ label: 'Percentage', value: `${p.percentage}%` });
-    if (p.data_source) statsRows.push({ label: 'Data Year', value: p.data_source });
-  }
-  if (layerType === 'urban' && impactData?.urban && !impactData.urban.error) {
-    const u = impactData.urban;
-    statsRows.push({ label: 'Affected Built-up', value: `${u.affected_area_km2} km²` });
-    statsRows.push({ label: 'Total Built-up', value: `${u.total_area_km2} km²` });
-    if (u.percentage != null) statsRows.push({ label: 'Percentage', value: `${u.percentage}%` });
-  }
-  if (layerType === 'landcover' && impactData?.landcover && !impactData.landcover.error) {
-    const lc = impactData.landcover;
-    if (lc.breakdown) {
-      Object.entries(lc.breakdown).forEach(([key, val]) => {
-        statsRows.push({ label: key.charAt(0).toUpperCase() + key.slice(1), value: `${val.area_km2} km²` });
-      });
-    }
-  }
-
-  const hasStats = statsRows.length > 0;
-
-  const popoverContent = showPopover ? createPortal(
-    <div
-      className="layer-info-popover"
-      ref={popoverRef}
-      style={{ top: popoverPos.top, left: popoverPos.left }}
-    >
-      <div className="popover-header">
-        <span className="popover-title">{meta.title}</span>
-        <button className="popover-close" onClick={() => setShowPopover(false)}>x</button>
-      </div>
-      <div className="popover-body">
-        <div className="layer-meta-section">
-          <div className="layer-meta-subtitle">Data Source</div>
-          <div className="imagery-meta-row">
-            <span className="meta-label">Source</span>
-            <span className="meta-value">{meta.source}</span>
-          </div>
-          <div className="imagery-meta-row">
-            <span className="meta-label">Method</span>
-            <span className="meta-value">{meta.method}</span>
-          </div>
-          <div className="imagery-meta-row">
-            <span className="meta-label">Resolution</span>
-            <span className="meta-value">{meta.resolution}</span>
-          </div>
-          {meta.auxiliary && (
-            <div className="imagery-meta-row">
-              <span className="meta-label">Auxiliary</span>
-              <span className="meta-value">{meta.auxiliary}</span>
-            </div>
-          )}
-        </div>
-        {hasStats && (
-          <div className="layer-meta-section">
-            <div className="layer-meta-subtitle">Statistics</div>
-            {statsRows.map((row, i) => (
-              <div key={i} className="imagery-meta-row">
-                <span className="meta-label">{row.label}</span>
-                <span className="meta-value">{row.value}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="layer-meta-description">{meta.description}</div>
-      </div>
-    </div>,
-    document.body
-  ) : null;
-
-  return (
-    <span
-      ref={iconRef}
-      className="layer-info-icon"
-      onClick={handleToggle}
-      title="Click to view data source info"
-    >
-      i
-      {popoverContent}
-    </span>
-  );
-}
 
 function AgentPanel() {
   const { 
@@ -1205,8 +567,6 @@ function AgentPanel() {
     setAgentRecommendedLayerVisibility,
     agentRasterLayerVisibility,
     setAgentRasterLayerVisibility,
-    agentRasterLoading,
-    setAgentRasterLoading,
     agentLayerOrder,
     setAgentLayerOrder,
     agentLayerLoading,
@@ -1224,15 +584,13 @@ function AgentPanel() {
 
   const { state } = useCoAgent({
     name: "flood_agent",
-    initialState: defaultAgentState,
+    initialState: DEFAULT_FLOOD_AGENT_STATE,
   });
 
   const imageryRequestKeyRef = useRef(null);
   const impactRequestKeyRef = useRef(null);
   const pendingRecommendedLayerRequestsRef = useRef(new Set());
-  const pendingAgentRasterRequestKeyRef = useRef({});
   const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
-  const selectedAoiSignatureRef = useRef('no-aoi');
   const previousSelectedAoiSignatureRef = useRef('no-aoi');
   const hasCoAgentState = Boolean(state);
   const rawState = hasCoAgentState ? state : floodAgentState;
@@ -1279,7 +637,7 @@ function AgentPanel() {
   const stableSelectedLayerIds = useStableReference(rawSelectedLayerIds, rawSelectedLayerSignature);
   const currentState = useMemo(
     () => ({
-      ...defaultAgentState,
+      ...DEFAULT_FLOOD_AGENT_STATE,
       event: rawEvent,
       pre_date: rawPreDate,
       after_date: rawAfterDate,
@@ -1319,7 +677,7 @@ function AgentPanel() {
 
   const sharedAgentState = useMemo(
     () => ({
-      ...defaultAgentState,
+      ...DEFAULT_FLOOD_AGENT_STATE,
       location: rawLocation,
       coordinates: stableCoordinates,
       bounds: stableBounds,
@@ -1438,9 +796,12 @@ function AgentPanel() {
     [activeAnalysisAoi]
   );
 
-  useEffect(() => {
-    selectedAoiSignatureRef.current = selectedAoiSignature;
-  }, [selectedAoiSignature]);
+  const requestAgentRasterLayer = useAgentRasterLayerRequest({
+    aoiSignature: selectedAoiSignature,
+    mergeLayerData,
+    setAgentLayerLoading,
+    setWarning,
+  });
 
   useEffect(() => {
     const previousSignature = previousSelectedAoiSignatureRef.current;
@@ -1452,24 +813,22 @@ function AgentPanel() {
 
     setAgentRasterLayerVisibility((previous) => {
       const next = { ...previous };
-      AGENT_RASTER_LAYER_CONFIG.forEach((layer) => {
+      FLOOD_RASTER_LAYER_CONFIG.forEach((layer) => {
         next[layer.key] = false;
       });
       return next;
     });
     setAgentLayerLoading((previous) => {
       const next = { ...previous };
-      AGENT_RASTER_LAYER_CONFIG.forEach((layer) => {
+      FLOOD_RASTER_LAYER_CONFIG.forEach((layer) => {
         next[`raster-${layer.key}`] = false;
       });
       return next;
     });
-    setAgentRasterLoading(false);
   }, [
     selectedAoiSignature,
     setAgentLayerLoading,
     setAgentRasterLayerVisibility,
-    setAgentRasterLoading,
   ]);
 
   const buildAgentRasterRequestParams = useCallback((layerKey, overrides = {}) => {
@@ -1522,10 +881,9 @@ function AgentPanel() {
       return;
     }
 
-    const requestAoiSignature = selectedAoiSignatureRef.current;
     const requestKey = [
       layerKey,
-      requestAoiSignature,
+      selectedAoiSignature,
       params.time_start || '',
       params.time_end || '',
       params.year_start || '',
@@ -1534,102 +892,27 @@ function AgentPanel() {
       params.year_count || '',
     ].join('|');
 
-    setAgentRasterLoading(true);
-    pendingAgentRasterRequestKeyRef.current[layerKey] = requestKey;
-    setAgentLayerLoading((previous) => ({ ...previous, [`raster-${layerKey}`]: true }));
-    try {
-      const result = await getAgentRasterLayers(params);
-
-      if (selectedAoiSignatureRef.current !== requestAoiSignature) {
-        return;
-      }
-
-      mergeLayerData(result, {
-        aoiSignature: requestAoiSignature,
-        requestKey,
-      });
-      setWarning('');
-    } catch (error) {
-      if (selectedAoiSignatureRef.current !== requestAoiSignature) {
-        return;
-      }
-
-      const message = error?.message || 'Raster layer request failed.';
-      setWarning(message);
-    } finally {
-      if (pendingAgentRasterRequestKeyRef.current[layerKey] === requestKey) {
-        delete pendingAgentRasterRequestKeyRef.current[layerKey];
-        setAgentRasterLoading(false);
-        setAgentLayerLoading((previous) => ({ ...previous, [`raster-${layerKey}`]: false }));
-      }
-    }
+    await requestAgentRasterLayer({
+      layerKey,
+      params,
+      requestKey,
+      errorMessage: 'Raster layer request failed.',
+    });
   }, [
     buildAgentRasterRequestParams,
-    mergeLayerData,
-    setAgentLayerLoading,
-    setAgentRasterLoading,
+    requestAgentRasterLayer,
+    selectedAoiSignature,
     setWarning,
   ]);
 
-  const fallbackGeeCode = useMemo(() => buildFallbackAgentGEECode({
-    eventName: currentEvent,
-    preDate: currentPreDate,
-    peekDate: currentPeekDate,
-    afterDate: currentAfterDate,
-    aoi: effectiveAoi || agentDerivedAoi,
-  }), [
-    agentDerivedAoi,
-    currentAfterDate,
-    currentEvent,
-    currentPeekDate,
-    currentPreDate,
-    effectiveAoi,
-  ]);
-  const downloadableGeeCode = currentGeeCode || fallbackGeeCode;
+  const downloadableGeeCode = currentGeeCode;
   const recommendedCatalogLayers = useMemo(
     () => sortCatalogLayers(
       currentRecommendedLayers.filter((layer) => layer.layer_family === 'catalog')
     ),
     [currentRecommendedLayers]
   );
-  const controlPanelCatalogLayers = useMemo(() => {
-    const byAssetId = new Map();
-
-    FLOOD_DEFAULT_CATALOG_LAYERS.forEach((layer) => {
-      byAssetId.set(layer.asset_id || layer.id, layer);
-    });
-
-    recommendedCatalogLayers.forEach((layer) => {
-      const key = layer.asset_id || layer.id;
-      const fallbackLayer = byAssetId.get(key) || {};
-      byAssetId.set(key, {
-        ...fallbackLayer,
-        ...layer,
-        source_meta: {
-          ...(fallbackLayer.source_meta || {}),
-          ...(layer.source_meta || {}),
-        },
-        selection_profile: {
-          ...(fallbackLayer.selection_profile || {}),
-          ...(layer.selection_profile || {}),
-        },
-        render_profile: {
-          ...(fallbackLayer.render_profile || {}),
-          ...(layer.render_profile || {}),
-        },
-        execution_profile: {
-          ...(fallbackLayer.execution_profile || {}),
-          ...(layer.execution_profile || {}),
-        },
-        ui_profile: {
-          ...(fallbackLayer.ui_profile || {}),
-          ...(layer.ui_profile || {}),
-        },
-      });
-    });
-
-    return sortCatalogLayers(Array.from(byAssetId.values()));
-  }, [recommendedCatalogLayers]);
+  const controlPanelCatalogLayers = recommendedCatalogLayers;
   const controlPanelCatalogLayerSignature = buildLayerSignature(controlPanelCatalogLayers);
   const effectiveAoiSignature = buildAoiSignature(effectiveAoi, currentBounds);
   const recommendedLayerBaseContextKey = useMemo(() => buildRecommendedLayerContextKey({
@@ -1809,7 +1092,7 @@ function AgentPanel() {
       },
     }] : [];
 
-    const rasterItems = AGENT_RASTER_LAYER_CONFIG.map((layer, index) => {
+    const rasterItems = FLOOD_RASTER_LAYER_CONFIG.map((layer, index) => {
       const descriptor = layerData?.[layer.key] || null;
       const visible = Boolean(agentRasterLayerVisibility?.[layer.key]);
       const hasScope = Boolean(activeAnalysisAoi);
@@ -1823,7 +1106,6 @@ function AgentPanel() {
         hasScope
         && (
           agentLayerLoading?.[`raster-${layer.key}`]
-          || (visible && agentRasterLoading && !hasTile)
         )
       );
       const downloadState = rasterDownloadState[layer.key] || null;
@@ -2305,7 +1587,6 @@ function AgentPanel() {
     agentLayerLoading,
     agentLayerProgress,
     agentRasterLayerVisibility,
-    agentRasterLoading,
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
     analysisDisplayEnabled,
@@ -2814,7 +2095,7 @@ function AgentPanel() {
               trackUxEvent('export_gee_code', {
                 event: currentEvent || null,
                 mode: 'agent',
-                source: currentGeeCode ? 'agent_state' : 'frontend_fallback',
+                source: 'agent_state',
               });
               downloadGEECode(downloadableGeeCode, currentEvent);
             }}
@@ -2835,5 +2116,3 @@ function AgentPanel() {
 }
 
 export default AgentPanel;
-
-

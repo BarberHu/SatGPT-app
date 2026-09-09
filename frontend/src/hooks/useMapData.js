@@ -2,20 +2,11 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { getHistoricalMap, getFloodHotspotMap, createCodeSnippet } from '../services/api';
 import { buildAskMapRequestParams, isFishnetAoi } from '../utils/aoi';
-import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 
 const FLOOD_HOTSPOT_YEAR_FROM = 1988;
 const ASK_AUTOLOAD_AOI_SOURCES = new Set(['fishnet']);
 
 const isAskAutoloadAoi = (aoi) => ASK_AUTOLOAD_AOI_SOURCES.has(String(aoi?.source || '').toLowerCase());
-const isAgentAutoloadAoi = (aoi) => isBusinessLayerAoiSource(aoi?.source);
-const canAutoloadAoi = (mode, aoi) => (
-  mode === 'ask'
-    ? isAskAutoloadAoi(aoi)
-    : mode === 'agent'
-      ? isAgentAutoloadAoi(aoi)
-      : false
-);
 
 export const useMapData = () => {
   const {
@@ -25,7 +16,6 @@ export const useMapData = () => {
     yearControl,
     appMode,
     setIsLoading,
-    setAgentRasterLoading,
     setWarning,
     updateLayerData,
     setGeeCodeUrl,
@@ -44,9 +34,7 @@ export const useMapData = () => {
   // Fetch map data when grid is selected
   const fetchMapData = useCallback(async (aoi) => {
     const currentMode = appModeRef.current;
-    if (!aoi || !canAutoloadAoi(currentMode, aoi)) return;
-
-    if (currentMode === 'agent') {
+    if (!aoi || currentMode !== 'ask' || !isAskAutoloadAoi(aoi)) {
       return;
     }
 
@@ -65,9 +53,7 @@ export const useMapData = () => {
     });
 
     console.log('API params:', params);
-    if (currentMode === 'ask') {
-      setIsLoading(true);
-    }
+    setIsLoading(true);
     setWarning('');
 
     try {
@@ -88,10 +74,6 @@ export const useMapData = () => {
 
       // Update layer data in context
       updateLayerData(data);
-
-      if (currentMode !== 'ask') {
-        return;
-      }
 
       // Create GEE code snippet and download URL
       const codeType = dataType === 'historical'
@@ -118,14 +100,10 @@ export const useMapData = () => {
       setWarning('Error loading map data. Please try again.');
     } finally {
       if (requestIdRef.current === requestId) {
-        if (currentMode === 'ask') {
-          setIsLoading(false);
-        } else if (currentMode === 'agent') {
-          setAgentRasterLoading(false);
-        }
+        setIsLoading(false);
       }
     }
-  }, [dataType, yearControl, setAgentRasterLoading, setIsLoading, setWarning, updateLayerData, setGeeCodeUrl]);
+  }, [dataType, yearControl, setIsLoading, setWarning, updateLayerData, setGeeCodeUrl]);
 
   // Auto-fetch when AOI is selected or data type changes
   useEffect(() => {
@@ -133,11 +111,10 @@ export const useMapData = () => {
     const modeChanged = previousMode !== appMode;
     previousModeRef.current = appMode;
 
-    if (appMode !== 'ask' && appMode !== 'agent') {
+    if (appMode !== 'ask') {
       prevAoiRef.current = null;
       requestIdRef.current += 1;
       setIsLoading(false);
-      setAgentRasterLoading(false);
       return;
     }
 
@@ -145,14 +122,13 @@ export const useMapData = () => {
       prevAoiRef.current = null;
       requestIdRef.current += 1;
       setIsLoading(false);
-      setAgentRasterLoading(false);
 
       if (isFishnetAoi(selectedAOI)) {
         return;
       }
     }
 
-    if (selectedAOI && canAutoloadAoi(appMode, selectedAOI)) {
+    if (selectedAOI && isAskAutoloadAoi(selectedAOI)) {
       console.log('selectedAOI changed:', selectedAOI);
       const currentAoiStr = JSON.stringify(selectedAOI);
       const prevAoiStr = JSON.stringify(prevAoiRef.current);
@@ -166,26 +142,22 @@ export const useMapData = () => {
       prevAoiRef.current = null;
       requestIdRef.current += 1;
       setIsLoading(false);
-      setAgentRasterLoading(false);
     }
-  }, [appMode, selectedAOI, fetchMapData, setAgentRasterLoading, setIsLoading]);
+  }, [appMode, selectedAOI, fetchMapData, setIsLoading]);
 
   useEffect(() => {
     requestIdRef.current += 1;
     prevAoiRef.current = null;
     setIsLoading(false);
-    setAgentRasterLoading(false);
-  }, [aoiClearVersion, setAgentRasterLoading, setIsLoading]);
+  }, [aoiClearVersion, setIsLoading]);
 
   // Also refetch when dataType or yearControl changes (if grid is selected)
   useEffect(() => {
     if (
       selectedAOI
       && prevAoiRef.current
-      && (
-        (appMode === 'ask' && isAskAutoloadAoi(selectedAOI))
-        || (appMode === 'agent' && isAgentAutoloadAoi(selectedAOI))
-      )
+      && appMode === 'ask'
+      && isAskAutoloadAoi(selectedAOI)
     ) {
       fetchMapData(selectedAOI);
     }

@@ -1,3 +1,5 @@
+import AGENT_LAYER_SOURCE_REFERENCES from './agentLayerSourceReferences';
+
 export const AGENT_BASE_LAYER_ORDER_IDS = [
   'agent-s2-pre',
   'agent-s1-pre',
@@ -29,17 +31,49 @@ export const AGENT_RASTER_LAYER_KEYS_BY_MODULE = {
   vector: [],
 };
 
-const DEPRECATED_AGENT_RASTER_LAYER_KEYS = [
-  'populationExposure',
-  'fuelLandCover',
-];
-
 const RISK_LEVEL_ITEMS = [
   { value: '1 Low', color: '#2E7D32' },
   { value: '2 Moderate', color: '#FDD835' },
   { value: '3 Watch', color: '#FF8F00' },
   { value: '4 Warning', color: '#E53935' },
   { value: '5 Very high', color: '#B71C1C' },
+];
+
+export const FLOOD_RASTER_LAYER_CONFIG = [
+  {
+    key: 'singleInundationEvent',
+    orderId: 'agent-raster-singleInundationEvent',
+    title: 'Single Inundation Event',
+    infoText: 'JRC Global Surface Water yearly history clipped to the selected AOI for a single analysis time window.',
+    dataset: AGENT_LAYER_SOURCE_REFERENCES.jrcGswYearlyHistory.datasetId,
+    method: 'JRC YearlyHistory permanent water and seasonal inundation classes',
+    sourceRef: AGENT_LAYER_SOURCE_REFERENCES.jrcGswYearlyHistory,
+    legend: {
+      type: 'classes',
+      label: 'Water classification',
+      items: [
+        { value: 'Permanent water', color: '#00008B' },
+        { value: 'Inundated area', color: '#FD0303' },
+      ],
+    },
+  },
+  {
+    key: 'inundationHotspot',
+    orderId: 'agent-raster-inundationHotspot',
+    title: 'Inundation Hotspot',
+    infoText: 'Long-term inundation frequency from JRC yearly water history, excluding mapped permanent water.',
+    dataset: AGENT_LAYER_SOURCE_REFERENCES.jrcGswYearlyHistory.datasetId,
+    method: 'Flood frequency over configurable historical duration',
+    sourceRef: AGENT_LAYER_SOURCE_REFERENCES.jrcGswYearlyHistory,
+    legend: {
+      type: 'palette',
+      label: 'Inundation hotspot frequency',
+      min: '10%',
+      max: '80%',
+      palette: ['#ffa9bb', '#ff8f9e', '#ff6171', '#ff3b50', '#ff084a'],
+    },
+    hasDurationControl: true,
+  },
 ];
 
 export const CONTEXT_RASTER_LAYER_CONFIG = [
@@ -242,10 +276,7 @@ export const WILDFIRE_PENDING_RASTER_LAYER_CONFIG = [
 ];
 
 export const ALL_AGENT_RASTER_LAYER_NAMES = Array.from(
-  new Set([
-    ...Object.values(AGENT_RASTER_LAYER_KEYS_BY_MODULE).flat(),
-    ...DEPRECATED_AGENT_RASTER_LAYER_KEYS,
-  ])
+  new Set(Object.values(AGENT_RASTER_LAYER_KEYS_BY_MODULE).flat())
 );
 
 export const ALL_AGENT_RASTER_LAYER_IDS = ALL_AGENT_RASTER_LAYER_NAMES.map(

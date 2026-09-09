@@ -1,0 +1,30 @@
+export const DEFAULT_FLOOD_AGENT_STATE = {
+  event: null,
+  event_description: null,
+  flood_report: null,
+  report_document: null,
+  pre_date: null,
+  after_date: null,
+  peek_date: null,
+  location: null,
+  coordinates: null,
+  bounds: null,
+  geojson: null,
+  resolved_aoi: null,
+  aoi_resolution_meta: null,
+  confirmed_aoi: null,
+  recommended_layers: [],
+  selected_layer_ids: [],
+  recommendation_strategy: null,
+  recommendation_source: null,
+  confirmation_version: 0,
+  search_sources: null,
+  gee_code: null,
+  is_valid_flood_query: false,
+};
+
+export const createDefaultFloodAgentState = () => ({
+  ...DEFAULT_FLOOD_AGENT_STATE,
+  recommended_layers: [],
+  selected_layer_ids: [],
+});

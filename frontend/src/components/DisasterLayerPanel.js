@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getAgentRasterLayers } from '../services/api';
 import { getFloodImages } from '../services/agentApi';
 import {
   buildAoiSignature,
@@ -8,6 +7,7 @@ import {
 } from '../utils/aoi';
 import { useAppContext } from '../context/AppContext';
 import useAgentRasterDownload from '../hooks/useAgentRasterDownload';
+import useAgentRasterLayerRequest from '../hooks/useAgentRasterLayerRequest';
 import LayerManager from './LayerManager';
 import 'rc-slider/assets/index.css';
 import './AgentPanel.css';
@@ -138,8 +138,6 @@ function DisasterLayerPanel({
     agentRasterLayerVisibility,
     setAgentRasterLayerVisibility,
     setAgentRasterExpectedRequestKeys,
-    agentRasterLoading,
-    setAgentRasterLoading,
     agentLayerLoading,
     setAgentLayerLoading,
     agentLayerProgress,
@@ -175,6 +173,12 @@ function DisasterLayerPanel({
     () => buildAoiSignature(activeAnalysisAoi),
     [activeAnalysisAoi]
   );
+  const requestAgentRasterLayer = useAgentRasterLayerRequest({
+    aoiSignature: selectedAoiSignature,
+    mergeLayerData,
+    setAgentLayerLoading,
+    setWarning,
+  });
   const {
     downloadState: rasterDownloadState,
     downloadRaster: handleAgentRasterDownload,
@@ -385,34 +389,20 @@ function DisasterLayerPanel({
       layer_keys: [layerKey],
       ...overrides,
     });
-    const requestAoiSignature = selectedAoiSignature;
     const requestKey = buildRasterRequestKey(layerKey, params);
-
-    setAgentRasterLoading(true);
-    setAgentLayerLoading((previous) => ({ ...previous, [`raster-${layerKey}`]: true }));
-    try {
-      const result = await getAgentRasterLayers(params);
-      mergeLayerData(result, {
-        aoiSignature: requestAoiSignature,
-        requestKey,
-      });
-      setWarning('');
-    } catch (error) {
-      setWarning(error?.message || `${moduleLabel} raster layer request failed.`);
-    } finally {
-      setAgentRasterLoading(false);
-      setAgentLayerLoading((previous) => ({ ...previous, [`raster-${layerKey}`]: false }));
-    }
+    await requestAgentRasterLayer({
+      layerKey,
+      params,
+      requestKey,
+      errorMessage: `${moduleLabel} raster layer request failed.`,
+    });
   }, [
     buildRasterRequestKey,
     getRasterLayerConfig,
     layerWindows,
-    mergeLayerData,
     moduleLabel,
     activeAnalysisAoi,
-    selectedAoiSignature,
-    setAgentLayerLoading,
-    setAgentRasterLoading,
+    requestAgentRasterLayer,
     setWarning,
   ]);
 
@@ -530,7 +520,7 @@ function DisasterLayerPanel({
       && descriptor.aoiSignature === selectedAoiSignature
       && descriptor?.requestKey === expectedRequestKey
     );
-    const loading = Boolean(agentLayerLoading?.[`raster-${layer.key}`] || (visible && agentRasterLoading && !hasTile));
+    const loading = Boolean(agentLayerLoading?.[`raster-${layer.key}`]);
     const downloadState = rasterDownloadState[layer.key] || null;
     const disabled = Boolean(layer.unsupportedReason) || !activeAnalysisAoi;
     let status = layer.unsupportedReason

@@ -35,8 +35,6 @@ AGENT_RASTER_LAYER_KEYS = {
     "activeFireDetections",
     "burnHistory",
     "slopeSteepness",
-    "populationExposure",
-    "fuelLandCover",
     "lclu",
     "populationDensity",
     "soilTexture",
@@ -212,14 +210,8 @@ def get_unsupervised_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
-    jrc_surface_water, jrc_surface_flood, jrc_surface_water_visual, jrc_surface_flood_visual = (
-        _build_single_inundation_images(payload, region)
-    )
+def _attach_supplementary_map_layers(content: Dict[str, Any], region: ee.Geometry) -> None:
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
-
     lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
     population_density = ee.Image(
         supplementary_catalog["populationDensity"]["dataset"]
@@ -240,13 +232,22 @@ def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
     )
 
-    content: Dict[str, Any] = {}
-    attach_map_id(content, "Flood", jrc_surface_flood_visual.getMapId())
-    attach_map_id(content, "Water", jrc_surface_water_visual.getMapId())
     attach_map_id(content, "LCLU", lclu.getMapId())
     attach_map_id(content, "PopulationDensity", population_density.getMapId())
     attach_map_id(content, "SoilTexture", soil_texture.getMapId())
     attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+
+
+def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    aoi = parse_aoi_from_payload(payload)
+    region = aoi_to_ee_geometry(aoi)
+    jrc_surface_water, jrc_surface_flood, jrc_surface_water_visual, jrc_surface_flood_visual = (
+        _build_single_inundation_images(payload, region)
+    )
+    content: Dict[str, Any] = {}
+    attach_map_id(content, "Flood", jrc_surface_flood_visual.getMapId())
+    attach_map_id(content, "Water", jrc_surface_water_visual.getMapId())
+    _attach_supplementary_map_layers(content, region)
     return content
 
 
@@ -644,7 +645,7 @@ def _build_landslide_risk_class_image(payload: Dict[str, Any], region: ee.Geomet
 def _requested_agent_raster_layer_keys(payload: Dict[str, Any]) -> set[str]:
     raw_keys = payload.get("layer_keys", payload.get("layerKeys"))
     if not raw_keys:
-        return set(AGENT_RASTER_LAYER_KEYS)
+        raise ValueError("layer_keys must include at least one layer key.")
 
     if isinstance(raw_keys, str):
         stripped = raw_keys.strip()
@@ -816,29 +817,6 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         content["slopeSteepnessMeta"] = {
             "dataset": "USGS/SRTMGL1_003",
             "derived": "ee.Terrain.slope(elevation)",
-        }
-
-    if "populationExposure" in requested_keys:
-        population_exposure = ee.Image(
-            supplementary_catalog["populationDensity"]["dataset"]
-        ).clip(region)
-        population_exposure = visualize_image(
-            population_exposure, supplementary_catalog["populationDensity"]["visualization"]
-        )
-        attach_map_id(content, "PopulationExposure", population_exposure.getMapId())
-        content["populationExposureMeta"] = {
-            "dataset": supplementary_catalog["populationDensity"]["dataset"],
-        }
-
-    if "fuelLandCover" in requested_keys:
-        fuel_land_cover = _build_worldcover_fuel_land_cover_image(region)
-        attach_map_id(
-            content,
-            "FuelLandCover",
-            _visualize_worldcover_fuel_land_cover(fuel_land_cover).getMapId(),
-        )
-        content["fuelLandCoverMeta"] = {
-            "dataset": supplementary_catalog["landcover"]["dataset"],
         }
 
     if "lclu" in requested_keys:
@@ -1054,35 +1032,10 @@ def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     permanent_water_layer, flood_frequency_map, permanent_water_visual, flood_visual = (
         _build_flood_hotspot_images(payload, region)
     )
-    supplementary_catalog = get_basic_layer_catalog()["supplementary"]
-
-    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-    population_density = ee.Image(
-        supplementary_catalog["populationDensity"]["dataset"]
-    ).clip(region)
-    population_density = visualize_image(
-        population_density, supplementary_catalog["populationDensity"]["visualization"]
-    )
-    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
-        supplementary_catalog["soilTexture"]["band"]
-    )
-    soil_texture = visualize_image(
-        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
-    )
-    healthcare_access = ee.Image(
-        supplementary_catalog["healthCareAccess"]["dataset"]
-    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
-    healthcare_access = visualize_image(
-        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
-    )
-
     content: Dict[str, Any] = {}
     attach_map_id(content, "Flood", flood_visual.getMapId())
     attach_map_id(content, "Water", permanent_water_visual.getMapId())
-    attach_map_id(content, "LCLU", lclu.getMapId())
-    attach_map_id(content, "PopulationDensity", population_density.getMapId())
-    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
-    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+    _attach_supplementary_map_layers(content, region)
     return content
 
 
@@ -1155,33 +1108,10 @@ def get_water_regime_change_map_payload(payload: Dict[str, Any]) -> Dict[str, An
         seasonality, supplementary_catalog["seasonality"]["visualization"]
     )
 
-    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-    population_density = ee.Image(
-        supplementary_catalog["populationDensity"]["dataset"]
-    ).clip(region)
-    population_density = visualize_image(
-        population_density, supplementary_catalog["populationDensity"]["visualization"]
-    )
-    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
-        supplementary_catalog["soilTexture"]["band"]
-    )
-    soil_texture = visualize_image(
-        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
-    )
-    healthcare_access = ee.Image(
-        supplementary_catalog["healthCareAccess"]["dataset"]
-    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
-    healthcare_access = visualize_image(
-        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
-    )
-
     content: Dict[str, Any] = {}
     attach_map_id(content, "RegimeChange", regime_change.getMapId())
     attach_map_id(content, "Seasonality", seasonality.getMapId())
-    attach_map_id(content, "LCLU", lclu.getMapId())
-    attach_map_id(content, "PopulationDensity", population_density.getMapId())
-    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
-    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+    _attach_supplementary_map_layers(content, region)
     return content
 
 

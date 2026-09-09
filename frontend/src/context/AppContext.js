@@ -15,6 +15,8 @@ import {
   buildDefaultAgentLayerOrder,
   buildDefaultAgentRasterLayerVisibility,
 } from '../config/agentRasterLayerConfig';
+import { createDefaultFloodAgentState } from '../config/floodAgentState';
+import { createEmptyLayerData, normalizeLayerData } from '../api/adapters/layerDataAdapter';
 
 const AppContext = createContext();
 
@@ -24,31 +26,6 @@ export const useAppContext = () => {
     throw new Error('useAppContext must be used within an AppProvider');
   }
   return context;
-};
-
-// Flood Agent 共享状态的默认结构，覆盖事件、AOI、推荐图层等上下文。
-const defaultFloodAgentState = {
-  event: null,
-  event_description: null,
-  flood_report: null,
-  report_document: null,
-  pre_date: null,
-  after_date: null,
-  peek_date: null,
-  location: null,
-  coordinates: null,
-  bounds: null,
-  geojson: null,
-  resolved_aoi: null,
-  aoi_resolution_meta: null,
-  confirmed_aoi: null,
-  recommended_layers: [],
-  selected_layer_ids: [],
-  recommendation_strategy: null,
-  recommendation_source: null,
-  confirmation_version: 0,
-  search_sources: null,
-  is_valid_flood_query: false,
 };
 
 const defaultAgentLayerVisibility = {
@@ -157,23 +134,7 @@ export const AppProvider = ({ children }) => {
   const [isResultVisible, setIsResultVisible] = useState(true);
   
   // Map Layer Data (EE responses)
-  const [layerData, setLayerData] = useState({
-    singleInundationEvent: null,
-    inundationHotspot: null,
-    wildfireRisk: null,
-    landslideRisk: null,
-    activeFireDetections: null,
-    burnHistory: null,
-    slopeSteepness: null,
-    populationExposure: null,
-    fuelLandCover: null,
-    water: null,
-    flood: null,
-    lclu: null,
-    populationDensity: null,
-    soilTexture: null,
-    healthCareAccess: null,
-  });
+  const [layerData, setLayerData] = useState(createEmptyLayerData);
   
   // GEE Code Download
   const [geeCodeUrl, setGeeCodeUrl] = useState(null);
@@ -187,7 +148,7 @@ export const AppProvider = ({ children }) => {
   const previousAppModeRef = useRef('ask');
   
   // ========== Flood Agent 分析上下文（事件、时间、AOI、推荐图层） ==========
-  const [floodAgentState, setFloodAgentState] = useState(defaultFloodAgentState);
+  const [floodAgentState, setFloodAgentState] = useState(createDefaultFloodAgentState);
   
   // Flood Agent 当前加载的影像结果，用于地图渲染与图层面板显示。
   const [agentImagery, setAgentImagery] = useState(null);
@@ -205,7 +166,6 @@ export const AppProvider = ({ children }) => {
   const [agentShowLandcoverLayer, setAgentShowLandcoverLayer] = useState(false);
   const [agentRasterLayerVisibility, setAgentRasterLayerVisibility] = useState(defaultAgentRasterLayerVisibility);
   const [agentRasterExpectedRequestKeys, setAgentRasterExpectedRequestKeys] = useState({});
-  const [agentRasterLoading, setAgentRasterLoading] = useState(false);
   const [agentImpactData, setAgentImpactData] = useState(null);
   const [agentImpactLoading, setAgentImpactLoading] = useState(false);
   const [agentTileLoading, setAgentTileLoading] = useState(false);
@@ -229,7 +189,7 @@ export const AppProvider = ({ children }) => {
   
   // 重置 Flood Agent 共享状态，并清空相关影像与推荐图层缓存。
   const resetFloodAgentState = useCallback(() => {
-    setFloodAgentState(defaultFloodAgentState);
+    setFloodAgentState(createDefaultFloodAgentState());
     setAgentImagery(null);
     setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentRecommendedLayerData({});
@@ -237,7 +197,6 @@ export const AppProvider = ({ children }) => {
     setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
     setAgentRasterExpectedRequestKeys({});
     setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
-    setAgentRasterLoading(false);
     setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
     setAgentLayerProgress({});
@@ -255,7 +214,6 @@ export const AppProvider = ({ children }) => {
     setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
     setAgentRasterExpectedRequestKeys({});
     setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
-    setAgentRasterLoading(false);
     setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
     setAgentLayerProgress({});
@@ -470,7 +428,7 @@ export const AppProvider = ({ children }) => {
   }, [selectedAOI]);
 
   const resetAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
-    setFloodAgentState(defaultFloodAgentState);
+    setFloodAgentState(createDefaultFloodAgentState());
     setAgentImagery(null);
     setAgentImageryLoading(false);
     setAgentImageryDateWindow(defaultAgentImageryDateWindow);
@@ -481,7 +439,6 @@ export const AppProvider = ({ children }) => {
     setAgentRecommendedLayerVisibility({});
     setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
     setAgentRasterExpectedRequestKeys({});
-    setAgentRasterLoading(false);
     setAgentLayerOrder(buildDefaultAgentLayerOrder());
     setAgentLayerLoading({});
     setAgentLayerProgress({});
@@ -510,23 +467,7 @@ export const AppProvider = ({ children }) => {
     setResultText('');
     setIsResultVisible(true);
     setWarning('');
-    setLayerData({
-      singleInundationEvent: null,
-      inundationHotspot: null,
-      wildfireRisk: null,
-      landslideRisk: null,
-      activeFireDetections: null,
-      burnHistory: null,
-      slopeSteepness: null,
-      populationExposure: null,
-      fuelLandCover: null,
-      water: null,
-      flood: null,
-      lclu: null,
-      populationDensity: null,
-      soilTexture: null,
-      healthCareAccess: null,
-    });
+    setLayerData(createEmptyLayerData());
     setGeeCodeUrl((previousUrl) => {
       if (previousUrl) {
         URL.revokeObjectURL(previousUrl);
@@ -721,109 +662,6 @@ export const AppProvider = ({ children }) => {
       ...normalizeLayerData(data, { partial: true, ...options }),
     }));
   }, []);
-
-  function normalizeLayerData(data = {}, options = {}) {
-    const { partial = false, aoiSignature = null, requestKey = null } = options;
-    const normalized = {};
-    const setLayer = (key, urlField, layerValue) => {
-      if (!partial || Object.prototype.hasOwnProperty.call(data, urlField)) {
-        normalized[key] = data[urlField]
-          ? {
-            ...layerValue,
-            aoiSignature,
-            requestKey,
-          }
-          : null;
-      }
-    };
-
-    setLayer('singleInundationEvent', 'eeMapURLSingleInundationEvent', {
-        mapId: data.eeMapIdSingleInundationEvent,
-        token: data.eeTokenSingleInundationEvent,
-        tileUrl: data.eeMapURLSingleInundationEvent,
-        meta: data.singleInundationEventMeta || null,
-    });
-    setLayer('inundationHotspot', 'eeMapURLInundationHotspot', {
-        mapId: data.eeMapIdInundationHotspot,
-        token: data.eeTokenInundationHotspot,
-        tileUrl: data.eeMapURLInundationHotspot,
-        meta: data.inundationHotspotMeta || null,
-    });
-    setLayer('wildfireRisk', 'eeMapURLWildfireRisk', {
-        mapId: data.eeMapIdWildfireRisk,
-        token: data.eeTokenWildfireRisk,
-        tileUrl: data.eeMapURLWildfireRisk,
-        meta: data.wildfireRiskMeta || null,
-    });
-    setLayer('landslideRisk', 'eeMapURLLandslideRisk', {
-        mapId: data.eeMapIdLandslideRisk,
-        token: data.eeTokenLandslideRisk,
-        tileUrl: data.eeMapURLLandslideRisk,
-        meta: data.landslideRiskMeta || null,
-    });
-    setLayer('water', 'eeMapURLWater', {
-        mapId: data.eeMapIdWater, 
-        token: data.eeTokenWater, 
-        tileUrl: data.eeMapURLWater 
-    });
-    setLayer('flood', 'eeMapURLFlood', {
-        mapId: data.eeMapIdFlood, 
-        token: data.eeTokenFlood, 
-        tileUrl: data.eeMapURLFlood 
-    });
-    setLayer('lclu', 'eeMapURLLCLU', {
-        mapId: data.eeMapIdLCLU, 
-        token: data.eeTokenLCLU, 
-        tileUrl: data.eeMapURLLCLU 
-    });
-    setLayer('populationDensity', 'eeMapURLPopulationDensity', {
-        mapId: data.eeMapIdPopulationDensity, 
-        token: data.eeTokenPopulationDensity, 
-        tileUrl: data.eeMapURLPopulationDensity 
-    });
-    setLayer('soilTexture', 'eeMapURLSoilTexture', {
-        mapId: data.eeMapIdSoilTexture, 
-        token: data.eeTokenSoilTexture, 
-        tileUrl: data.eeMapURLSoilTexture 
-    });
-    setLayer('activeFireDetections', 'eeMapURLActiveFireDetections', {
-        mapId: data.eeMapIdActiveFireDetections,
-        token: data.eeTokenActiveFireDetections,
-        tileUrl: data.eeMapURLActiveFireDetections,
-        meta: data.activeFireDetectionsMeta || null,
-    });
-    setLayer('burnHistory', 'eeMapURLBurnHistory', {
-        mapId: data.eeMapIdBurnHistory,
-        token: data.eeTokenBurnHistory,
-        tileUrl: data.eeMapURLBurnHistory,
-        meta: data.burnHistoryMeta || null,
-    });
-    setLayer('slopeSteepness', 'eeMapURLSlopeSteepness', {
-        mapId: data.eeMapIdSlopeSteepness,
-        token: data.eeTokenSlopeSteepness,
-        tileUrl: data.eeMapURLSlopeSteepness,
-        meta: data.slopeSteepnessMeta || null,
-    });
-    setLayer('populationExposure', 'eeMapURLPopulationExposure', {
-        mapId: data.eeMapIdPopulationExposure,
-        token: data.eeTokenPopulationExposure,
-        tileUrl: data.eeMapURLPopulationExposure,
-        meta: data.populationExposureMeta || null,
-    });
-    setLayer('fuelLandCover', 'eeMapURLFuelLandCover', {
-        mapId: data.eeMapIdFuelLandCover,
-        token: data.eeTokenFuelLandCover,
-        tileUrl: data.eeMapURLFuelLandCover,
-        meta: data.fuelLandCoverMeta || null,
-    });
-    setLayer('healthCareAccess', 'eeMapURLHealthCareAccess', {
-        mapId: data.eeMapIdHealthCareAccess, 
-        token: data.eeTokenHealthCareAccess, 
-        tileUrl: data.eeMapURLHealthCareAccess 
-    });
-
-    return normalized;
-  }
 
   const cancelDraftAoi = useCallback(() => {
     setDraftAOI(null);
@@ -1044,8 +882,6 @@ export const AppProvider = ({ children }) => {
     setAgentRasterLayerVisibility,
     agentRasterExpectedRequestKeys,
     setAgentRasterExpectedRequestKeys,
-    agentRasterLoading,
-    setAgentRasterLoading,
     agentLayerOrder,
     setAgentLayerOrder,
     agentLayerLoading,
