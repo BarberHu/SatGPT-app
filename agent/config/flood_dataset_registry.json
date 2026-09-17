@@ -25,7 +25,7 @@
         "bands": ["WTR_Water_classification"],
         "min": 0,
         "max": 5,
-        "palette": ["#ffffff", "#0000ff", "#0088ff", "#f2f2f2", "#dfdfdf", "#da00ff"]
+        "palette": ["#ffffff", "#0000ff", "#66c2a5", "#d3d3d3", "#a9a9a9", "#000080"]
       },
       "legend_spec": {
         "type": "categorical",
@@ -33,10 +33,10 @@
         "items": [
           { "value": 0, "label": "Not water", "color": "#ffffff" },
           { "value": 1, "label": "Open water", "color": "#0000ff" },
-          { "value": 2, "label": "Partial surface water", "color": "#0088ff" },
-          { "value": 3, "label": "Snow or ice", "color": "#f2f2f2" },
-          { "value": 4, "label": "Cloud or shadow", "color": "#dfdfdf" },
-          { "value": 5, "label": "Ocean masked", "color": "#da00ff" }
+          { "value": 2, "label": "Inundated vegetation", "color": "#66c2a5" },
+          { "value": 3, "label": "HAND masked", "color": "#d3d3d3" },
+          { "value": 4, "label": "Layover or shadow masked", "color": "#a9a9a9" },
+          { "value": 5, "label": "Ocean masked", "color": "#000080" }
         ]
       },
       "execution_profile": {
@@ -44,6 +44,11 @@
         "requires_date_range": true,
         "select_bands": ["WTR_Water_classification"],
         "reducer": "max",
+        "value_remap": {
+          "band": "WTR_Water_classification",
+          "source_values": [0, 1, 3, 250, 251, 254],
+          "display_values": [0, 1, 2, 3, 4, 5]
+        },
         "supports_tile": true,
         "cacheable": true
       }
@@ -90,6 +95,11 @@
         "requires_date_range": true,
         "select_bands": ["WTR_Water_classification"],
         "reducer": "mode",
+        "value_remap": {
+          "band": "WTR_Water_classification",
+          "source_values": [0, 1, 2, 252, 253, 254],
+          "display_values": [0, 1, 2, 3, 4, 5]
+        },
         "supports_tile": true,
         "cacheable": true
       }
@@ -141,7 +151,26 @@
       "asset_id": "JRC/GSW1_4/MonthlyRecurrence",
       "enabled": true,
       "title": "JRC Monthly Water Recurrence",
-      "summary": "Monthly recurrence percentage for reading how frequently water appears in the selected month.",
+      "summary": "Water recurrence percentage for the selected calendar month, aggregated across all valid observations from 1984 to 2021.",
+      "official_url": "https://developers.google.com/earth-engine/datasets/catalog/JRC_GSW1_4_MonthlyRecurrence?hl=en",
+      "band_metadata": [
+        {
+          "name": "monthly_recurrence",
+          "unit": "%",
+          "min": 0,
+          "max": 100,
+          "pixel_size": "30 m",
+          "description": "Water recurrence percentage for the selected calendar month across 1984-2021."
+        },
+        {
+          "name": "has_observations",
+          "unit": "flag",
+          "min": 0,
+          "max": 1,
+          "pixel_size": "30 m",
+          "description": "Indicates whether the pixel has at least one valid observation for the selected calendar month."
+        }
+      ],
       "product_group": "surface_water_frequency",
       "task_roles": ["water_frequency_context", "recurrence_baseline"],
       "when_to_use": "Use to identify where water is commonly present in the same month and avoid over-reading normal seasonal water as floodwater.",
@@ -174,6 +203,16 @@
         "requires_date_range": true,
         "select_bands": ["monthly_recurrence"],
         "reducer": "first",
+        "time_selection": {
+          "mode": "calendar_month_property",
+          "property": "month",
+          "start_year": 1984,
+          "end_year": 2021
+        },
+        "valid_data_mask": {
+          "band": "has_observations",
+          "valid_value": 1
+        },
         "supports_tile": true,
         "cacheable": true
       }

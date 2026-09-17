@@ -37,6 +37,7 @@ def load_handlers():
         '_ensure_gee_ready': lambda: None, '_summarize_flood_image_request': lambda request: {},
         '_duration_ms': lambda started: 0,
         'get_default_map_payload': lambda: {'ok': True},
+        'thin_geojson_geometry': lambda geojson: geojson,
         'get_default_flood_layer_catalog': lambda: {
             'recommended_layers': [{'id': 'asset:catalog', 'layer_family': 'catalog'}],
             'selected_layer_ids': [],

@@ -134,6 +134,129 @@ def aoi_to_ee_geometry(aoi: Dict[str, Any]) -> ee.Geometry:
     raise ValueError("AOI payload does not include geojson or bounds.")
 
 
+# Earth Engine rejects download requests whose serialized payload exceeds ~48 MB
+# ("Total request size (X bytes) must be less than or equal to Y bytes."). Complex AOI
+# polygons (uploaded boundaries, basin outlines) dominate that payload and are embedded
+# twice for downloads (once by .clip(), once as the region parameter), so thin oversized
+# geometries on the client before handing them to Earth Engine.
+DOWNLOAD_GEOMETRY_BUDGET_BYTES = 2_000_000
+_GEOJSON_BYTES_PER_POINT = 48
+
+
+def _geojson_geometry_byte_size(geometry: Dict[str, Any]) -> int:
+    try:
+        return len(json.dumps(geometry, separators=(",", ":")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _decimate_ring(ring: list, keep_every: int) -> list:
+    if keep_every <= 1 or len(ring) <= 4:
+        return ring
+    thinned = ring[::keep_every]
+    if ring and ring[0] == ring[-1] and (not thinned or thinned[-1] != thinned[0]):
+        thinned.append(thinned[0])
+    # GEE 要求闭合环至少 4 个点（3 个独立点 + 闭合点），否则报
+    # "GeometryConstructors.MultiPolygon: At least 4 points are required ..."。
+    # 混合大小的环统一按 keep_every 抽稀时，小环可能被抽到不足 4 点，保留原环。
+    if len(thinned) < 4:
+        return ring
+    return thinned
+
+
+def _thin_polygon_rings(rings: list, keep_every: int) -> list:
+    return [_decimate_ring(ring, keep_every) for ring in rings if isinstance(ring, list)]
+
+
+def _thin_geojson_geometry(geometry: Dict[str, Any], keep_every: int) -> Dict[str, Any]:
+    geo_type = geometry.get("type")
+    coords = geometry.get("coordinates")
+    if geo_type == "Polygon" and isinstance(coords, list):
+        return {**geometry, "coordinates": _thin_polygon_rings(coords, keep_every)}
+    if geo_type == "MultiPolygon" and isinstance(coords, list):
+        return {
+            **geometry,
+            "coordinates": [
+                _thin_polygon_rings(polygon, keep_every)
+                for polygon in coords
+                if isinstance(polygon, list)
+            ],
+        }
+    return geometry
+
+
+def _thin_geojson_geometry_to_budget(geometry: Dict[str, Any], budget_bytes: int) -> Dict[str, Any]:
+    """Uniformly thin polygon rings until the serialized geometry fits the byte budget."""
+    if _geojson_geometry_byte_size(geometry) <= budget_bytes:
+        return geometry
+
+    coordinates = geometry.get("coordinates")
+    geo_type = geometry.get("type")
+    if geo_type not in ("Polygon", "MultiPolygon") or not isinstance(coordinates, list):
+        return geometry
+
+    if geo_type == "Polygon":
+        point_total = sum(len(ring) for ring in coordinates if isinstance(ring, list))
+    else:
+        point_total = sum(
+            len(ring)
+            for polygon in coordinates
+            if isinstance(polygon, list)
+            for ring in polygon
+            if isinstance(ring, list)
+        )
+    target_points = max(256, budget_bytes // _GEOJSON_BYTES_PER_POINT)
+    keep_every = max(2, -(-point_total // target_points))
+
+    thinned = _thin_geojson_geometry(geometry, keep_every)
+    attempts = 0
+    while _geojson_geometry_byte_size(thinned) > budget_bytes and attempts < 6:
+        keep_every *= 2
+        thinned = _thin_geojson_geometry(geometry, keep_every)
+        attempts += 1
+    return thinned
+
+
+def build_download_region(aoi: Dict[str, Any]) -> ee.Geometry:
+    """AOI geometry for GeoTIFF downloads, thinned when it would blow up the request size."""
+    geometry = extract_geojson_geometry(aoi.get("geojson"))
+    if geometry:
+        thinned = _thin_geojson_geometry_to_budget(geometry, DOWNLOAD_GEOMETRY_BUDGET_BYTES)
+        return ee.Geometry(thinned)
+
+    bounds = aoi.get("bounds")
+    if is_valid_bounds(bounds):
+        return ee.Geometry.Rectangle([
+            bounds["west"],
+            bounds["south"],
+            bounds["east"],
+            bounds["north"],
+        ])
+
+    raise ValueError("AOI payload does not include geojson or bounds.")
+
+
+# 影像场景的几何预算：约 2500 个顶点。流域尺度下显示无差别，
+# 但能避免数万顶点的 AOI 拖慢 GEE 检索与每片瓦片的 clip 计算。
+IMAGERY_GEOMETRY_BUDGET_BYTES = 64 * 1024
+
+
+def thin_geojson_geometry(
+    geometry: Dict[str, Any],
+    budget_bytes: int = IMAGERY_GEOMETRY_BUDGET_BYTES,
+) -> Dict[str, Any]:
+    """公开接口：把 GeoJSON geometry 均匀抽稀到字节预算内。
+
+    影像/瓦片场景对边界精度要求低，但超大 AOI（如流域边界，动辄数万顶点）
+    会让 GEE 的 filterBounds/clip 每次瓦片请求都显著变慢，统一抽稀可大幅加速。
+
+    会先把 Feature / FeatureCollection 解包成纯几何（ee.Geometry 不接受
+    Feature 包裹结构，否则报 "Invalid GeoJSON geometry"），非多边形类型原样返回。
+    """
+    unpacked = extract_geojson_geometry(geometry) or geometry
+    return _thin_geojson_geometry_to_budget(unpacked, budget_bytes)
+
+
 def visualize_image(image: ee.Image, vis_params: Dict[str, Any]) -> ee.Image:
     return image.visualize(
         min=vis_params["min"],
@@ -850,9 +973,69 @@ def _safe_download_name(value: Any, fallback: str = "aoi") -> str:
     return cleaned[:48] or fallback
 
 
+def _get_imagery_download_date_window(payload: Dict[str, Any]) -> tuple[str, str, str]:
+    """Return the selected inclusive imagery window and EE's exclusive end date."""
+    start_value = str(payload.get("start_date") or "").strip()
+    end_value = str(payload.get("end_date") or "").strip()
+    if not start_value or not end_value:
+        raise ValueError("Imagery downloads require start_date and end_date.")
+
+    try:
+        start = date.fromisoformat(start_value)
+        end = date.fromisoformat(end_value)
+    except ValueError as error:
+        raise ValueError("Imagery download dates must use YYYY-MM-DD format.") from error
+
+    if start > end:
+        raise ValueError("Imagery download start_date must not be after end_date.")
+
+    return start.isoformat(), end.isoformat(), (end + timedelta(days=1)).isoformat()
+
+
+def _build_sentinel2_rgb_download_image(region: ee.Geometry, payload: Dict[str, Any]) -> ee.Image:
+    start_date, _end_date, filter_end_date = _get_imagery_download_date_window(payload)
+    cloud_threshold = max(0.0, min(100.0, _get_cloud_threshold(payload, 30)))
+    collection = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterDate(start_date, filter_end_date)
+        .filterBounds(region)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_threshold))
+        .sort("CLOUDY_PIXEL_PERCENTAGE")
+    )
+    # Keep the scientific surface-reflectance bands rather than exporting styled RGB pixels.
+    # The collection/filter/mosaic order matches gee_service._get_sentinel2_by_region.
+    return collection.mosaic().clip(region).select(["B4", "B3", "B2"])
+
+
+def _build_sentinel1_vv_download_image(region: ee.Geometry, payload: Dict[str, Any]) -> ee.Image:
+    start_date, _end_date, filter_end_date = _get_imagery_download_date_window(payload)
+    collection = (
+        ee.ImageCollection("COPERNICUS/S1_GRD")
+        .filterDate(start_date, filter_end_date)
+        .filterBounds(region)
+        .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VV"))
+        .filter(ee.Filter.eq("instrumentMode", "IW"))
+        .select("VV")
+    )
+    # COPERNICUS/S1_GRD is already calibrated and stored in dB in Earth Engine.
+    return collection.mosaic().clip(region)
+
+
 def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
     layer_configs = {
+        "sentinel2Rgb": {
+            "title": "Sentinel-2 RGB Mosaic",
+            "filename": "sentinel2_rgb_mosaic",
+            "scale": 10,
+            "image_builder": _build_sentinel2_rgb_download_image,
+        },
+        "sentinel1Vv": {
+            "title": "Sentinel-1 VV Mosaic",
+            "filename": "sentinel1_vv_mosaic",
+            "scale": 10,
+            "image_builder": _build_sentinel1_vv_download_image,
+        },
         "singleInundationEvent": {
             "title": "Single Inundation Event",
             "filename": "single_inundation_event",
@@ -949,7 +1132,7 @@ def _get_agent_raster_download_payload(payload: Dict[str, Any], scale: Optional[
         raise ValueError("Missing layer_key.")
 
     aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
+    region = build_download_region(aoi)
     image, config = _build_agent_raster_download_image(str(layer_key), region, payload)
     scope_name = _safe_download_name(aoi.get("label") or aoi.get("source"), "aoi")
     filename_base = f"satgpt_{config['filename']}_{scope_name}"
@@ -980,6 +1163,8 @@ def get_agent_raster_download_payload(payload: Dict[str, Any]) -> Dict[str, Any]
 
 
 def _agent_raster_download_scales(layer_key: str, base_scale: int) -> list[int]:
+    if layer_key in {"sentinel2Rgb", "sentinel1Vv"}:
+        return [base_scale, 20, 30, 60, 100, 250]
     if layer_key in {"singleInundationEvent", "inundationHotspot"}:
         return [base_scale, 60, 100, 250]
     if layer_key == "lclu":
@@ -993,6 +1178,16 @@ def _agent_raster_download_scales(layer_key: str, base_scale: int) -> list[int]:
     if layer_key == "slopeSteepness":
         return [base_scale, 60, 100, 250]
     return [base_scale]
+
+
+def _is_download_size_limit_error(error_text: Any) -> bool:
+    normalized = str(error_text or "").lower()
+    return any(marker in normalized for marker in (
+        "total request size",
+        "pixel grid dimensions",
+        "must be less than or equal to 32768",
+        "image is too large",
+    ))
 
 
 def get_agent_raster_download_file(payload: Dict[str, Any]):
@@ -1016,12 +1211,20 @@ def get_agent_raster_download_file(payload: Dict[str, Any]):
         except HTTPError as error:
             error_text = error.read().decode("utf-8", errors="replace")
             last_error = error_text or str(error)
-            if "Total request size" not in last_error:
+            if not _is_download_size_limit_error(last_error):
                 break
         except Exception as error:
             last_error = str(error)
-            if "Total request size" not in last_error:
+            if not _is_download_size_limit_error(last_error):
                 break
+
+    if _is_download_size_limit_error(last_error):
+        raise RuntimeError(
+            "The selected AOI is too large or complex for a direct GeoTIFF download: "
+            "Earth Engine rejected the request because its pixel grid or request payload "
+            "still exceeded the direct-download limit at the coarsest available resolution. "
+            "Try a smaller or simpler AOI."
+        )
 
     raise RuntimeError(last_error or "Raster download failed.")
 

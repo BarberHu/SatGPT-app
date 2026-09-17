@@ -165,6 +165,10 @@ def _apply_registry_entry(asset: AssetRecord, entry: Dict[str, Any]) -> AssetRec
         merged.title = str(entry["title"])
     if entry.get("summary"):
         merged.summary = str(entry["summary"])
+    if entry.get("official_url"):
+        merged.official_url = str(entry["official_url"])
+    if entry.get("band_metadata"):
+        merged.band_metadata = deepcopy(entry["band_metadata"])
 
     merged_vis = _merge_render_profile(entry)
     if merged_vis:
@@ -180,6 +184,12 @@ def _apply_registry_entry(asset: AssetRecord, entry: Dict[str, Any]) -> AssetRec
         hints["reducer"] = execution_profile["reducer"]
     if execution_profile.get("select_bands"):
         hints["select_bands"] = list(execution_profile["select_bands"])
+    if execution_profile.get("value_remap"):
+        hints["value_remap"] = deepcopy(execution_profile["value_remap"])
+    if execution_profile.get("time_selection"):
+        hints["time_selection"] = deepcopy(execution_profile["time_selection"])
+    if execution_profile.get("valid_data_mask"):
+        hints["valid_data_mask"] = deepcopy(execution_profile["valid_data_mask"])
     merged.collection_processing_hints = hints
     return merged
 

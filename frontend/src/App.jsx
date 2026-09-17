@@ -121,13 +121,22 @@ function SettingsButton() {
 }
 
 function Warnings() {
-  const { warning } = useAppContext();
-  
+  const { warning, setWarning } = useAppContext();
+
   if (!warning) return null;
-  
+
   return (
     <div className="warnings" role="status" aria-live="polite">
       <span>{warning}</span>
+      <button
+        type="button"
+        className="warnings__close"
+        onClick={() => setWarning('')}
+        aria-label="Dismiss warning"
+        title="Dismiss"
+      >
+        &times;
+      </button>
     </div>
   );
 }

@@ -19,6 +19,12 @@ load_project_env()
 
 logger = logging.getLogger(__name__)
 
+# 数据集可用时间范围（GEE 官方目录）
+# Sentinel-1 GRD: 2014-10-03 至今
+# Sentinel-2 SR (Harmonized): 2015-06-23 至今
+SENTINEL1_AVAILABLE_SINCE = "2014-10-03"
+SENTINEL2_AVAILABLE_SINCE = "2015-06-23"
+
 
 def _duration_ms(started_at: float) -> float:
     return round((time.perf_counter() - started_at) * 1000, 1)
@@ -676,11 +682,32 @@ class GEEService:
                 .filterBounds(region) \
                 .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_cover_max)) \
                 .sort("CLOUDY_PIXEL_PERCENTAGE")
-            
+
             # 检查是否有影像
             count_started_at = time.perf_counter()
             count = s2_collection.size().getInfo()
             count_query_ms = _duration_ms(count_started_at)
+
+            # 云量回退：指定窗口内所有场景都可能超过云量阈值（如雨季），
+            # 此时放宽云量限制重新检索，确保用户仍能看到光学影像。
+            relaxed_cloud_cover = None
+            if count == 0 and cloud_cover_max < 90:
+                relaxed_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
+                    .filterDate(start_date, filter_end_date) \
+                    .filterBounds(region) \
+                    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 90)) \
+                    .sort("CLOUDY_PIXEL_PERCENTAGE")
+                relaxed_count = relaxed_collection.size().getInfo()
+                if relaxed_count > 0:
+                    s2_collection = relaxed_collection
+                    count = relaxed_count
+                    cloud_cover_max = 90
+                    relaxed_cloud_cover = 90
+                    logger.info(
+                        "[gee-s2-region] cloud_fallback date=%s relaxed_count=%s",
+                        date,
+                        relaxed_count,
+                    )
             if count == 0:
                 logger.info(
                     "[gee-s2-region] no_imagery date=%s duration_ms=%s count_query_ms=%s",
@@ -694,7 +721,8 @@ class GEEService:
                     "requested_date": date,
                     "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                     "search_range": f"{start_date} ~ {end_date}",
-                    "image_count": 0
+                    "image_count": 0,
+                    "available_since": SENTINEL2_AVAILABLE_SINCE,
                 }
             
             # 获取所有影像的日期范围
@@ -755,6 +783,8 @@ class GEEService:
                 "search_range": f"{start_date} ~ {end_date}",
                 "actual_date_range": dates_info.get("date_range"),
                 "cloud_cover": properties.get("CLOUDY_PIXEL_PERCENTAGE", 0),
+                "cloud_cover_max": cloud_cover_max,
+                "cloud_cover_relaxed": relaxed_cloud_cover is not None,
                 "spacecraft": properties.get("SPACECRAFT_NAME", "unknown"),
                 "mgrs_tile": properties.get("MGRS_TILE", ""),
                 "id": info.get("id", "unknown"),
@@ -817,7 +847,8 @@ class GEEService:
                     "requested_date": date,
                     "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                     "search_range": f"{start_date} ~ {end_date}",
-                    "image_count": 0
+                    "image_count": 0,
+                    "available_since": SENTINEL1_AVAILABLE_SINCE,
                 }
             
             # 获取所有影像的日期范围

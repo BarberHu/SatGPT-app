@@ -13,9 +13,14 @@ const downloadGEECode = (code, eventName) => {
   URL.revokeObjectURL(url);
 };
 
-export default function AgentGeeCodeDownload({ code, eventName }) {
+export default function AgentGeeCodeDownload({
+  code,
+  eventName,
+  disabledReason = null,
+}) {
+  const hasCode = Boolean(code);
   const handleDownload = useCallback(() => {
-    if (!code) {
+    if (!hasCode) {
       return;
     }
     trackUxEvent('export_gee_code', {
@@ -24,23 +29,25 @@ export default function AgentGeeCodeDownload({ code, eventName }) {
       source: 'agent_state',
     });
     downloadGEECode(code, eventName);
-  }, [code, eventName]);
+  }, [code, eventName, hasCode]);
+
+  const title = hasCode
+    ? 'Download Google Earth Engine JavaScript'
+    : (disabledReason || 'GEE code is available after event dates and AOI are resolved');
 
   return (
     <div className="download-btn-div">
       <button
         type="button"
-        className={`submit btn download ${!code ? 'disabled' : ''}`}
+        className={`submit btn download ${!hasCode ? 'disabled' : ''}`}
         onClick={handleDownload}
-        disabled={!code}
+        disabled={!hasCode}
         style={{
-          cursor: code ? 'pointer' : 'not-allowed',
-          opacity: code ? 1 : 0.5,
-          pointerEvents: code ? 'auto' : 'none',
+          cursor: hasCode ? 'pointer' : 'not-allowed',
+          opacity: hasCode ? 1 : 0.5,
+          pointerEvents: hasCode ? 'auto' : 'none',
         }}
-        title={code
-          ? 'Download Google Earth Engine JavaScript'
-          : 'GEE code is available after event dates and AOI are resolved'}
+        title={title}
       >
         DOWNLOAD GEE CODE
       </button>

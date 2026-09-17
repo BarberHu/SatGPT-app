@@ -101,4 +101,64 @@ describe('useAgentLayerManagerGroups', () => {
       end_date: '2020-08-01',
     });
   });
+
+  test('treats calendar-month climatology as month-only selection', () => {
+    const window = resolveCatalogLayerDateWindow({
+      temporal_type: 'monthly',
+      execution_profile: {
+        requires_date_range: true,
+        time_selection: {
+          mode: 'calendar_month_property',
+          start_year: 1984,
+          end_year: 2021,
+        },
+      },
+    }, {
+      year: 2020,
+      month: 8,
+    }, {
+      currentPeekDate: '2024-01-02',
+    });
+
+    expect(window).toEqual({
+      mode: 'calendar_month',
+      month: 8,
+      start_date: '2000-08-01',
+      end_date: '2000-09-01',
+      valueLabel: 'Aug recurrence (1984\u20132021)',
+    });
+  });
+
+  test('does not expose a year field for calendar-month climatology', () => {
+    const layer = {
+      id: 'monthly-recurrence',
+      asset_id: 'JRC/GSW1_4/MonthlyRecurrence',
+      title: 'JRC Monthly Water Recurrence',
+      temporal_type: 'monthly',
+      execution_profile: {
+        requires_date_range: true,
+        time_selection: {
+          mode: 'calendar_month_property',
+          start_year: 1984,
+          end_year: 2021,
+        },
+      },
+      render_profile: { bands: ['monthly_recurrence'] },
+    };
+    const options = createOptions();
+    options.controlPanelCatalogLayers = [layer];
+    options.agentRecommendedLayerVisibility = { [layer.id]: true };
+    options.getCatalogLayerDateWindow = () => resolveCatalogLayerDateWindow(
+      layer,
+      { month: 8 },
+      { currentPeekDate: '2024-08-15' }
+    );
+    options.getRecommendedLayerContextKey = () => 'context:monthly-recurrence:8';
+
+    act(() => root.render(<HookHarness options={options} expose={expose} />));
+
+    const item = expose.current[0].items.find((entry) => entry.title === layer.title);
+    expect(item.sliderControl.valueLabel).toBe('Aug recurrence (1984\u20132021)');
+    expect(item.sliderControl.fields).toEqual([]);
+  });
 });

@@ -80,7 +80,11 @@ export function LayerManagerLegend({ legendModel }) {
       <div className="layer-manager-legend classes">
         <div className="layer-manager-legend-class-row">
           {legendModel.items.map((item) => (
-            <span className="layer-manager-legend-class" key={`${legendModel.label}-${item.value}`}>
+            <span
+              className="layer-manager-legend-class"
+              key={`${legendModel.label}-${item.value}`}
+              title={item.label || undefined}
+            >
               <span
                 className="layer-manager-legend-color"
                 style={{ backgroundColor: item.color }}
@@ -89,7 +93,6 @@ export function LayerManagerLegend({ legendModel }) {
             </span>
           ))}
         </div>
-        <span className="layer-manager-legend-label">{legendModel.label}</span>
       </div>
     );
   }
@@ -394,9 +397,6 @@ export function LayerSliderControl({ control }) {
           ariaLabelForHandle={control.ariaLabel}
         />
       </div>
-      {control.helpText ? (
-        <div className="layer-manager-slider-help">{control.helpText}</div>
-      ) : null}
     </div>
   );
 }
@@ -478,9 +478,6 @@ function LayerTimeWindowControl({ control }) {
           </label>
         ))}
       </div>
-      {control.helpText ? (
-        <div className="layer-manager-slider-help">{control.helpText}</div>
-      ) : null}
       {control.action ? (
         <button
           type="button"
@@ -543,9 +540,6 @@ function LayerManagerItemCopy({ item }) {
       <LayerManagerLegend legendModel={item.legend} />
       {item.detailText ? (
         <div className="layer-manager-item-detail">{item.detailText}</div>
-      ) : null}
-      {item.showStatus && item.status ? (
-        <div className="layer-manager-item-detail">{item.status}</div>
       ) : null}
       <LayerLoadProgress progress={item.loadProgress} loading={item.loading} />
       {item.sliderControl ? <LayerSliderControl control={item.sliderControl} /> : null}

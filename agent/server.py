@@ -42,6 +42,7 @@ from flood_api_services import (
     get_historical_map_payload,
     get_unsupervised_map_payload,
     get_water_regime_change_map_payload,
+    thin_geojson_geometry,
 )
 from project_env import load_project_env, required_env
 
@@ -494,8 +495,13 @@ async def get_flood_imagery(request: FloodImageRequest):
             status_code=503,
             detail="GEE服务未初始化，请检查认证配置"
         )
-    
+
     try:
+        # 复杂 AOI（如大型流域边界，数万顶点）会让 GEE 的 filterBounds/clip 显著变慢，
+        # 影像展示对边界精度要求低，统一抽稀到 64KB 预算内以加速检索与瓦片渲染。
+        if request.geojson:
+            request.geojson = thin_geojson_geometry(request.geojson)
+
         # 优先使用 geojson，其次 bounds，最后使用中心点
         if request.imagery_start_date and request.imagery_end_date and request.geojson:
             result = await _run_heavy_operation(

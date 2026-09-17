@@ -185,11 +185,38 @@ function DisasterLayerPanel({
   } = useAgentRasterDownload({ aoi: activeAnalysisAoi, setWarning });
   const imageryRequestKeyRef = useRef(null);
   const imageryAbortControllerRef = useRef(null);
+  const activeAoiSignatureRef = useRef(selectedAoiSignature);
 
   useEffect(() => () => {
     imageryAbortControllerRef.current?.abort();
     imageryAbortControllerRef.current = null;
+    // 卸载即中止请求：共享的 agentImageryLoading 必须复位，
+    // 否则下次进入该模块会永久停留在 "Loading imagery..."。
+    setAgentImageryLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (activeAoiSignatureRef.current === selectedAoiSignature) {
+      return;
+    }
+
+    // A stored vector can be visible without being the active analysis scope. Once the
+    // active AOI really changes, never leave the previous AOI's mosaic on the map or let
+    // its in-flight response overwrite the new selection.
+    activeAoiSignatureRef.current = selectedAoiSignature;
+    imageryAbortControllerRef.current?.abort();
+    imageryAbortControllerRef.current = null;
+    imageryRequestKeyRef.current = null;
+    if (agentImagery?.imagery_aoi_signature !== selectedAoiSignature) {
+      setAgentImagery(null);
+    }
+    setAgentImageryLoading(false);
+  }, [
+    agentImagery?.imagery_aoi_signature,
+    selectedAoiSignature,
+    setAgentImagery,
+    setAgentImageryLoading,
+  ]);
   const resolvedImageryDateWindow = useMemo(
     () => normalizeImageryDateWindow(agentImageryDateWindow, agentAnalysisContext),
     [agentAnalysisContext, agentImageryDateWindow]
@@ -443,8 +470,13 @@ function DisasterLayerPanel({
   const imageryItems = ['sentinel2', 'sentinel1'].map((type, index) => {
     const descriptor = agentImagery?.custom_range?.[type] || null;
     const orderId = `agent-${type === 'sentinel2' ? 's2' : 's1'}-custom_range`;
+    const downloadLayerKey = type === 'sentinel2' ? 'sentinel2Rgb' : 'sentinel1Vv';
+    const downloadState = rasterDownloadState?.[downloadLayerKey];
     const hasAoi = Boolean(activeAnalysisAoi);
     const isAvailable = Boolean(hasCurrentImageryWindow && descriptor?.tile_url);
+    const datasetAvailableSince = type === 'sentinel2'
+      ? (descriptor?.available_since || '2015-06-23')
+      : (descriptor?.available_since || '2014-10-03');
     const loading = Boolean(
       hasAoi
       && (
@@ -454,9 +486,15 @@ function DisasterLayerPanel({
       )
     );
     const checked = Boolean(agentShowBaseImagery && agentBaseImageryVisibility?.[type]);
-    const unavailableDetail = hasAoi
-      ? 'Apply the imagery window to load this layer'
-      : 'Select an AOI before loading imagery';
+    const hasAppliedWindow = Boolean(hasCurrentImageryWindow);
+    const noImageryError = hasAppliedWindow && !isAvailable && descriptor?.error
+      ? descriptor.error
+      : null;
+    // 闲置状态下不再铺小字说明（用户要求），仅在真实查无影像报错时提示
+    const unavailableDetail = noImageryError;
+    const dateOutOfRange = hasAppliedWindow
+      && resolvedImageryDateWindow.start_date
+      && resolvedImageryDateWindow.start_date < datasetAvailableSince;
     return {
       id: `${moduleName}-imagery-${type}`,
       orderId,
@@ -469,20 +507,31 @@ function DisasterLayerPanel({
         ? 'Sentinel-2 optical mosaic filtered by the selected imagery window.'
         : 'Sentinel-1 SAR mosaic filtered by the selected imagery window.',
       subtitle: type === 'sentinel2' ? 'Sentinel-2 RGB context' : 'Sentinel-1 radar context',
-      detailText: isAvailable ? 'Selected-window imagery mosaic' : unavailableDetail,
+      detailText: isAvailable ? null : unavailableDetail,
       infoDetails: [
         { label: 'Time window', value: `${resolvedImageryDateWindow.start_date} to ${resolvedImageryDateWindow.end_date}` },
+        { label: 'Data available since', value: datasetAvailableSince },
         { label: 'Scope', value: activeAnalysisAoi?.label || 'No active scope' },
         { label: 'Status', value: !hasAoi ? 'Unavailable' : (loading ? 'Loading' : (isAvailable ? 'Ready' : 'Unavailable')) },
+      ],
+      infoWarnings: [
+        ...(dateOutOfRange ? [
+          `The selected window starts before ${datasetAvailableSince}, when this satellite archive begins. No imagery exists before that date.`,
+        ] : []),
+        ...(isAvailable && descriptor?.cloud_cover_relaxed ? [
+          'No low-cloud scenes met the default 30% threshold in this window, so the mosaic includes scenes with up to 90% cloud cover.',
+        ] : []),
       ],
       checked,
       disabled: !hasAoi,
       loading,
       loadProgress: agentLayerProgress?.[`base-imagery-${type}`],
       showStatus: true,
-      status: !hasAoi
-        ? 'Unavailable: select an AOI first'
-        : (loading ? 'Loading' : (isAvailable ? (checked ? 'Visible' : 'Ready') : 'Needs loading')),
+      status: loading
+        ? 'Loading'
+        : (isAvailable
+          ? (checked ? 'Visible' : 'Ready')
+          : (noImageryError ? 'No imagery in window' : null)),
       legend: {
         type: type === 'sentinel2' ? 'text' : 'palette',
         label: type === 'sentinel2' ? 'True color RGB composite' : 'VV backscatter',
@@ -490,6 +539,29 @@ function DisasterLayerPanel({
         max: type === 'sentinel1' ? '0 dB' : undefined,
         palette: type === 'sentinel1' ? ['#111827', '#64748b', '#f8fafc'] : undefined,
       },
+      infoActions: [
+        {
+          key: `download-${downloadLayerKey}`,
+          label: downloadState?.status === 'preparing' ? 'Preparing GeoTIFF...' : 'Download AOI GeoTIFF',
+          disabled: !isAvailable || loading || downloadState?.status === 'preparing',
+          status: downloadState?.status,
+          message: downloadState?.message,
+          title: isAvailable
+            ? `Download the current ${type === 'sentinel2' ? 'Sentinel-2 RGB' : 'Sentinel-1 VV'} mosaic clipped to the AOI`
+            : 'Available after imagery has loaded for the selected window',
+          onClick: () => handleAgentRasterDownload({
+            layerKey: downloadLayerKey,
+            title: type === 'sentinel2' ? 'Optical Imagery' : 'SAR Imagery',
+            requestParams: {
+              start_date: resolvedImageryDateWindow.start_date,
+              end_date: resolvedImageryDateWindow.end_date,
+              ...(type === 'sentinel2'
+                ? { cloud_threshold: descriptor?.cloud_cover_max ?? 30 }
+                : {}),
+            },
+          }),
+        },
+      ],
       onToggle: (event) => {
         if (!hasAoi) {
           setWarning('Please select an AOI before loading imagery.');
@@ -640,16 +712,24 @@ function DisasterLayerPanel({
       id: `scope-${layer.id}`,
       title: layer.label,
       subtitle: layer.source || 'business layer',
-      detailText: layer.is_active ? 'Active analysis scope' : 'Stored spatial scope',
+      detailText: layer.is_active
+        ? 'Active analysis scope'
+        : 'Click the layer name to use this analysis scope',
       checked: isVisible,
       disabled: false,
-      status: isVisible ? 'Visible' : 'Hidden',
+      status: layer.is_active ? 'Active' : (isVisible ? 'Visible' : 'Hidden'),
       legend: {
         type: 'solid',
         label: layer.is_active ? 'Active scope' : 'Spatial scope',
         color: layer.is_active ? '#1d4ed8' : '#0f766e',
       },
-      onToggle: () => toggleBusinessLayerVisibility(layer.id),
+      onToggle: (event) => {
+        const nextVisible = Boolean(event?.target?.checked);
+        toggleBusinessLayerVisibility(layer.id);
+        if (nextVisible && !layer.is_active) {
+          activateBusinessLayerRecord(layer.id);
+        }
+      },
       onSelect: () => activateBusinessLayerRecord(layer.id),
       actionLabel: 'Delete',
       onAction: () => deleteBusinessLayer(layer.id),

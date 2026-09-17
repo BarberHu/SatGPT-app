@@ -328,6 +328,11 @@ function AgentPanel() {
   ]);
 
   const downloadableGeeCode = currentGeeCode;
+  const geeCodeDisabledReason = !currentGeeCode
+    ? (hasResolvedAnalysisContext
+      ? 'GEE code will become available once the flood report completes. Confirm the event and let the agent finish generating the report.'
+      : 'Resolve event dates and AOI, then complete the analysis to enable GEE code download.')
+    : null;
   const recommendedCatalogLayers = useMemo(
     () => sortCatalogLayers(
       currentRecommendedLayers.filter((layer) => layer.layer_family === 'catalog')
@@ -620,7 +625,11 @@ function AgentPanel() {
           </div>
         </section>
 
-        <AgentGeeCodeDownload code={downloadableGeeCode} eventName={currentEvent} />
+        <AgentGeeCodeDownload
+          code={downloadableGeeCode}
+          eventName={currentEvent}
+          disabledReason={geeCodeDisabledReason}
+        />
       </div>
     </Profiler>
   );

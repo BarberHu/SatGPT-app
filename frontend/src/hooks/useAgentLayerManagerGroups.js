@@ -135,6 +135,9 @@ const getCatalogTimeControlMode = (layer) => {
   if (!layer || layer.execution_profile?.requires_date_range === false) {
     return null;
   }
+  if (layer.execution_profile?.time_selection?.mode === 'calendar_month_property') {
+    return 'calendar_month';
+  }
   if (layer.temporal_type === 'yearly') {
     return 'year';
   }
@@ -170,6 +173,23 @@ export const resolveCatalogLayerDateWindow = (layer, override = {}, dates = {}) 
       start_date: `${year}-01-01`,
       end_date: `${year + 1}-01-01`,
       valueLabel: String(year),
+    };
+  }
+
+  if (mode === 'calendar_month') {
+    const defaultMonth = defaultPointSelection.month;
+    const month = getMonthFromDate(
+      `2000-${String(override.month ?? defaultMonth).padStart(2, '0')}-01`,
+      defaultMonth
+    );
+    const startYear = Number(layer.execution_profile?.time_selection?.start_year) || JRC_YEARLY_MIN_YEAR;
+    const endYear = Number(layer.execution_profile?.time_selection?.end_year) || JRC_YEARLY_MAX_YEAR;
+    return {
+      mode,
+      month,
+      start_date: formatMonthDate(2000, month),
+      end_date: nextMonthDate(2000, month),
+      valueLabel: `${getMonthLabel(month)} recurrence (${startYear}\u2013${endYear})`,
     };
   }
 
@@ -703,20 +723,24 @@ export default function useAgentLayerManagerGroups({
           }));
         },
       } : null;
-      const monthSliderControl = catalogDateWindow.mode === 'month' ? {
+      const monthSliderControl = ['month', 'calendar_month'].includes(catalogDateWindow.mode) ? {
         range: false,
         selectionMode: 'point',
         label: 'Month',
         value: catalogDateWindow.month,
-        valueLabel: `${catalogDateWindow.year} ${getMonthLabel(catalogDateWindow.month)}`,
+        valueLabel: catalogDateWindow.mode === 'calendar_month'
+          ? catalogDateWindow.valueLabel
+          : `${catalogDateWindow.year} ${getMonthLabel(catalogDateWindow.month)}`,
         min: 1,
         max: 12,
         step: 1,
         marks: MONTH_SLIDER_MARKS,
         dots: true,
         disabled: !hasCatalogScope,
-        helpText: 'Monthly products use the selected year and month.',
-        fields: [
+        helpText: catalogDateWindow.mode === 'calendar_month'
+          ? 'This product aggregates the selected calendar month across 1984-2021.'
+          : 'Monthly products use the selected year and month.',
+        fields: catalogDateWindow.mode === 'calendar_month' ? [] : [
           {
             key: 'year',
             label: 'Year',
@@ -745,9 +769,11 @@ export default function useAgentLayerManagerGroups({
               ...(previous || {}),
               [layer.id]: {
                 ...current,
-                year: current.year ?? catalogDateWindow.year,
+                ...(catalogDateWindow.mode === 'month'
+                  ? { year: current.year ?? catalogDateWindow.year }
+                  : {}),
                 month: getMonthFromDate(
-                  `${catalogDateWindow.year}-${String(nextMonth).padStart(2, '0')}-01`,
+                  `2000-${String(nextMonth).padStart(2, '0')}-01`,
                   catalogDateWindow.month
                 ),
               },
@@ -798,11 +824,6 @@ export default function useAgentLayerManagerGroups({
           });
         },
       } : null;
-      const dateWindowDetailText = catalogDateWindow.mode === 'date_range'
-        ? (hasRequiredDates
-          ? `Event window: ${catalogDateWindow.valueLabel}`
-          : 'Event window required from the flood event')
-        : null;
       const statusLabel = !hasCatalogScope
         ? 'Unavailable: select an AOI first'
         : (!hasRequiredDates
@@ -817,7 +838,6 @@ export default function useAgentLayerManagerGroups({
         infoKicker: layer.ui_profile?.group_label || 'Recommended dataset',
         infoMeta: sourceMeta.asset_id || layer.asset_id,
         infoText: sourceSummary || layer.ui_profile?.group_label || 'Recommended catalog layer',
-        detailText: dateWindowDetailText,
         infoDetails: [
           { label: 'Group', value: layer.ui_profile?.group_label || layer.product_group },
           { label: 'Source', value: sourceTitle },
