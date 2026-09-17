@@ -65,6 +65,35 @@ export const getCenterFromBounds = (bounds) => {
   };
 };
 
+export const formatAoiCoordinatePart = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue.toFixed(6) : '';
+};
+
+export const buildAoiBoundsSignature = (bounds) => {
+  if (!bounds) {
+    return 'no-bounds';
+  }
+
+  return [
+    formatAoiCoordinatePart(bounds.west),
+    formatAoiCoordinatePart(bounds.south),
+    formatAoiCoordinatePart(bounds.east),
+    formatAoiCoordinatePart(bounds.north),
+  ].join(':');
+};
+
+export const buildAoiSignature = (aoi, fallbackBounds = null) => [
+  aoi?.id || aoi?.label || aoi?.source || 'aoi',
+  buildAoiBoundsSignature(aoi?.bounds || fallbackBounds),
+].join('|');
+
+export const isFishnetAoi = (aoi) =>
+  String(aoi?.source || '').toLowerCase() === 'fishnet';
+
+export const resolveAgentAnalysisAoi = (...candidates) =>
+  candidates.find((aoi) => aoi && !isFishnetAoi(aoi)) || null;
+
 const mergeBounds = (boundsList = []) => {
   const validBounds = boundsList.filter(Boolean);
   if (!validBounds.length) {

@@ -13,11 +13,17 @@ import time
 import ee
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
-from project_env import load_project_env
+from project_env import load_project_env, required_env
 
 load_project_env()
 
 logger = logging.getLogger(__name__)
+
+# 数据集可用时间范围（GEE 官方目录）
+# Sentinel-1 GRD: 2014-10-03 至今
+# Sentinel-2 SR (Harmonized): 2015-06-23 至今
+SENTINEL1_AVAILABLE_SINCE = "2014-10-03"
+SENTINEL2_AVAILABLE_SINCE = "2015-06-23"
 
 
 def _duration_ms(started_at: float) -> float:
@@ -30,44 +36,32 @@ def _round_coord(value: Any) -> Any:
     except (TypeError, ValueError):
         return value
 
-# 设置代理（如果配置了的话）
-http_proxy = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
-if http_proxy:
-    os.environ["HTTP_PROXY"] = http_proxy
-    os.environ["HTTPS_PROXY"] = http_proxy
-    print(f"[INFO] Using proxy: {http_proxy}")
-
-
 class GEEService:
     """Google Earth Engine 服务类"""
     
     def __init__(self):
         self.initialized = False
-        self.project_id = os.getenv("GEE_PROJECT_ID", "flood-agent")
+        self.project_id = required_env("GEE_PROJECT_ID")
         self._initialize_ee()
     
     def _initialize_ee(self):
         """初始化 Earth Engine - 与 test.ipynb 保持一致"""
         try:
-            credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            
-            if credentials_path and os.path.exists(credentials_path):
-                # 使用服务账户凭证
-                credentials = ee.ServiceAccountCredentials(
-                    email=None,
-                    key_file=credentials_path
-                )
-                ee.Initialize(credentials, project=self.project_id)
-                print(f"[INFO] Earth Engine initialized with service account (project: {self.project_id})")
-            else:
-                # 使用默认认证 (需要先运行 ee.Authenticate())
-                ee.Initialize(project=self.project_id)
-                print(f"[INFO] Earth Engine initialized with default credentials (project: {self.project_id})")
+            credentials_path = required_env("GOOGLE_APPLICATION_CREDENTIALS")
+            if not os.path.exists(credentials_path):
+                raise FileNotFoundError(f"GEE credentials not found: {credentials_path}")
+
+            credentials = ee.ServiceAccountCredentials(
+                email=None,
+                key_file=credentials_path
+            )
+            ee.Initialize(credentials, project=self.project_id)
+            print(f"[INFO] Earth Engine initialized with service account (project: {self.project_id})")
             
             self.initialized = True
         except Exception as e:
             print(f"[ERROR] Earth Engine initialization failed: {e}")
-            print("[HINT] Set GOOGLE_APPLICATION_CREDENTIALS or run ee.Authenticate() first.")
+            print("[HINT] Check GOOGLE_APPLICATION_CREDENTIALS and GEE_PROJECT_ID in .env.")
             self.initialized = False
     
     def _get_collection_date_range(self, collection: ee.ImageCollection) -> Dict[str, Any]:
@@ -336,6 +330,109 @@ class GEEService:
             )
         
         return self._get_imagery_for_bounds(pre_date, peek_date, after_date, bounds, center)
+
+    def _get_imagery_window_for_region(
+        self,
+        start_date: str,
+        end_date: str,
+        region: ee.Geometry,
+        bounds: Dict[str, float],
+        center: Tuple[float, float],
+    ) -> Dict[str, Any]:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        if start > end:
+            raise ValueError("Imagery window start date must not be after the end date.")
+
+        return {
+            "center": center,
+            "bounds": bounds,
+            "imagery_window": {
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            "custom_range": {
+                "sentinel2": self._get_sentinel2_by_region(
+                    start_date,
+                    region,
+                    window_end_date=end_date,
+                ),
+                "sentinel1": self._get_sentinel1_by_region(
+                    start_date,
+                    region,
+                    window_end_date=end_date,
+                ),
+            },
+        }
+
+    def get_imagery_window_by_bounds(
+        self,
+        start_date: str,
+        end_date: str,
+        bounds: Dict[str, float],
+        center: Optional[Tuple[float, float]] = None,
+    ) -> Dict[str, Any]:
+        resolved_center = center or (
+            (bounds["west"] + bounds["east"]) / 2,
+            (bounds["south"] + bounds["north"]) / 2,
+        )
+        region = ee.Geometry.Rectangle([
+            bounds["west"],
+            bounds["south"],
+            bounds["east"],
+            bounds["north"],
+        ])
+        return self._get_imagery_window_for_region(
+            start_date,
+            end_date,
+            region,
+            bounds,
+            resolved_center,
+        )
+
+    def get_imagery_window(
+        self,
+        start_date: str,
+        end_date: str,
+        center: Tuple[float, float],
+        buffer_km: float = 50,
+    ) -> Dict[str, Any]:
+        lat_buffer = buffer_km / 111
+        lon_buffer = buffer_km / (111 * abs(center[1]) if center[1] != 0 else 111)
+        bounds = {
+            "west": center[0] - lon_buffer,
+            "south": center[1] - lat_buffer,
+            "east": center[0] + lon_buffer,
+            "north": center[1] + lat_buffer,
+        }
+        return self.get_imagery_window_by_bounds(start_date, end_date, bounds, center)
+
+    def get_imagery_window_by_geojson(
+        self,
+        start_date: str,
+        end_date: str,
+        geojson: Dict[str, Any],
+        center: Optional[Tuple[float, float]] = None,
+    ) -> Dict[str, Any]:
+        region = ee.Geometry(geojson)
+        bounds_list = region.bounds().getInfo()["coordinates"][0]
+        bounds = {
+            "west": min(point[0] for point in bounds_list),
+            "south": min(point[1] for point in bounds_list),
+            "east": max(point[0] for point in bounds_list),
+            "north": max(point[1] for point in bounds_list),
+        }
+        resolved_center = center or (
+            (bounds["west"] + bounds["east"]) / 2,
+            (bounds["south"] + bounds["north"]) / 2,
+        )
+        return self._get_imagery_window_for_region(
+            start_date,
+            end_date,
+            region,
+            bounds,
+            resolved_center,
+        )
     
     def get_flood_imagery_by_geojson(
         self,
@@ -558,7 +655,8 @@ class GEEService:
         date: str,
         region: ee.Geometry,
         cloud_cover_max: int = 30,
-        days_range: int = 15
+        days_range: int = 15,
+        window_end_date: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """使用 EE Geometry 获取 Sentinel-2 影像"""
         if not self.initialized:
@@ -567,19 +665,49 @@ class GEEService:
         try:
             request_started_at = time.perf_counter()
             target_date = datetime.strptime(date, "%Y-%m-%d")
-            start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
-            end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+            if window_end_date:
+                window_end = datetime.strptime(window_end_date, "%Y-%m-%d")
+                if target_date > window_end:
+                    raise ValueError("Imagery window start date must not be after the end date.")
+                start_date = date
+                end_date = window_end_date
+                filter_end_date = (window_end + timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
+                end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+                filter_end_date = end_date
             
             s2_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
-                .filterDate(start_date, end_date) \
+                .filterDate(start_date, filter_end_date) \
                 .filterBounds(region) \
                 .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_cover_max)) \
                 .sort("CLOUDY_PIXEL_PERCENTAGE")
-            
+
             # 检查是否有影像
             count_started_at = time.perf_counter()
             count = s2_collection.size().getInfo()
             count_query_ms = _duration_ms(count_started_at)
+
+            # 云量回退：指定窗口内所有场景都可能超过云量阈值（如雨季），
+            # 此时放宽云量限制重新检索，确保用户仍能看到光学影像。
+            relaxed_cloud_cover = None
+            if count == 0 and cloud_cover_max < 90:
+                relaxed_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
+                    .filterDate(start_date, filter_end_date) \
+                    .filterBounds(region) \
+                    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 90)) \
+                    .sort("CLOUDY_PIXEL_PERCENTAGE")
+                relaxed_count = relaxed_collection.size().getInfo()
+                if relaxed_count > 0:
+                    s2_collection = relaxed_collection
+                    count = relaxed_count
+                    cloud_cover_max = 90
+                    relaxed_cloud_cover = 90
+                    logger.info(
+                        "[gee-s2-region] cloud_fallback date=%s relaxed_count=%s",
+                        date,
+                        relaxed_count,
+                    )
             if count == 0:
                 logger.info(
                     "[gee-s2-region] no_imagery date=%s duration_ms=%s count_query_ms=%s",
@@ -588,11 +716,13 @@ class GEEService:
                     count_query_ms,
                 )
                 return {
-                    "error": f"No Sentinel-2 imagery found near {date}",
+                    "error": f"No Sentinel-2 imagery found in {start_date} to {end_date}",
                     "type": "Sentinel-2",
                     "requested_date": date,
+                    "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                     "search_range": f"{start_date} ~ {end_date}",
-                    "image_count": 0
+                    "image_count": 0,
+                    "available_since": SENTINEL2_AVAILABLE_SINCE,
                 }
             
             # 获取所有影像的日期范围
@@ -649,9 +779,12 @@ class GEEService:
                 "tile_url": tile_url,
                 "date": image_date,
                 "requested_date": date,
+                "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                 "search_range": f"{start_date} ~ {end_date}",
                 "actual_date_range": dates_info.get("date_range"),
                 "cloud_cover": properties.get("CLOUDY_PIXEL_PERCENTAGE", 0),
+                "cloud_cover_max": cloud_cover_max,
+                "cloud_cover_relaxed": relaxed_cloud_cover is not None,
                 "spacecraft": properties.get("SPACECRAFT_NAME", "unknown"),
                 "mgrs_tile": properties.get("MGRS_TILE", ""),
                 "id": info.get("id", "unknown"),
@@ -668,7 +801,8 @@ class GEEService:
         date: str,
         region: ee.Geometry,
         days_range: int = 15,
-        polarization: str = "VV"
+        polarization: str = "VV",
+        window_end_date: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """使用 EE Geometry 获取 Sentinel-1 影像"""
         if not self.initialized:
@@ -677,11 +811,20 @@ class GEEService:
         try:
             request_started_at = time.perf_counter()
             target_date = datetime.strptime(date, "%Y-%m-%d")
-            start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
-            end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+            if window_end_date:
+                window_end = datetime.strptime(window_end_date, "%Y-%m-%d")
+                if target_date > window_end:
+                    raise ValueError("Imagery window start date must not be after the end date.")
+                start_date = date
+                end_date = window_end_date
+                filter_end_date = (window_end + timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                start_date = (target_date - timedelta(days=days_range)).strftime("%Y-%m-%d")
+                end_date = (target_date + timedelta(days=days_range)).strftime("%Y-%m-%d")
+                filter_end_date = end_date
             
             s1_collection = ee.ImageCollection("COPERNICUS/S1_GRD") \
-                .filterDate(start_date, end_date) \
+                .filterDate(start_date, filter_end_date) \
                 .filterBounds(region) \
                 .filter(ee.Filter.listContains("transmitterReceiverPolarisation", polarization)) \
                 .filter(ee.Filter.eq("instrumentMode", "IW")) \
@@ -699,11 +842,13 @@ class GEEService:
                     count_query_ms,
                 )
                 return {
-                    "error": f"No Sentinel-1 imagery found near {date}",
+                    "error": f"No Sentinel-1 imagery found in {start_date} to {end_date}",
                     "type": "Sentinel-1",
                     "requested_date": date,
+                    "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                     "search_range": f"{start_date} ~ {end_date}",
-                    "image_count": 0
+                    "image_count": 0,
+                    "available_since": SENTINEL1_AVAILABLE_SINCE,
                 }
             
             # 获取所有影像的日期范围
@@ -751,6 +896,7 @@ class GEEService:
                 "tile_url": tile_url,
                 "date": image_date,
                 "requested_date": date,
+                "requested_range": f"{start_date} to {end_date}" if window_end_date else None,
                 "search_range": f"{start_date} ~ {end_date}",
                 "actual_date_range": dates_info.get("date_range"),
                 "id": info.get("id", "unknown"),

@@ -10,16 +10,18 @@
 - confirmation_node: 用户确认 (HITL)
 - processing_node: 数据处理，地理编码 + 报告生成
 """
+import asyncio
 import os
 import json
 import re
 import requests
-from typing import Literal, Optional, Dict, Any
+from typing import Annotated, Literal, Optional, Dict, Any
 
 from langchain.tools import tool
+from langchain_core.tools import InjectedToolCallId
 from langchain_openai import ChatOpenAI
 from openai import AsyncOpenAI
-from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
@@ -32,17 +34,9 @@ from gee_code_generator import generate_flood_gee_code
 from flood_aoi import aoi_to_geo_fields
 from flood_dataset_service import build_confirmation_context
 from mention_context import resolve_mention_context
-from project_env import load_project_env
+from project_env import load_project_env, required_env
 
 load_project_env()
-
-# 配置代理
-http_proxy = os.getenv("HTTP_PROXY")
-https_proxy = os.getenv("HTTPS_PROXY")
-if http_proxy:
-    os.environ["HTTP_PROXY"] = http_proxy
-if https_proxy:
-    os.environ["HTTPS_PROXY"] = https_proxy
 
 
 # ============== 内部函数 ==============
@@ -384,14 +378,14 @@ User message:
 {message_content or ""}
 """
     try:
-        client_kwargs = {"api_key": os.getenv("OPENAI_API_KEY", "")}
-        base_url = os.getenv("OPENAI_API_BASE")
-        if base_url:
-            client_kwargs["base_url"] = base_url
+        client_kwargs = {
+            "api_key": required_env("OPENAI_API_KEY"),
+            "base_url": required_env("OPENAI_API_BASE"),
+        }
 
         client = AsyncOpenAI(**client_kwargs)
         response = await client.chat.completions.create(
-            model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+            model=required_env("LLM_MODEL"),
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -554,9 +548,9 @@ def _get_location_coordinates_internal(location_name: str) -> Optional[Dict[str,
 def _get_model() -> ChatOpenAI:
     """获取 LLM 模型实例"""
     return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        base_url=os.getenv("OPENAI_API_BASE"),
+        model=required_env("LLM_MODEL"),
+        api_key=required_env("OPENAI_API_KEY"),
+        base_url=required_env("OPENAI_API_BASE"),
         temperature=0.7
     )
 
@@ -659,9 +653,7 @@ def _has_complete_flood_info(state: FloodAgentState) -> bool:
 
 # ============== 工具定义 ==============
 
-# 全局变量用于临时存储搜索来源信息和完整内容
-_pending_search_sources: list = []
-_pending_search_contents: list = []
+# Search payloads are written to FloodAgentState by the tool Command.
 MAX_SEARCH_SOURCES = 8
 MAX_SEARCH_CONTENT_CHARS = 700
 
@@ -673,7 +665,10 @@ def _compact_search_content(content: str, limit: int = MAX_SEARCH_CONTENT_CHARS)
     return text[:limit].rstrip() + "..."
 
 @tool
-def search_flood_event(query: str) -> str:
+def search_flood_event(
+    query: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
     """
     搜索洪水事件的相关信息。
     
@@ -683,14 +678,25 @@ def search_flood_event(query: str) -> str:
     Returns:
         搜索结果的摘要文本
     """
-    global _pending_search_sources, _pending_search_contents
+    search_sources: list[Dict[str, str]] = []
+    search_contents: list[Dict[str, str]] = []
+
+    def build_result(message: str) -> Command:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(content=message, tool_call_id=tool_call_id)
+                ],
+                "search_sources": search_sources,
+                "search_contents": search_contents,
+            }
+        )
+
     try:
         from tavily import TavilyClient
         tavily_api_key = os.getenv("TAVILY_API_KEY")
         if not tavily_api_key:
-            _pending_search_sources = []
-            _pending_search_contents = []
-            return (
+            return build_result(
                 "Search tool is unavailable because TAVILY_API_KEY is not configured. "
                 "Use built-in knowledge only, and tell the user that online search is disabled."
             )
@@ -769,17 +775,24 @@ def search_flood_event(query: str) -> str:
         
         all_sources = all_sources[:MAX_SEARCH_SOURCES]
         results = results[: MAX_SEARCH_SOURCES + 1]
-        _pending_search_sources = [{"title": s["title"], "url": s["url"]} for s in all_sources]
-        _pending_search_contents = all_sources  # Store full content for report generation
+        search_sources.extend(
+            {"title": source["title"], "url": source["url"]}
+            for source in all_sources
+        )
+        search_contents.extend(all_sources)
         
         print(f"[INFO] Search completed with {len(all_sources)} sources")
         
-        return "\n---\n".join(results) if results else "No relevant flood event information found"
+        return build_result(
+            "\n---\n".join(results)
+            if results
+            else "No relevant flood event information found"
+        )
         
     except Exception as e:
-        _pending_search_sources = []
-        _pending_search_contents = []
-        return f"Search error: {str(e)}"
+        search_sources.clear()
+        search_contents.clear()
+        return build_result(f"Search error: {str(e)}")
 
 
 # 工具列表
@@ -829,12 +842,15 @@ async def entry_node(
                 "confirmed_aoi": None,
                 "recommended_layers": [],
                 "selected_layer_ids": [],
+                "recommendation_strategy": None,
+                "recommendation_source": None,
                 "mentioned_layer_refs": [],
                 "mentioned_aoi": None,
                 "mentioned_aoi_source": None,
                 "confirmation_version": 0,
                 "geo_data": None,
                 "search_sources": [],
+                "search_contents": [],
                 "gee_code": None,
                 "intent": None,
             }
@@ -1044,7 +1060,8 @@ async def pre_confirmation_node(
         thread_id=(state.get("copilotkit") or {}).get("threadId"),
     )
 
-    confirmation_context = build_confirmation_context(
+    confirmation_context = await asyncio.to_thread(
+        build_confirmation_context,
         event=state.get("event"),
         event_description=state.get("event_description"),
         location=state.get("location"),
@@ -1063,6 +1080,8 @@ async def pre_confirmation_node(
             "confirmed_aoi": confirmation_context.get("confirmed_aoi"),
             "recommended_layers": confirmation_context.get("recommended_layers", []),
             "selected_layer_ids": confirmation_context.get("selected_layer_ids", []),
+            "recommendation_strategy": confirmation_context.get("recommendation_strategy"),
+            "recommendation_source": confirmation_context.get("recommendation_source"),
             "confirmation_version": confirmation_context.get("confirmation_version", 1),
             "coordinates": confirmation_context.get("coordinates"),
             "bounds": confirmation_context.get("bounds"),
@@ -1097,6 +1116,8 @@ async def confirmation_node(
     aoi_resolution_meta = state.get("aoi_resolution_meta")
     recommended_layers = state.get("recommended_layers") or []
     selected_layer_ids = state.get("selected_layer_ids") or []
+    recommendation_strategy = state.get("recommendation_strategy")
+    recommendation_source = state.get("recommendation_source")
     confirmed_aoi = state.get("confirmed_aoi") or resolved_aoi
     confirmation_version = state.get("confirmation_version") or 1
     mentioned_layer_refs = state.get("mentioned_layer_refs") or []
@@ -1118,6 +1139,8 @@ async def confirmation_node(
             "aoi_resolution_meta": aoi_resolution_meta,
             "recommended_layers": recommended_layers,
             "selected_layer_ids": selected_layer_ids,
+            "recommendation_strategy": recommendation_strategy,
+            "recommendation_source": recommendation_source,
             "confirmed_aoi": confirmed_aoi,
             "confirmation_version": confirmation_version,
             "mentioned_layer_refs": mentioned_layer_refs,
@@ -1174,6 +1197,8 @@ async def confirmation_node(
             "aoi_resolution_meta": confirmed_data.get("aoi_resolution_meta", aoi_resolution_meta),
             "recommended_layers": confirmed_data.get("recommended_layers", recommended_layers),
             "selected_layer_ids": confirmed_data.get("selected_layer_ids", selected_layer_ids),
+            "recommendation_strategy": confirmed_data.get("recommendation_strategy", recommendation_strategy),
+            "recommendation_source": confirmed_data.get("recommendation_source", recommendation_source),
             "confirmed_aoi": confirmed_data.get("confirmed_aoi", confirmed_aoi),
             "confirmation_version": confirmed_data.get("confirmation_version", confirmation_version),
             "mentioned_layer_refs": confirmed_data.get("mentioned_layer_refs", mentioned_layer_refs),
@@ -1197,8 +1222,6 @@ async def processing_node(
     2. 使用 LLM 基于搜索内容生成详细洪水分析报告
     3. 更新最终状态
     """
-    global _pending_search_contents
-    
     location = state.get("location")
     event = state.get("event")
     event_description = state.get("event_description")
@@ -1235,8 +1258,9 @@ async def processing_node(
     
     # 格式化搜索内容用于 LLM 生成报告
     search_contents_text = ""
-    if _pending_search_contents:
-        for i, item in enumerate(_pending_search_contents, 1):
+    search_contents = state.get("search_contents") or []
+    if search_contents:
+        for i, item in enumerate(search_contents, 1):
             title = item.get("title", "")
             content = item.get("content", "")
             url = item.get("url", "")
@@ -1258,7 +1282,7 @@ async def processing_node(
     )
     
     try:
-        response = model.invoke([HumanMessage(content=report_prompt)])
+        response = await model.ainvoke([HumanMessage(content=report_prompt)])
         detailed_report = response.content
         print(f"[INFO] Detailed report generated by LLM, length={len(detailed_report)}")
     except Exception as e:
@@ -1282,7 +1306,8 @@ Limited information available; no recovery progress information at this time.
 This flood event has caused certain impacts. Further information collection is needed for a complete assessment."""
     
     # 格式化来源信息
-    sources_text = _format_sources_text(_pending_search_sources)
+    search_sources = list(state.get("search_sources") or [])
+    sources_text = _format_sources_text(search_sources)
     
     # 组装最终报告
     flood_report = FLOOD_REPORT_TEMPLATE.format(
@@ -1294,9 +1319,6 @@ This flood event has caused certain impacts. Further information collection is n
         detailed_report=detailed_report,
         sources=sources_text
     )
-    
-    # 保存来源信息
-    search_sources = _pending_search_sources.copy() if _pending_search_sources else []
     
     # 创建报告完成消息
     report_message = AIMessage(content=f"✅ Information confirmed, report generated!\n\n{flood_report}")
@@ -1339,6 +1361,8 @@ This flood event has caused certain impacts. Further information collection is n
             "confirmed_aoi": confirmed_aoi,
             "recommended_layers": state.get("recommended_layers") or [],
             "selected_layer_ids": state.get("selected_layer_ids") or [],
+            "recommendation_strategy": state.get("recommendation_strategy"),
+            "recommendation_source": state.get("recommendation_source"),
             "mentioned_layer_refs": state.get("mentioned_layer_refs") or [],
             "mentioned_aoi": state.get("mentioned_aoi"),
             "mentioned_aoi_source": state.get("mentioned_aoi_source"),

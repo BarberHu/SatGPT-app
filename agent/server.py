@@ -2,6 +2,7 @@
 FastAPI 后端服务 - 集成 CopilotKit 和 LangGraph
 使用 LangGraphAGUIAgent 作为智能体与 CopilotKit 的连接方式
 """
+import asyncio
 import os
 import logging
 import time
@@ -11,10 +12,10 @@ from typing import Any, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from pydantic.warnings import UnsupportedFieldAttributeWarning
+from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 # CopilotKit AG-UI 集成
@@ -26,7 +27,7 @@ from ag_ui.core import RunStartedEvent
 from flood_agent import graph
 from gee_service import gee_service, get_flood_images
 from gee_code_generator import generate_flood_gee_code
-from flood_dataset_service import build_confirmation_context, renderer
+from flood_dataset_service import build_confirmation_context, get_default_flood_layer_catalog, renderer
 from flood_aoi import search_location_candidates
 from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
 from flood_api_services import (
@@ -39,14 +40,40 @@ from flood_api_services import (
     get_default_map_payload,
     get_flood_hotspot_map_payload,
     get_historical_map_payload,
-    get_latest_script,
     get_unsupervised_map_payload,
     get_water_regime_change_map_payload,
-    remember_latest_script,
+    thin_geojson_geometry,
 )
-from project_env import load_project_env
+from project_env import load_project_env, required_env
 
+load_project_env()
 logger = logging.getLogger(__name__)
+
+_HEAVY_OPERATION_LIMIT = max(1, int(required_env("SATGPT_HEAVY_CONCURRENCY")))
+_HEAVY_QUEUE_TIMEOUT_SECONDS = max(
+    1.0,
+    float(required_env("SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS")),
+)
+_HEAVY_OPERATION_SEMAPHORE = asyncio.Semaphore(_HEAVY_OPERATION_LIMIT)
+
+
+async def _run_heavy_operation(function, *args, **kwargs):
+    try:
+        await asyncio.wait_for(
+            _HEAVY_OPERATION_SEMAPHORE.acquire(),
+            timeout=_HEAVY_QUEUE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The analysis queue is full. Please retry shortly.",
+            headers={"Retry-After": "5"},
+        ) from exc
+
+    try:
+        return await run_in_threadpool(function, *args, **kwargs)
+    finally:
+        _HEAVY_OPERATION_SEMAPHORE.release()
 
 
 def _duration_ms(started_at: float) -> float:
@@ -88,6 +115,8 @@ def _summarize_flood_image_request(request: "FloodImageRequest") -> dict:
         "pre_date": request.pre_date,
         "peek_date": request.peek_date,
         "after_date": request.after_date,
+        "imagery_start_date": request.imagery_start_date,
+        "imagery_end_date": request.imagery_end_date,
         "longitude": _rounded(request.longitude),
         "latitude": _rounded(request.latitude),
         "has_bounds": bool(request.bounds),
@@ -138,34 +167,7 @@ class PatchedLangGraphAGUIAgent(LangGraphAGUIAgent):
         # 最终事件流变成: RunStartedEvent(来自148行) → interrupt → RunFinishedEvent ✅
         return result
 
-load_project_env()
 warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
-
-# 配置代理
-http_proxy = os.getenv("HTTP_PROXY")
-https_proxy = os.getenv("HTTPS_PROXY")
-if http_proxy:
-    os.environ["HTTP_PROXY"] = http_proxy
-if https_proxy:
-    os.environ["HTTPS_PROXY"] = https_proxy
-
-
-def _get_allowed_cors_origins() -> list[str]:
-    configured = os.getenv("SATGPT_CORS_ORIGINS", "").strip()
-    if configured:
-        return [origin.strip() for origin in configured.split(",") if origin.strip()]
-
-    frontend_port = os.getenv("FRONTEND_PORT", "3000")
-    public_host = os.getenv("SATGPT_PUBLIC_HOST", "localhost").strip() or "localhost"
-    origins = {
-        f"http://localhost:{frontend_port}",
-        f"http://127.0.0.1:{frontend_port}",
-    }
-
-    if public_host not in {"localhost", "127.0.0.1", "0.0.0.0"}:
-        origins.add(f"http://{public_host}:{frontend_port}")
-
-    return sorted(origins)
 
 
 @asynccontextmanager
@@ -183,16 +185,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
-
-# CORS 配置
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_get_allowed_cors_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 # ============== CopilotKit AG-UI 集成 ==============
 
@@ -220,9 +212,11 @@ class GeoBounds(BaseModel):
 
 class FloodImageRequest(BaseModel):
     """洪水影像请求"""
-    pre_date: str
-    peek_date: str
-    after_date: str
+    pre_date: Optional[str] = None
+    peek_date: Optional[str] = None
+    after_date: Optional[str] = None
+    imagery_start_date: Optional[str] = None
+    imagery_end_date: Optional[str] = None
     longitude: float
     latitude: float
     buffer_km: Optional[float] = 50
@@ -286,6 +280,10 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class ScriptPdfRequest(BaseModel):
+    script: str
+
+
 async def _get_request_payload(request: Request) -> dict:
     if request.method == "POST":
         payload = await request.json()
@@ -327,7 +325,8 @@ async def health():
     return {
         "status": "ok",
         "service": "flood-agent",
-        "gee_initialized": gee_service.initialized
+        "gee_initialized": gee_service.initialized,
+        "gee_max_concurrency": _HEAVY_OPERATION_LIMIT,
     }
 
 
@@ -335,7 +334,9 @@ async def health():
 async def get_default_map():
     _ensure_gee_ready()
     try:
-        return get_default_map_payload()
+        return await _run_heavy_operation(get_default_map_payload)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -344,7 +345,10 @@ async def get_default_map():
 async def get_unsupervised_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_unsupervised_map_payload(await _get_request_payload(request))
+        payload = await _get_request_payload(request)
+        return await _run_heavy_operation(get_unsupervised_map_payload, payload)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -353,7 +357,10 @@ async def get_unsupervised_map(request: Request):
 async def get_historical_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_historical_map_payload(await _get_request_payload(request))
+        payload = await _get_request_payload(request)
+        return await _run_heavy_operation(get_historical_map_payload, payload)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -362,7 +369,10 @@ async def get_historical_map(request: Request):
 async def get_flood_hotspot_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_flood_hotspot_map_payload(await _get_request_payload(request))
+        payload = await _get_request_payload(request)
+        return await _run_heavy_operation(get_flood_hotspot_map_payload, payload)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -371,7 +381,10 @@ async def get_flood_hotspot_map(request: Request):
 async def get_water_regime_change_map(request: Request):
     _ensure_gee_ready()
     try:
-        return get_water_regime_change_map_payload(await _get_request_payload(request))
+        payload = await _get_request_payload(request)
+        return await _run_heavy_operation(get_water_regime_change_map_payload, payload)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -380,7 +393,10 @@ async def get_water_regime_change_map(request: Request):
 async def get_agent_raster_layers(request: Request):
     _ensure_gee_ready()
     try:
-        return get_agent_raster_layers_payload(await _get_request_payload(request))
+        payload = await _get_request_payload(request)
+        return await _run_heavy_operation(get_agent_raster_layers_payload, payload)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -389,7 +405,10 @@ async def get_agent_raster_layers(request: Request):
 async def get_agent_raster_download(request: Request):
     _ensure_gee_ready()
     try:
-        return get_agent_raster_download_payload(await _get_request_payload(request))
+        payload = await _get_request_payload(request)
+        return await _run_heavy_operation(get_agent_raster_download_payload, payload)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -400,7 +419,8 @@ async def get_agent_raster_download(request: Request):
 async def download_agent_raster_file(request: Request):
     _ensure_gee_ready()
     try:
-        content, filename, scale = get_agent_raster_download_file(await _get_request_payload(request))
+        payload = await _get_request_payload(request)
+        content, filename, scale = await _run_heavy_operation(get_agent_raster_download_file, payload)
         safe_filename = filename.replace('"', "")
         return StreamingResponse(
             BytesIO(content),
@@ -411,6 +431,8 @@ async def download_agent_raster_file(request: Request):
                 "X-SatGPT-Raster-Scale": str(scale),
             },
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -420,7 +442,7 @@ async def download_agent_raster_file(request: Request):
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     _ensure_openai_ready()
-    chatgpt_response = get_chatgpt_response(request.message)
+    chatgpt_response = await run_in_threadpool(get_chatgpt_response, request.message)
     if not chatgpt_response:
         raise HTTPException(status_code=500, detail="Error with ChatGPT.")
     return {"message": chatgpt_response}
@@ -429,19 +451,17 @@ async def chat(request: ChatRequest):
 @app.post("/api/scripts/gee")
 async def get_script(request: ChatRequest):
     _ensure_openai_ready()
-    code_snippet = get_code_response(request.message)
+    code_snippet = await run_in_threadpool(get_code_response, request.message)
     if not code_snippet:
         raise HTTPException(status_code=500, detail="Error with ChatGPT.")
-    remember_latest_script(code_snippet)
     return {"message": code_snippet}
 
 
-@app.get("/api/scripts/pdf")
-async def get_pdf():
-    latest_script = get_latest_script()
-    if not latest_script:
-        raise HTTPException(status_code=500, detail="No generated script is available.")
-    pdf_bytes = build_script_pdf(latest_script)
+@app.post("/api/scripts/pdf")
+async def get_pdf(request: ScriptPdfRequest):
+    if not request.script.strip():
+        raise HTTPException(status_code=400, detail="Script content is required.")
+    pdf_bytes = await run_in_threadpool(build_script_pdf, request.script)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -455,6 +475,14 @@ async def get_flood_imagery(request: FloodImageRequest):
     request_summary = _summarize_flood_image_request(request)
     logger.info("[flood-images] request:start summary=%s", request_summary)
 
+    has_imagery_window = bool(request.imagery_start_date and request.imagery_end_date)
+    if bool(request.imagery_start_date) != bool(request.imagery_end_date):
+        raise HTTPException(status_code=400, detail="Both imagery_start_date and imagery_end_date are required.")
+    if has_imagery_window and request.imagery_start_date > request.imagery_end_date:
+        raise HTTPException(status_code=400, detail="imagery_start_date must not be after imagery_end_date.")
+    if not has_imagery_window and not all((request.pre_date, request.peek_date, request.after_date)):
+        raise HTTPException(status_code=400, detail="Flood imagery requires pre_date, peek_date, and after_date.")
+
     """
     获取洪水事件的卫星影像
     支持三种区域定义方式：
@@ -467,11 +495,47 @@ async def get_flood_imagery(request: FloodImageRequest):
             status_code=503,
             detail="GEE服务未初始化，请检查认证配置"
         )
-    
+
     try:
-        # 优先使用 geojson，其次 bounds，最后使用中心点
+        # 复杂 AOI（如大型流域边界，数万顶点）会让 GEE 的 filterBounds/clip 显著变慢，
+        # 影像展示对边界精度要求低，统一抽稀到 64KB 预算内以加速检索与瓦片渲染。
         if request.geojson:
-            result = gee_service.get_flood_imagery_by_geojson(
+            request.geojson = thin_geojson_geometry(request.geojson)
+
+        # 优先使用 geojson，其次 bounds，最后使用中心点
+        if request.imagery_start_date and request.imagery_end_date and request.geojson:
+            result = await _run_heavy_operation(
+                gee_service.get_imagery_window_by_geojson,
+                start_date=request.imagery_start_date,
+                end_date=request.imagery_end_date,
+                geojson=request.geojson,
+                center=(request.longitude, request.latitude),
+            )
+        elif request.imagery_start_date and request.imagery_end_date and request.bounds:
+            bounds_dict = {
+                "west": request.bounds.west,
+                "south": request.bounds.south,
+                "east": request.bounds.east,
+                "north": request.bounds.north,
+            }
+            result = await _run_heavy_operation(
+                gee_service.get_imagery_window_by_bounds,
+                start_date=request.imagery_start_date,
+                end_date=request.imagery_end_date,
+                bounds=bounds_dict,
+                center=(request.longitude, request.latitude),
+            )
+        elif request.imagery_start_date and request.imagery_end_date:
+            result = await _run_heavy_operation(
+                gee_service.get_imagery_window,
+                start_date=request.imagery_start_date,
+                end_date=request.imagery_end_date,
+                center=(request.longitude, request.latitude),
+                buffer_km=request.buffer_km or 50,
+            )
+        elif request.geojson:
+            result = await _run_heavy_operation(
+                gee_service.get_flood_imagery_by_geojson,
                 pre_date=request.pre_date,
                 peek_date=request.peek_date,
                 after_date=request.after_date,
@@ -485,7 +549,8 @@ async def get_flood_imagery(request: FloodImageRequest):
                 "east": request.bounds.east,
                 "north": request.bounds.north
             }
-            result = gee_service.get_flood_imagery_by_bounds(
+            result = await _run_heavy_operation(
+                gee_service.get_flood_imagery_by_bounds,
                 pre_date=request.pre_date,
                 peek_date=request.peek_date,
                 after_date=request.after_date,
@@ -493,7 +558,8 @@ async def get_flood_imagery(request: FloodImageRequest):
                 center=(request.longitude, request.latitude)
             )
         else:
-            result = get_flood_images(
+            result = await _run_heavy_operation(
+                get_flood_images,
                 pre_date=request.pre_date,
                 peek_date=request.peek_date,
                 after_date=request.after_date,
@@ -509,6 +575,8 @@ async def get_flood_imagery(request: FloodImageRequest):
             "success": True,
             "data": result
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(
             "[flood-images] request:error duration_ms=%s summary=%s error=%s",
@@ -557,7 +625,8 @@ async def generate_gee_code(request: GEECodeRequest):
                 "north": request.bounds.north,
             }
 
-        code = generate_flood_gee_code(
+        code = await run_in_threadpool(
+            generate_flood_gee_code,
             event_name=request.event,
             pre_date=request.pre_date,
             peek_date=request.peek_date,
@@ -626,7 +695,8 @@ async def get_flood_impact(request: FloodImpactRequest):
     
     try:
         if request.geojson:
-            result = gee_service.get_flood_impact_by_geojson(
+            result = await _run_heavy_operation(
+                gee_service.get_flood_impact_by_geojson,
                 pre_date=request.pre_date,
                 peek_date=request.peek_date,
                 geojson=request.geojson
@@ -638,7 +708,8 @@ async def get_flood_impact(request: FloodImpactRequest):
                 "east": request.bounds.east,
                 "north": request.bounds.north
             }
-            result = gee_service.get_flood_impact_by_bounds(
+            result = await _run_heavy_operation(
+                gee_service.get_flood_impact_by_bounds,
                 pre_date=request.pre_date,
                 peek_date=request.peek_date,
                 bounds=bounds_dict
@@ -665,7 +736,8 @@ async def get_flood_impact(request: FloodImpactRequest):
 @app.post("/api/flood-confirmation/refresh")
 async def refresh_flood_confirmation(request: FloodConfirmationRefreshRequest):
     try:
-        context = build_confirmation_context(
+        context = await run_in_threadpool(
+            build_confirmation_context,
             event=request.event,
             event_description=request.event_description,
             location=request.location,
@@ -679,10 +751,20 @@ async def refresh_flood_confirmation(request: FloodConfirmationRefreshRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/flood-layer-catalog")
+async def get_flood_layer_catalog():
+    try:
+        catalog = await run_in_threadpool(get_default_flood_layer_catalog)
+        return {"success": True, "data": catalog}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/recommended-layer-render")
 async def render_recommended_layer(request: RecommendedLayerRenderRequest):
     try:
-        rendered = renderer.render_layer(
+        rendered = await _run_heavy_operation(
+            renderer.render_layer,
             layer_id=request.layer_id,
             recommended_layers=request.recommended_layers,
             confirmed_aoi=request.confirmed_aoi,
@@ -691,6 +773,8 @@ async def render_recommended_layer(request: RecommendedLayerRenderRequest):
             after_date=request.after_date,
         )
         return {"success": True, "data": rendered}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -698,7 +782,8 @@ async def render_recommended_layer(request: RecommendedLayerRenderRequest):
 @app.post("/api/location-search")
 async def search_location(request: LocationSearchRequest):
     try:
-        candidates = search_location_candidates(
+        candidates = await run_in_threadpool(
+            search_location_candidates,
             location_name=request.query,
             limit=request.limit or 5,
         )
@@ -760,13 +845,14 @@ async def update_state(state: FloodState):
 if __name__ == "__main__":
     import uvicorn
     
-    host = os.getenv("AGENT_HOST", "0.0.0.0")
-    port = int(os.getenv("AGENT_PORT", 8000))
-    debug = os.getenv("AGENT_DEBUG", "True").lower() == "true"
+    host = required_env("AGENT_HOST")
+    port = int(required_env("AGENT_PORT"))
+    debug = required_env("AGENT_DEBUG").lower() == "true"
     
     print(f"[INFO] Flood agent listening at http://{host}:{port}")
     print(f"[INFO] API docs: http://{host}:{port}/docs")
     print(f"[INFO] Agent endpoint: http://{host}:{port}/agent")
+    print(f"[INFO] GEE max concurrency: {_HEAVY_OPERATION_LIMIT}")
     
     uvicorn.run(
         "server:app",

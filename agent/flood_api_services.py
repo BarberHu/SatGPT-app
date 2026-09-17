@@ -1,7 +1,6 @@
 import json
-import os
 import re
-import threading
+from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -20,20 +19,31 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from project_env import load_project_env, required_env
+
+
+load_project_env()
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 LAYER_CATALOG_PATH = ROOT_DIR / "frontend" / "src" / "config" / "layerCatalog.json"
 AGENT_RASTER_LAYER_KEYS = {
     "singleInundationEvent",
     "inundationHotspot",
+    "wildfireRisk",
+    "landslideRisk",
+    "activeFireDetections",
+    "burnHistory",
+    "slopeSteepness",
     "lclu",
     "populationDensity",
     "soilTexture",
 }
-
-_LATEST_SCRIPT_LOCK = threading.Lock()
-_LATEST_SCRIPT: Optional[str] = None
-
+JRC_YEARLY_HISTORY_MIN_YEAR = 1984
+JRC_YEARLY_HISTORY_MAX_YEAR = 2021
+DEFAULT_RISK_WINDOW_DAYS = 60
+WILDFIRE_RISK_PALETTE = ["#2E7D32", "#FDD835", "#FF8F00", "#E53935", "#B71C1C"]
+LANDSLIDE_RISK_PALETTE = ["#1565C0", "#42A5F5", "#FFC107", "#FF6F00", "#D84315"]
 
 def _load_layer_catalog() -> Dict[str, Any]:
     with LAYER_CATALOG_PATH.open("r", encoding="utf-8") as handle:
@@ -124,6 +134,129 @@ def aoi_to_ee_geometry(aoi: Dict[str, Any]) -> ee.Geometry:
     raise ValueError("AOI payload does not include geojson or bounds.")
 
 
+# Earth Engine rejects download requests whose serialized payload exceeds ~48 MB
+# ("Total request size (X bytes) must be less than or equal to Y bytes."). Complex AOI
+# polygons (uploaded boundaries, basin outlines) dominate that payload and are embedded
+# twice for downloads (once by .clip(), once as the region parameter), so thin oversized
+# geometries on the client before handing them to Earth Engine.
+DOWNLOAD_GEOMETRY_BUDGET_BYTES = 2_000_000
+_GEOJSON_BYTES_PER_POINT = 48
+
+
+def _geojson_geometry_byte_size(geometry: Dict[str, Any]) -> int:
+    try:
+        return len(json.dumps(geometry, separators=(",", ":")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _decimate_ring(ring: list, keep_every: int) -> list:
+    if keep_every <= 1 or len(ring) <= 4:
+        return ring
+    thinned = ring[::keep_every]
+    if ring and ring[0] == ring[-1] and (not thinned or thinned[-1] != thinned[0]):
+        thinned.append(thinned[0])
+    # GEE 要求闭合环至少 4 个点（3 个独立点 + 闭合点），否则报
+    # "GeometryConstructors.MultiPolygon: At least 4 points are required ..."。
+    # 混合大小的环统一按 keep_every 抽稀时，小环可能被抽到不足 4 点，保留原环。
+    if len(thinned) < 4:
+        return ring
+    return thinned
+
+
+def _thin_polygon_rings(rings: list, keep_every: int) -> list:
+    return [_decimate_ring(ring, keep_every) for ring in rings if isinstance(ring, list)]
+
+
+def _thin_geojson_geometry(geometry: Dict[str, Any], keep_every: int) -> Dict[str, Any]:
+    geo_type = geometry.get("type")
+    coords = geometry.get("coordinates")
+    if geo_type == "Polygon" and isinstance(coords, list):
+        return {**geometry, "coordinates": _thin_polygon_rings(coords, keep_every)}
+    if geo_type == "MultiPolygon" and isinstance(coords, list):
+        return {
+            **geometry,
+            "coordinates": [
+                _thin_polygon_rings(polygon, keep_every)
+                for polygon in coords
+                if isinstance(polygon, list)
+            ],
+        }
+    return geometry
+
+
+def _thin_geojson_geometry_to_budget(geometry: Dict[str, Any], budget_bytes: int) -> Dict[str, Any]:
+    """Uniformly thin polygon rings until the serialized geometry fits the byte budget."""
+    if _geojson_geometry_byte_size(geometry) <= budget_bytes:
+        return geometry
+
+    coordinates = geometry.get("coordinates")
+    geo_type = geometry.get("type")
+    if geo_type not in ("Polygon", "MultiPolygon") or not isinstance(coordinates, list):
+        return geometry
+
+    if geo_type == "Polygon":
+        point_total = sum(len(ring) for ring in coordinates if isinstance(ring, list))
+    else:
+        point_total = sum(
+            len(ring)
+            for polygon in coordinates
+            if isinstance(polygon, list)
+            for ring in polygon
+            if isinstance(ring, list)
+        )
+    target_points = max(256, budget_bytes // _GEOJSON_BYTES_PER_POINT)
+    keep_every = max(2, -(-point_total // target_points))
+
+    thinned = _thin_geojson_geometry(geometry, keep_every)
+    attempts = 0
+    while _geojson_geometry_byte_size(thinned) > budget_bytes and attempts < 6:
+        keep_every *= 2
+        thinned = _thin_geojson_geometry(geometry, keep_every)
+        attempts += 1
+    return thinned
+
+
+def build_download_region(aoi: Dict[str, Any]) -> ee.Geometry:
+    """AOI geometry for GeoTIFF downloads, thinned when it would blow up the request size."""
+    geometry = extract_geojson_geometry(aoi.get("geojson"))
+    if geometry:
+        thinned = _thin_geojson_geometry_to_budget(geometry, DOWNLOAD_GEOMETRY_BUDGET_BYTES)
+        return ee.Geometry(thinned)
+
+    bounds = aoi.get("bounds")
+    if is_valid_bounds(bounds):
+        return ee.Geometry.Rectangle([
+            bounds["west"],
+            bounds["south"],
+            bounds["east"],
+            bounds["north"],
+        ])
+
+    raise ValueError("AOI payload does not include geojson or bounds.")
+
+
+# 影像场景的几何预算：约 2500 个顶点。流域尺度下显示无差别，
+# 但能避免数万顶点的 AOI 拖慢 GEE 检索与每片瓦片的 clip 计算。
+IMAGERY_GEOMETRY_BUDGET_BYTES = 64 * 1024
+
+
+def thin_geojson_geometry(
+    geometry: Dict[str, Any],
+    budget_bytes: int = IMAGERY_GEOMETRY_BUDGET_BYTES,
+) -> Dict[str, Any]:
+    """公开接口：把 GeoJSON geometry 均匀抽稀到字节预算内。
+
+    影像/瓦片场景对边界精度要求低，但超大 AOI（如流域边界，动辄数万顶点）
+    会让 GEE 的 filterBounds/clip 每次瓦片请求都显著变慢，统一抽稀可大幅加速。
+
+    会先把 Feature / FeatureCollection 解包成纯几何（ee.Geometry 不接受
+    Feature 包裹结构，否则报 "Invalid GeoJSON geometry"），非多边形类型原样返回。
+    """
+    unpacked = extract_geojson_geometry(geometry) or geometry
+    return _thin_geojson_geometry_to_budget(unpacked, budget_bytes)
+
+
 def visualize_image(image: ee.Image, vis_params: Dict[str, Any]) -> ee.Image:
     return image.visualize(
         min=vis_params["min"],
@@ -200,14 +333,8 @@ def get_unsupervised_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
-    jrc_surface_water, jrc_surface_flood, jrc_surface_water_visual, jrc_surface_flood_visual = (
-        _build_single_inundation_images(payload, region)
-    )
+def _attach_supplementary_map_layers(content: Dict[str, Any], region: ee.Geometry) -> None:
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
-
     lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
     population_density = ee.Image(
         supplementary_catalog["populationDensity"]["dataset"]
@@ -228,13 +355,22 @@ def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
     )
 
-    content: Dict[str, Any] = {}
-    attach_map_id(content, "Flood", jrc_surface_flood_visual.getMapId())
-    attach_map_id(content, "Water", jrc_surface_water_visual.getMapId())
     attach_map_id(content, "LCLU", lclu.getMapId())
     attach_map_id(content, "PopulationDensity", population_density.getMapId())
     attach_map_id(content, "SoilTexture", soil_texture.getMapId())
     attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+
+
+def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    aoi = parse_aoi_from_payload(payload)
+    region = aoi_to_ee_geometry(aoi)
+    jrc_surface_water, jrc_surface_flood, jrc_surface_water_visual, jrc_surface_flood_visual = (
+        _build_single_inundation_images(payload, region)
+    )
+    content: Dict[str, Any] = {}
+    attach_map_id(content, "Flood", jrc_surface_flood_visual.getMapId())
+    attach_map_id(content, "Water", jrc_surface_water_visual.getMapId())
+    _attach_supplementary_map_layers(content, region)
     return content
 
 
@@ -247,32 +383,35 @@ def _build_single_inundation_images(payload: Dict[str, Any], region: ee.Geometry
     start_year = int(time_start.split("-")[0])
     end_year = int(time_end.split("-")[0])
 
-    jrc_surface_water = (
-        ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
-        .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
-        .map(
-            lambda image: image.select(historical_catalog["water"]["band"]).eq(
-                historical_catalog["water"]["matchValue"]
-            )
+    water_band = historical_catalog["water"]["band"]
+    flood_band = historical_catalog["flood"]["band"]
+
+    if end_year < JRC_YEARLY_HISTORY_MIN_YEAR or start_year > JRC_YEARLY_HISTORY_MAX_YEAR:
+        jrc_surface_water = ee.Image.constant(0).rename(water_band).clip(region)
+        jrc_surface_flood = ee.Image.constant(0).rename(flood_band).clip(region)
+    else:
+        start_year = max(start_year, JRC_YEARLY_HISTORY_MIN_YEAR)
+        end_year = min(end_year, JRC_YEARLY_HISTORY_MAX_YEAR)
+        jrc_surface_water = (
+            ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
+            .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
+            .map(lambda image: image.select(water_band).eq(historical_catalog["water"]["matchValue"]))
+            .sum()
+            .rename(water_band)
+            .clip(region)
         )
-        .sum()
-        .clip(region)
-    )
+        jrc_surface_flood = (
+            ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
+            .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
+            .map(lambda image: image.select(flood_band).eq(historical_catalog["flood"]["matchValue"]))
+            .sum()
+            .rename(flood_band)
+            .clip(region)
+        )
+
     jrc_surface_water = jrc_surface_water.updateMask(jrc_surface_water.gt(0))
     jrc_surface_water_visual = visualize_image(
         jrc_surface_water, historical_catalog["water"]["visualization"]
-    )
-
-    jrc_surface_flood = (
-        ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
-        .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
-        .map(
-            lambda image: image.select(historical_catalog["flood"]["band"]).eq(
-                historical_catalog["flood"]["matchValue"]
-            )
-        )
-        .sum()
-        .clip(region)
     )
     jrc_surface_flood = jrc_surface_flood.updateMask(jrc_surface_flood.gt(0))
     jrc_surface_flood_visual = visualize_image(
@@ -310,10 +449,326 @@ def _visualize_hotspot(permanent_water_visual: ee.Image, flood_frequency_visual:
     return _blend_visual_layers(permanent_water_visual, flood_frequency_visual)
 
 
+def _build_active_fire_detection_image(payload: Dict[str, Any], region: ee.Geometry) -> ee.Image:
+    time_start = str(payload.get("time_start") or "2024-01-01")
+    time_end = str(payload.get("time_end") or "2024-12-31")
+    active_fire_collection = (
+        ee.ImageCollection("FIRMS")
+        .filterDate(time_start, time_end)
+        .select("T21")
+    )
+    active_fire = ee.Image(
+        ee.Algorithms.If(
+            active_fire_collection.size().gt(0),
+            active_fire_collection.max().rename("T21").clip(region),
+            ee.Image.constant(0).rename("T21").clip(region),
+        )
+    )
+    return active_fire.updateMask(active_fire.gt(0))
+
+
+def _get_burn_history_date_window(payload: Dict[str, Any]) -> tuple[str, str]:
+    default_start, default_end = _get_recent_date_window(365)
+    return (
+        str(payload.get("time_start") or default_start),
+        str(payload.get("time_end") or default_end),
+    )
+
+
+def _build_burn_history_image(payload: Dict[str, Any], region: ee.Geometry) -> ee.Image:
+    time_start, time_end = _get_burn_history_date_window(payload)
+    burned_area_collection = (
+        ee.ImageCollection("MODIS/061/MCD64A1")
+        .filterDate(time_start, time_end)
+        .filterBounds(region)
+        .select("BurnDate")
+    )
+    burned_area = ee.Image(
+        ee.Algorithms.If(
+            burned_area_collection.size().gt(0),
+            burned_area_collection.max().gt(0).rename("burn_history").clip(region),
+            ee.Image.constant(0).rename("burn_history").clip(region),
+        )
+    )
+    return burned_area.updateMask(burned_area.gt(0))
+
+
+def _build_slope_steepness_image(region: ee.Geometry) -> ee.Image:
+    elevation = ee.Image("USGS/SRTMGL1_003").select("elevation")
+    return ee.Terrain.slope(elevation).rename("slope").clip(region)
+
+
+def _build_worldcover_fuel_land_cover_image(region: ee.Geometry) -> ee.Image:
+    class_values = [10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100]
+    remapped_values = list(range(len(class_values)))
+    return (
+        ee.ImageCollection(get_basic_layer_catalog()["supplementary"]["landcover"]["dataset"])
+        .first()
+        .select("Map")
+        .remap(class_values, remapped_values)
+        .rename("fuel_land_cover")
+        .clip(region)
+    )
+
+
+def _visualize_worldcover_fuel_land_cover(image: ee.Image) -> ee.Image:
+    return image.visualize(
+        min=0,
+        max=10,
+        palette=[
+            "#006400",
+            "#ffbb22",
+            "#ffff4c",
+            "#f096ff",
+            "#fa0000",
+            "#b4b4b4",
+            "#f0f0f0",
+            "#0064c8",
+            "#0096a0",
+            "#00cf75",
+            "#fae6a0",
+        ],
+    )
+
+
+def _get_recent_date_window(day_count: int = DEFAULT_RISK_WINDOW_DAYS) -> tuple[str, str]:
+    safe_day_count = max(1, int(day_count or DEFAULT_RISK_WINDOW_DAYS))
+    end = date.today()
+    start = end - timedelta(days=safe_day_count - 1)
+    return start.isoformat(), end.isoformat()
+
+
+def _get_risk_date_context(payload: Dict[str, Any]) -> tuple[str, str, ee.Date, ee.Date, ee.Date, ee.Date]:
+    default_start, default_end = _get_recent_date_window()
+    time_start = str(payload.get("time_start") or default_start)
+    time_end = str(payload.get("time_end") or default_end)
+    start_date = ee.Date(time_start)
+    end_date = ee.Date(time_end)
+    historical_start = end_date.advance(-3, "year")
+    historical_end = start_date
+    return time_start, time_end, start_date, end_date, historical_start, historical_end
+
+
+def _get_cloud_threshold(payload: Dict[str, Any], default_value: float = 50) -> float:
+    raw_value = payload.get("cloud_threshold", payload.get("cloudthre", default_value))
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return default_value
+
+
+def _safe_collection_reduction_image(
+    collection: ee.ImageCollection,
+    reducer: str,
+    band_name: str,
+    fallback_value: float = 0,
+) -> ee.Image:
+    if reducer == "median":
+        reduced = collection.median()
+    elif reducer == "mean":
+        reduced = collection.mean()
+    elif reducer == "sum":
+        reduced = collection.sum()
+    elif reducer == "max":
+        reduced = collection.max()
+    else:
+        raise ValueError(f"Unsupported image collection reducer: {reducer}")
+
+    return ee.Image(
+        ee.Algorithms.If(
+            collection.size().gt(0),
+            reduced.rename(band_name),
+            ee.Image.constant(fallback_value).rename(band_name),
+        )
+    )
+
+
+def _mask_sentinel2_scl(image: ee.Image) -> ee.Image:
+    scl = image.select("SCL")
+    mask = (
+        scl.neq(3)
+        .multiply(scl.neq(8))
+        .multiply(scl.neq(9))
+        .multiply(scl.neq(10))
+        .multiply(scl.neq(1))
+    )
+    return image.updateMask(mask).copyProperties(image, ["system:time_start"])
+
+
+def _add_sentinel2_indices(image: ee.Image) -> ee.Image:
+    ndvi = image.normalizedDifference(["B8", "B4"]).rename("NDVI")
+    ndwi = image.normalizedDifference(["B3", "B8"]).rename("NDWI")
+    return image.addBands([ndvi, ndwi])
+
+
+def _build_sentinel2_index_images(
+    region: ee.Geometry,
+    start_date: ee.Date,
+    end_date: ee.Date,
+    cloud_threshold: float,
+) -> tuple[ee.Image, ee.Image]:
+    collection = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterBounds(region)
+        .filterDate(start_date, end_date)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_threshold))
+        .map(_mask_sentinel2_scl)
+        .map(_add_sentinel2_indices)
+    )
+    ndvi = _safe_collection_reduction_image(collection.select("NDVI"), "median", "NDVI", 0).clip(region)
+    ndwi = _safe_collection_reduction_image(collection.select("NDWI"), "median", "NDWI", 0).clip(region)
+    return ndvi, ndwi
+
+
+def _build_land_mask_image(region: ee.Geometry) -> ee.Image:
+    land_in_roi = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017").filterBounds(region)
+    return ee.Image.constant(1).clip(land_in_roi).rename("land_mask")
+
+
+def _build_forest_mask_image(region: ee.Geometry) -> ee.Image:
+    landcover = (
+        ee.ImageCollection(get_basic_layer_catalog()["supplementary"]["landcover"]["dataset"])
+        .first()
+        .select("Map")
+        .clip(region)
+    )
+    return landcover.eq(10).add(landcover.eq(20)).add(landcover.eq(30)).gt(0).rename("forest_mask")
+
+
+def _build_modis_lst_image(start_date: ee.Date, end_date: ee.Date, region: ee.Geometry, band_name: str) -> ee.Image:
+    raw_lst = _safe_collection_reduction_image(
+        ee.ImageCollection("MODIS/061/MOD11A2")
+        .filterDate(start_date, end_date)
+        .select("LST_Day_1km"),
+        "mean",
+        f"{band_name}_raw",
+        15000,
+    )
+    return raw_lst.multiply(0.02).subtract(273.15).rename(band_name).clip(region)
+
+
+def _build_precip_sum_image(start_date: ee.Date, end_date: ee.Date, region: ee.Geometry, band_name: str) -> ee.Image:
+    return _safe_collection_reduction_image(
+        ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+        .filterDate(start_date, end_date)
+        .select("precipitation"),
+        "sum",
+        band_name,
+        0,
+    ).clip(region)
+
+
+def _build_sentinel1_vh_image(region: ee.Geometry, start_date: ee.Date, end_date: ee.Date, band_name: str) -> ee.Image:
+    collection = (
+        ee.ImageCollection("COPERNICUS/S1_GRD")
+        .filterBounds(region)
+        .filterDate(start_date, end_date)
+        .filter(ee.Filter.eq("instrumentMode", "IW"))
+        .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH"))
+        .select("VH")
+    )
+    return _safe_collection_reduction_image(collection, "mean", band_name, -18).clip(region)
+
+
+def _classify_risk_image(risk: ee.Image, band_name: str) -> ee.Image:
+    clamped = risk.clamp(0, 100)
+    return (
+        ee.Image.constant(1)
+        .where(clamped.gte(20), 2)
+        .where(clamped.gte(40), 3)
+        .where(clamped.gte(60), 4)
+        .where(clamped.gte(80), 5)
+        .updateMask(clamped.mask())
+        .rename(band_name)
+    )
+
+
+def _build_wildfire_risk_class_image(payload: Dict[str, Any], region: ee.Geometry) -> ee.Image:
+    _time_start, _time_end, start_date, end_date, historical_start, historical_end = _get_risk_date_context(payload)
+    cloud_threshold = _get_cloud_threshold(payload)
+    ndvi_current, ndwi_current = _build_sentinel2_index_images(region, start_date, end_date, cloud_threshold)
+    _ndvi_historical, ndwi_historical = _build_sentinel2_index_images(
+        region,
+        historical_start,
+        historical_end,
+        cloud_threshold,
+    )
+    lst_current = _build_modis_lst_image(start_date, end_date, region, "LST")
+    lst_historical = _build_modis_lst_image(historical_start, historical_end, region, "LST_Historical")
+    precip_current = _build_precip_sum_image(start_date, end_date, region, "Precip_Current")
+    precip_historical_sum = _build_precip_sum_image(historical_start, historical_end, region, "Precip_Historical")
+
+    current_days = ee.Number(end_date.difference(start_date, "day")).max(1)
+    historical_days = ee.Number(historical_end.difference(historical_start, "day")).max(1)
+    precip_historical = precip_historical_sum.divide(historical_days).multiply(current_days)
+
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation")
+    slope = ee.Terrain.slope(dem).rename("Slope").clip(region)
+    aspect = ee.Terrain.aspect(dem).rename("Aspect").clip(region)
+    land_mask = _build_land_mask_image(region)
+    forest_mask = _build_forest_mask_image(region)
+
+    fuel_dryness = ndvi_current.subtract(ndwi_current).multiply(50).clamp(0, 100)
+    water_deficit = ndwi_historical.subtract(ndwi_current).multiply(50).clamp(0, 100)
+    temp_anomaly = lst_current.subtract(lst_historical).add(5).multiply(5).clamp(0, 100)
+    precip_denominator = precip_historical.max(ee.Image.constant(1))
+    precip_deficit = precip_historical.subtract(precip_current).divide(precip_denominator).multiply(100).clamp(0, 100)
+    slope_risk = slope.divide(45).multiply(50).clamp(0, 50)
+    aspect_risk = aspect.subtract(180).abs().divide(180).multiply(-50).add(50)
+    topo_vulnerability = slope_risk.add(aspect_risk).clamp(0, 100)
+
+    wildfire_risk = (
+        fuel_dryness.multiply(0.2)
+        .add(water_deficit.multiply(0.3))
+        .add(temp_anomaly.multiply(0.25))
+        .add(precip_deficit.multiply(0.15))
+        .add(topo_vulnerability.multiply(0.1))
+        .rename("wildfire_risk")
+        .updateMask(forest_mask)
+        .updateMask(land_mask)
+        .clip(region)
+    )
+    return _classify_risk_image(wildfire_risk, "wildfire_risk_class")
+
+
+def _build_landslide_risk_class_image(payload: Dict[str, Any], region: ee.Geometry) -> ee.Image:
+    _time_start, _time_end, start_date, end_date, historical_start, historical_end = _get_risk_date_context(payload)
+    cloud_threshold = _get_cloud_threshold(payload)
+    ndvi_current, _ndwi_current = _build_sentinel2_index_images(region, start_date, end_date, cloud_threshold)
+    precip_3days = _build_precip_sum_image(end_date.advance(-3, "day"), end_date, region, "Precip_3days")
+    slope = _build_slope_steepness_image(region)
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(region)
+    rugosity = dem.reduceNeighborhood(
+        reducer=ee.Reducer.stdDev(),
+        kernel=ee.Kernel.circle(3, "pixels"),
+    ).rename("Rugosity")
+    s1_current = _build_sentinel1_vh_image(region, start_date, end_date, "SAR_VH")
+    s1_historical = _build_sentinel1_vh_image(region, historical_start, historical_end, "SAR_VH_Historical")
+    land_mask = _build_land_mask_image(region)
+
+    rain_trigger = precip_3days.clamp(0, 100)
+    slope_hazard = slope.subtract(15).divide(30).multiply(100).clamp(0, 100)
+    terrain_roughness = rugosity.unitScale(0, 50).multiply(100).clamp(0, 100)
+    soil_saturation = s1_historical.subtract(s1_current).add(3).divide(6).multiply(100).clamp(0, 100)
+    vegetation_instability = ndvi_current.multiply(-100).add(100).clamp(0, 100)
+
+    landslide_risk = (
+        rain_trigger.multiply(0.35)
+        .add(slope_hazard.multiply(0.25))
+        .add(soil_saturation.multiply(0.2))
+        .add(vegetation_instability.multiply(0.1))
+        .add(terrain_roughness.multiply(0.1))
+        .rename("landslide_risk")
+        .updateMask(land_mask)
+        .clip(region)
+    )
+    return _classify_risk_image(landslide_risk, "landslide_risk_class")
+
+
 def _requested_agent_raster_layer_keys(payload: Dict[str, Any]) -> set[str]:
     raw_keys = payload.get("layer_keys", payload.get("layerKeys"))
     if not raw_keys:
-        return set(AGENT_RASTER_LAYER_KEYS)
+        raise ValueError("layer_keys must include at least one layer key.")
 
     if isinstance(raw_keys, str):
         stripped = raw_keys.strip()
@@ -332,6 +787,38 @@ def _requested_agent_raster_layer_keys(payload: Dict[str, Any]) -> set[str]:
     if not requested_keys:
         raise ValueError("layer_keys must include at least one layer key.")
     return requested_keys
+
+
+def _clamp_jrc_year(value: Any, fallback: int) -> int:
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        year = fallback
+    return max(JRC_YEARLY_HISTORY_MIN_YEAR, min(JRC_YEARLY_HISTORY_MAX_YEAR, year))
+
+
+def _get_jrc_year_range_from_payload(
+    payload: Dict[str, Any],
+    *,
+    default_start: int = 1988,
+    default_count: int = 5,
+) -> tuple[int, int, int]:
+    if payload.get("year_start") is not None or payload.get("year_end") is not None:
+        year_start = _clamp_jrc_year(payload.get("year_start"), default_start)
+        year_end = _clamp_jrc_year(payload.get("year_end"), year_start)
+    else:
+        year_start = _clamp_jrc_year(payload.get("year_from"), default_start)
+        try:
+            year_count = max(1, int(payload.get("year_count") or default_count))
+        except (TypeError, ValueError):
+            year_count = default_count
+        year_end = _clamp_jrc_year(year_start + year_count - 1, year_start)
+
+    if year_end < year_start:
+        year_start, year_end = year_end, year_start
+
+    year_count = year_end - year_start + 1
+    return year_start, year_end, year_count
 
 
 def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -362,12 +849,97 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "InundationHotspot",
             _visualize_hotspot(hotspot_water_visual, hotspot_visual).getMapId(),
         )
-        year_from = int(payload.get("year_from") or 1988)
-        year_count = int(payload.get("year_count") or 5)
+        year_start, year_end, year_count = _get_jrc_year_range_from_payload(payload)
         content["inundationHotspotMeta"] = {
-            "year_from": year_from,
+            "year_start": year_start,
+            "year_end": year_end,
+            "year_from": year_start,
             "year_count": year_count,
-            "year_to": year_from + year_count,
+            "year_to": year_end,
+        }
+
+    if "wildfireRisk" in requested_keys:
+        time_start, time_end, *_date_context = _get_risk_date_context(payload)
+        wildfire_risk_class = _build_wildfire_risk_class_image(payload, region)
+        wildfire_risk_visual = wildfire_risk_class.visualize(
+            min=1,
+            max=5,
+            palette=WILDFIRE_RISK_PALETTE,
+        )
+        attach_map_id(content, "WildfireRisk", wildfire_risk_visual.getMapId())
+        content["wildfireRiskMeta"] = {
+            "dataset": "Sentinel-2 SR, MODIS LST, CHIRPS, SRTM, ESA WorldCover",
+            "time_start": time_start,
+            "time_end": time_end,
+            "classification": "1 low, 2 moderate, 3 watch, 4 warning, 5 very high",
+        }
+
+    if "landslideRisk" in requested_keys:
+        time_start, time_end, *_date_context = _get_risk_date_context(payload)
+        landslide_risk_class = _build_landslide_risk_class_image(payload, region)
+        landslide_risk_visual = landslide_risk_class.visualize(
+            min=1,
+            max=5,
+            palette=LANDSLIDE_RISK_PALETTE,
+        )
+        attach_map_id(content, "LandslideRisk", landslide_risk_visual.getMapId())
+        content["landslideRiskMeta"] = {
+            "dataset": "CHIRPS, SRTM, Sentinel-1 VH, Sentinel-2 NDVI",
+            "time_start": time_start,
+            "time_end": time_end,
+            "classification": "1 low, 2 moderate, 3 watch, 4 warning, 5 very high",
+        }
+
+    if "activeFireDetections" in requested_keys:
+        active_fire = _build_active_fire_detection_image(payload, region)
+        active_fire_visual = visualize_image(
+            active_fire,
+            {
+                "min": 325,
+                "max": 400,
+                "palette": ["#ef4444", "#f97316", "#facc15"],
+            },
+        )
+        attach_map_id(content, "ActiveFireDetections", active_fire_visual.getMapId())
+        content["activeFireDetectionsMeta"] = {
+            "dataset": "FIRMS",
+            "time_start": str(payload.get("time_start") or "2024-01-01"),
+            "time_end": str(payload.get("time_end") or "2024-12-31"),
+        }
+
+    if "burnHistory" in requested_keys:
+        time_start, time_end = _get_burn_history_date_window(payload)
+        burn_history = _build_burn_history_image(payload, region)
+        burn_history_visual = visualize_image(
+            burn_history,
+            {
+                "min": 0,
+                "max": 1,
+                "palette": ["#111827"],
+            },
+        )
+        attach_map_id(content, "BurnHistory", burn_history_visual.getMapId())
+        content["burnHistoryMeta"] = {
+            "dataset": "MODIS/061/MCD64A1",
+            "band": "BurnDate",
+            "time_start": time_start,
+            "time_end": time_end,
+        }
+
+    if "slopeSteepness" in requested_keys:
+        slope_steepness = _build_slope_steepness_image(region)
+        slope_steepness_visual = visualize_image(
+            slope_steepness,
+            {
+                "min": 0,
+                "max": 60,
+                "palette": ["#f7fcf5", "#c7e9c0", "#74c476", "#fd8d3c", "#bd0026"],
+            },
+        )
+        attach_map_id(content, "SlopeSteepness", slope_steepness_visual.getMapId())
+        content["slopeSteepnessMeta"] = {
+            "dataset": "USGS/SRTMGL1_003",
+            "derived": "ee.Terrain.slope(elevation)",
         }
 
     if "lclu" in requested_keys:
@@ -401,9 +973,69 @@ def _safe_download_name(value: Any, fallback: str = "aoi") -> str:
     return cleaned[:48] or fallback
 
 
+def _get_imagery_download_date_window(payload: Dict[str, Any]) -> tuple[str, str, str]:
+    """Return the selected inclusive imagery window and EE's exclusive end date."""
+    start_value = str(payload.get("start_date") or "").strip()
+    end_value = str(payload.get("end_date") or "").strip()
+    if not start_value or not end_value:
+        raise ValueError("Imagery downloads require start_date and end_date.")
+
+    try:
+        start = date.fromisoformat(start_value)
+        end = date.fromisoformat(end_value)
+    except ValueError as error:
+        raise ValueError("Imagery download dates must use YYYY-MM-DD format.") from error
+
+    if start > end:
+        raise ValueError("Imagery download start_date must not be after end_date.")
+
+    return start.isoformat(), end.isoformat(), (end + timedelta(days=1)).isoformat()
+
+
+def _build_sentinel2_rgb_download_image(region: ee.Geometry, payload: Dict[str, Any]) -> ee.Image:
+    start_date, _end_date, filter_end_date = _get_imagery_download_date_window(payload)
+    cloud_threshold = max(0.0, min(100.0, _get_cloud_threshold(payload, 30)))
+    collection = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterDate(start_date, filter_end_date)
+        .filterBounds(region)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_threshold))
+        .sort("CLOUDY_PIXEL_PERCENTAGE")
+    )
+    # Keep the scientific surface-reflectance bands rather than exporting styled RGB pixels.
+    # The collection/filter/mosaic order matches gee_service._get_sentinel2_by_region.
+    return collection.mosaic().clip(region).select(["B4", "B3", "B2"])
+
+
+def _build_sentinel1_vv_download_image(region: ee.Geometry, payload: Dict[str, Any]) -> ee.Image:
+    start_date, _end_date, filter_end_date = _get_imagery_download_date_window(payload)
+    collection = (
+        ee.ImageCollection("COPERNICUS/S1_GRD")
+        .filterDate(start_date, filter_end_date)
+        .filterBounds(region)
+        .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VV"))
+        .filter(ee.Filter.eq("instrumentMode", "IW"))
+        .select("VV")
+    )
+    # COPERNICUS/S1_GRD is already calibrated and stored in dB in Earth Engine.
+    return collection.mosaic().clip(region)
+
+
 def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
     layer_configs = {
+        "sentinel2Rgb": {
+            "title": "Sentinel-2 RGB Mosaic",
+            "filename": "sentinel2_rgb_mosaic",
+            "scale": 10,
+            "image_builder": _build_sentinel2_rgb_download_image,
+        },
+        "sentinel1Vv": {
+            "title": "Sentinel-1 VV Mosaic",
+            "filename": "sentinel1_vv_mosaic",
+            "scale": 10,
+            "image_builder": _build_sentinel1_vv_download_image,
+        },
         "singleInundationEvent": {
             "title": "Single Inundation Event",
             "filename": "single_inundation_event",
@@ -439,6 +1071,30 @@ def _get_agent_raster_download_config(layer_key: str) -> Dict[str, Any]:
             "image_builder": lambda region, payload: ee.Image(
                 supplementary_catalog["soilTexture"]["dataset"]
             ).select(supplementary_catalog["soilTexture"]["band"]).clip(region),
+        },
+        "wildfireRisk": {
+            "title": "Wildfire Risk",
+            "filename": "wildfire_risk",
+            "scale": 100,
+            "image_builder": lambda region, payload: _build_wildfire_risk_class_image(payload, region),
+        },
+        "burnHistory": {
+            "title": "Burn History",
+            "filename": "burn_history",
+            "scale": 500,
+            "image_builder": lambda region, payload: _build_burn_history_image(payload, region),
+        },
+        "landslideRisk": {
+            "title": "Landslide Risk",
+            "filename": "landslide_risk",
+            "scale": 100,
+            "image_builder": lambda region, payload: _build_landslide_risk_class_image(payload, region),
+        },
+        "slopeSteepness": {
+            "title": "Slope Steepness",
+            "filename": "slope_steepness",
+            "scale": 30,
+            "image_builder": lambda region, payload: _build_slope_steepness_image(region),
         },
     }
 
@@ -476,7 +1132,7 @@ def _get_agent_raster_download_payload(payload: Dict[str, Any], scale: Optional[
         raise ValueError("Missing layer_key.")
 
     aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
+    region = build_download_region(aoi)
     image, config = _build_agent_raster_download_image(str(layer_key), region, payload)
     scope_name = _safe_download_name(aoi.get("label") or aoi.get("source"), "aoi")
     filename_base = f"satgpt_{config['filename']}_{scope_name}"
@@ -507,13 +1163,31 @@ def get_agent_raster_download_payload(payload: Dict[str, Any]) -> Dict[str, Any]
 
 
 def _agent_raster_download_scales(layer_key: str, base_scale: int) -> list[int]:
+    if layer_key in {"sentinel2Rgb", "sentinel1Vv"}:
+        return [base_scale, 20, 30, 60, 100, 250]
     if layer_key in {"singleInundationEvent", "inundationHotspot"}:
         return [base_scale, 60, 100, 250]
     if layer_key == "lclu":
         return [base_scale, 20, 30, 50, 100]
     if layer_key == "soilTexture":
         return [base_scale, 500, 1000]
+    if layer_key in {"wildfireRisk", "landslideRisk"}:
+        return [base_scale, 250, 500, 1000]
+    if layer_key == "burnHistory":
+        return [base_scale, 1000]
+    if layer_key == "slopeSteepness":
+        return [base_scale, 60, 100, 250]
     return [base_scale]
+
+
+def _is_download_size_limit_error(error_text: Any) -> bool:
+    normalized = str(error_text or "").lower()
+    return any(marker in normalized for marker in (
+        "total request size",
+        "pixel grid dimensions",
+        "must be less than or equal to 32768",
+        "image is too large",
+    ))
 
 
 def get_agent_raster_download_file(payload: Dict[str, Any]):
@@ -537,12 +1211,20 @@ def get_agent_raster_download_file(payload: Dict[str, Any]):
         except HTTPError as error:
             error_text = error.read().decode("utf-8", errors="replace")
             last_error = error_text or str(error)
-            if "Total request size" not in last_error:
+            if not _is_download_size_limit_error(last_error):
                 break
         except Exception as error:
             last_error = str(error)
-            if "Total request size" not in last_error:
+            if not _is_download_size_limit_error(last_error):
                 break
+
+    if _is_download_size_limit_error(last_error):
+        raise RuntimeError(
+            "The selected AOI is too large or complex for a direct GeoTIFF download: "
+            "Earth Engine rejected the request because its pixel grid or request payload "
+            "still exceeded the direct-download limit at the coarsest available resolution. "
+            "Try a smaller or simpler AOI."
+        )
 
     raise RuntimeError(last_error or "Raster download failed.")
 
@@ -553,44 +1235,17 @@ def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     permanent_water_layer, flood_frequency_map, permanent_water_visual, flood_visual = (
         _build_flood_hotspot_images(payload, region)
     )
-    supplementary_catalog = get_basic_layer_catalog()["supplementary"]
-
-    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-    population_density = ee.Image(
-        supplementary_catalog["populationDensity"]["dataset"]
-    ).clip(region)
-    population_density = visualize_image(
-        population_density, supplementary_catalog["populationDensity"]["visualization"]
-    )
-    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
-        supplementary_catalog["soilTexture"]["band"]
-    )
-    soil_texture = visualize_image(
-        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
-    )
-    healthcare_access = ee.Image(
-        supplementary_catalog["healthCareAccess"]["dataset"]
-    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
-    healthcare_access = visualize_image(
-        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
-    )
-
     content: Dict[str, Any] = {}
     attach_map_id(content, "Flood", flood_visual.getMapId())
     attach_map_id(content, "Water", permanent_water_visual.getMapId())
-    attach_map_id(content, "LCLU", lclu.getMapId())
-    attach_map_id(content, "PopulationDensity", population_density.getMapId())
-    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
-    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+    _attach_supplementary_map_layers(content, region)
     return content
 
 
 def _build_flood_hotspot_images(payload: Dict[str, Any], region: ee.Geometry) -> tuple[ee.Image, ee.Image, ee.Image, ee.Image]:
     basic_layer_catalog = get_basic_layer_catalog()
     hotspot_catalog = basic_layer_catalog["hotspot"]
-    year_from = int(payload.get("year_from") or 1988)
-    year_count = int(payload.get("year_count") or 5)
-    year_to = year_from + year_count
+    year_start, year_end, year_count = _get_jrc_year_range_from_payload(payload)
 
     water_esa2 = ee.ImageCollection(hotspot_catalog["worldCoverPrimaryWater"]["dataset"]).first().eq(
         hotspot_catalog["worldCoverPrimaryWater"]["classValue"]
@@ -599,7 +1254,7 @@ def _build_flood_hotspot_images(payload: Dict[str, Any], region: ee.Geometry) ->
         hotspot_catalog["worldCoverLegacyWater"]["classValue"]
     ).selfMask()
     water_history = ee.ImageCollection(hotspot_catalog["jrcYearlyHistory"]["dataset"]).filter(
-        ee.Filter.calendarRange(year_from, year_to, "year")
+        ee.Filter.calendarRange(year_start, year_end, "year")
     )
 
     masks = water_history.map(lambda image: image.select("waterClass").eq(3))
@@ -656,59 +1311,28 @@ def get_water_regime_change_map_payload(payload: Dict[str, Any]) -> Dict[str, An
         seasonality, supplementary_catalog["seasonality"]["visualization"]
     )
 
-    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-    population_density = ee.Image(
-        supplementary_catalog["populationDensity"]["dataset"]
-    ).clip(region)
-    population_density = visualize_image(
-        population_density, supplementary_catalog["populationDensity"]["visualization"]
-    )
-    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
-        supplementary_catalog["soilTexture"]["band"]
-    )
-    soil_texture = visualize_image(
-        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
-    )
-    healthcare_access = ee.Image(
-        supplementary_catalog["healthCareAccess"]["dataset"]
-    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
-    healthcare_access = visualize_image(
-        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
-    )
-
     content: Dict[str, Any] = {}
     attach_map_id(content, "RegimeChange", regime_change.getMapId())
     attach_map_id(content, "Seasonality", seasonality.getMapId())
-    attach_map_id(content, "LCLU", lclu.getMapId())
-    attach_map_id(content, "PopulationDensity", population_density.getMapId())
-    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
-    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
+    _attach_supplementary_map_layers(content, region)
     return content
 
 
 def _configure_openai() -> None:
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    api_base = os.getenv("OPENAI_API_BASE")
-    if api_base:
-        openai.api_base = api_base
+    openai.api_key = required_env("OPENAI_API_KEY")
+    openai.api_base = required_env("OPENAI_API_BASE")
 
 
 def _get_llm_model() -> str:
-    return os.getenv("LLM_MODEL", "gpt-4o-mini")
+    return required_env("LLM_MODEL")
 
 
 def _create_chat_completion(model: str, messages: list[dict[str, str]], functions: Optional[list[dict[str, Any]]] = None):
-    api_key = os.getenv("OPENAI_API_KEY")
-    api_base = os.getenv("OPENAI_API_BASE")
+    api_key = required_env("OPENAI_API_KEY")
+    api_base = required_env("OPENAI_API_BASE")
 
     if OpenAI is not None:
-        client_kwargs: Dict[str, Any] = {}
-        if api_key:
-            client_kwargs["api_key"] = api_key
-        if api_base:
-            client_kwargs["base_url"] = api_base
-
-        client = OpenAI(**client_kwargs)
+        client = OpenAI(api_key=api_key, base_url=api_base)
         request_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -833,17 +1457,6 @@ def get_code_response(user_input: str) -> Optional[str]:
         return json_data["response"][0]["script"]
     except Exception:
         return None
-
-
-def remember_latest_script(script: str) -> None:
-    global _LATEST_SCRIPT
-    with _LATEST_SCRIPT_LOCK:
-        _LATEST_SCRIPT = script
-
-
-def get_latest_script() -> Optional[str]:
-    with _LATEST_SCRIPT_LOCK:
-        return _LATEST_SCRIPT
 
 
 def build_script_pdf(script: str) -> bytes:

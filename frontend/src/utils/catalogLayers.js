@@ -226,6 +226,18 @@ export const getCatalogMapLayerId = (layerId) => `agent-rec-${String(layerId || 
 
 export const isCatalogMapLayerId = (id) => String(id || '').startsWith('agent-rec-');
 
+export const shouldReuseCatalogMapLayer = ({
+  previousSignature,
+  nextSignature,
+  hasLayer,
+  hasSource,
+}) => Boolean(
+  previousSignature
+  && previousSignature === nextSignature
+  && hasLayer
+  && hasSource
+);
+
 export const getCatalogDefaultOpacity = (descriptor) => {
   const uiProfile = getRuntimeUiProfile(descriptor);
   const fallback = getLegendSpec(descriptor)?.type === 'vector' ? 0.9 : 0.82;
