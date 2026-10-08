@@ -154,6 +154,12 @@ const useStableReference = (value, signature) => {
 };
 
 export const buildFloodAgentViewState = (state) => ({
+  event: state.event,
+  pre_date: state.pre_date,
+  peek_date: state.peek_date,
+  after_date: state.after_date,
+  user_confirmed: state.user_confirmed === true,
+  stage: state.stage,
   location: state.location,
   coordinates: state.coordinates,
   bounds: state.bounds,
@@ -230,11 +236,15 @@ export default function useFloodAgentStateAdapter({ state, fallbackState }) {
     recommendation_source: rawState?.recommendation_source || null,
     confirmation_version: rawState?.confirmation_version || 0,
     gee_code: rawState?.gee_code || null,
+    user_confirmed: rawState?.user_confirmed === true,
+    stage: rawState?.stage || 'initial',
   }), [
     rawState?.after_date,
     rawState?.confirmation_version,
     rawState?.event,
     rawState?.gee_code,
+    rawState?.user_confirmed,
+    rawState?.stage,
     rawState?.location,
     rawState?.peek_date,
     rawState?.pre_date,

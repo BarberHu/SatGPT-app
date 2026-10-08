@@ -4,6 +4,7 @@ import AgentDisasterRail from './AgentDisasterRail';
 import AgentWorkspaceSidebar from './AgentWorkspaceSidebar';
 import ControlPanel from './ControlPanel';
 import LocationScopePicker from './LocationScopePicker';
+import FloodAgentViewSync from './FloodAgentViewSync';
 
 // 浏览器始终通过当前站点的反向代理访问 CopilotKit Runtime。
 const COPILOTKIT_URL = '/copilotkit';
@@ -15,6 +16,7 @@ function AgentExperience({ onError, sidebarProfiler }) {
       agent="flood_agent"
       onError={onError}
     >
+      <FloodAgentViewSync />
       <AgentDisasterRail />
       <div className="ui agent-control-panel-ui">
         <ControlPanel />

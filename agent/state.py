@@ -37,7 +37,8 @@ class FloodAgentState(CopilotKitState, total=False):
     # 是否是有效的洪水事件查询
     is_valid_flood_query: bool
     
-    # 工作流阶段: "initial" -> "pending_confirmation" -> "confirmed" -> "completed"
+    # 工作流阶段: initial -> awaiting_workflow_event_confirmation ->
+    # pending_confirmation -> awaiting_user_confirmation -> confirmed -> completed
     # initial: 初始状态
     # pending_confirmation: 等待用户确认事件信息
     # confirmed: 用户已确认，可以获取地理数据和生成报告
@@ -46,6 +47,9 @@ class FloodAgentState(CopilotKitState, total=False):
     
     # 用户是否已确认事件信息
     user_confirmed: bool
+
+    # Preserve the explicit scope while the user supplies dates or says yes.
+    spatial_scope_message: str
     
     # 事件地理位置
     location: str

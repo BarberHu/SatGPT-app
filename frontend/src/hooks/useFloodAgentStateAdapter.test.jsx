@@ -52,7 +52,7 @@ describe('useFloodAgentStateAdapter', () => {
     expect(expose.current.currentState.recommended_layers).toBe(firstLayers);
   });
 
-  test('publishes a view projection without conversation-only fields', () => {
+  test('shares confirmed event dates with map panels without copying report text', () => {
     const viewState = buildFloodAgentViewState({
       event: 'Conversation event',
       flood_report: 'Conversation report',
@@ -71,11 +71,28 @@ describe('useFloodAgentStateAdapter', () => {
       recommendation_strategy: null,
       recommendation_source: null,
       confirmation_version: 1,
+      user_confirmed: true,
+      stage: 'completed',
     });
 
-    expect(viewState.event).toBeUndefined();
+    expect(viewState.event).toBe('Conversation event');
     expect(viewState.flood_report).toBeUndefined();
-    expect(viewState.pre_date).toBeUndefined();
+    expect(viewState.pre_date).toBe('2024-01-01');
+    expect(viewState.peek_date).toBe('2024-01-02');
+    expect(viewState.after_date).toBe('2024-01-03');
+    expect(viewState.user_confirmed).toBe(true);
+    expect(viewState.stage).toBe('completed');
     expect(viewState.location).toBe('Nanjing');
+  });
+
+  test('propagates confirmation changes without treating a resolved AOI as consent', () => {
+    const state = { event: 'Nepal flood', confirmed_aoi: { id: 'rasuwa' } };
+    act(() => root.render(<HookHarness options={{ state }} expose={expose} />));
+    expect(expose.current.currentState.user_confirmed).toBe(false);
+    act(() => root.render(<HookHarness options={{ state: { ...state, user_confirmed: true, stage: 'confirmed' } }} expose={expose} />));
+    expect(expose.current.currentState.user_confirmed).toBe(true);
+    expect(expose.current.currentState.stage).toBe('confirmed');
+    act(() => root.render(<HookHarness options={{ state: { ...state, user_confirmed: false } }} expose={expose} />));
+    expect(expose.current.currentState.user_confirmed).toBe(false);
   });
 });

@@ -497,8 +497,7 @@ async def get_flood_imagery(request: FloodImageRequest):
         )
 
     try:
-        # 复杂 AOI（如大型流域边界，数万顶点）会让 GEE 的 filterBounds/clip 显著变慢，
-        # 影像展示对边界精度要求低，统一抽稀到 64KB 预算内以加速检索与瓦片渲染。
+        # Validate and unwrap the AOI without moving the selected boundary.
         if request.geojson:
             request.geojson = thin_geojson_geometry(request.geojson)
 
@@ -577,6 +576,8 @@ async def get_flood_imagery(request: FloodImageRequest):
         }
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as e:
         logger.exception(
             "[flood-images] request:error duration_ms=%s summary=%s error=%s",

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { getFloodImages, getFloodImpact } from '../services/agentApi';
 import { startAgentDiagnosticSpan } from '../utils/agentDiagnostics';
 import useFloodAnalysisRequests from './useFloodAnalysisRequests';
+import { buildAoiSignature } from '../utils/aoi';
 
 vi.mock('../services/agentApi', () => ({
   getFloodImages: vi.fn(),
@@ -78,7 +79,7 @@ describe('useFloodAnalysisRequests', () => {
   test('releases a failed imagery request so the same request can retry', async () => {
     getFloodImages
       .mockRejectedValueOnce(new Error('temporary failure'))
-      .mockResolvedValueOnce({ success: true, data: { flood_detection: 'tile' } });
+      .mockResolvedValueOnce({ success: true, data: { flood_detection: { tile_url: 'tile' } } });
     const requestState = {
       pre_date: options.currentPreDate,
       peek_date: options.currentPeekDate,
@@ -98,7 +99,9 @@ describe('useFloodAnalysisRequests', () => {
       true,
       false,
     ]);
-    expect(options.setAgentImagery).toHaveBeenLastCalledWith({ flood_detection: 'tile' });
+    expect(options.setAgentImagery.mock.calls.at(-1)[0](null)).toEqual({
+      flood_detection: { tile_url: 'tile' }, imagery_aoi_signature: buildAoiSignature(options.effectiveAoi),
+    });
   });
 
   test('aborts imagery and impact requests when the analysis context becomes inactive', async () => {
@@ -120,5 +123,62 @@ describe('useFloodAnalysisRequests', () => {
 
     expect(imagerySignal.aborted).toBe(true);
     expect(impactSignal.aborted).toBe(true);
+  });
+
+  test('reports missing imagery inside HTTP-success data and allows retry', async () => {
+    const unavailable = { peek_date: { sentinel1: { error: 'No SAR imagery in window' } } };
+    getFloodImages.mockResolvedValueOnce({ success: true, data: unavailable })
+      .mockResolvedValueOnce({ success: true, data: { peek_date: { sentinel1: { tile_url: 'sar-tile' } } } });
+    const requestState = { pre_date: options.currentPreDate, peek_date: options.currentPeekDate,
+      after_date: options.currentAfterDate, coordinates: options.currentCoordinates, bounds: options.currentBounds };
+    await act(async () => expose.current.fetchAgentImagery(requestState, options.effectiveAoi));
+    expect(options.setWarning).toHaveBeenLastCalledWith(expect.stringContaining('No SAR imagery in window'));
+    expect(options.setAgentImagery.mock.calls.at(-1)[0](null)).toMatchObject(unavailable);
+    await act(async () => expose.current.fetchAgentImagery(requestState, options.effectiveAoi));
+    expect(getFloodImages).toHaveBeenCalledTimes(2);
+    expect(options.setWarning).toHaveBeenLastCalledWith('');
+  });
+
+  test('preserves a custom imagery result for the same AOI when event analysis finishes', async () => {
+    getFloodImages.mockResolvedValue({ success: true, data: { flood_detection: { tile_url: 'flood' } } });
+    await act(async () => expose.current.fetchAgentImagery({ pre_date: options.currentPreDate,
+      peek_date: options.currentPeekDate, after_date: options.currentAfterDate }, options.effectiveAoi));
+    const custom = { imagery_aoi_signature: buildAoiSignature(options.effectiveAoi),
+      custom_range: { sentinel2: { tile_url: 'custom-optical' } },
+      imagery_window: { start_date: '2024-01-01', end_date: '2024-01-05' } };
+    expect(options.setAgentImagery.mock.calls.at(-1)[0](custom)).toMatchObject({
+      ...custom, flood_detection: { tile_url: 'flood' },
+    });
+    const otherScope = { ...custom, imagery_aoi_signature: 'other-scope' };
+    expect(options.setAgentImagery.mock.calls.at(-1)[0](otherScope).custom_range).toBeUndefined();
+  });
+
+  test('ignores a late response after consent is withdrawn, even if transport ignores abort', async () => {
+    const pending = deferred();
+    getFloodImages.mockReturnValue(pending.promise);
+    const active = createOptions({ analysisDisplayEnabled: true });
+    await act(async () => root.render(<HookHarness options={active} expose={expose} />));
+    act(() => root.render(<HookHarness options={{ ...active, analysisDisplayEnabled: false }} expose={expose} />));
+    active.setAgentImagery.mockClear();
+    active.setWarning.mockClear();
+    await act(async () => pending.resolve({ success: true, data: { flood_detection: { tile_url: 'old' } } }));
+    expect(active.setAgentImagery).not.toHaveBeenCalled();
+    expect(active.setWarning).not.toHaveBeenCalled();
+  });
+
+  test('a cancelled request cannot finish the loading state of a restarted identical request', async () => {
+    const first = deferred();
+    const second = deferred();
+    getFloodImages.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const active = createOptions({ analysisDisplayEnabled: true });
+    await act(async () => root.render(<HookHarness options={active} expose={expose} />));
+    act(() => root.render(<HookHarness options={{ ...active, analysisDisplayEnabled: false }} expose={expose} />));
+    await act(async () => root.render(<HookHarness options={active} expose={expose} />));
+    expect(active.setAgentImageryLoading).toHaveBeenLastCalledWith(true);
+    await act(async () => first.resolve({ success: true, data: { flood_detection: { tile_url: 'old' } } }));
+    expect(active.setAgentImageryLoading).toHaveBeenLastCalledWith(true);
+    await act(async () => second.resolve({ success: true, data: { flood_detection: { tile_url: 'new' } } }));
+    expect(active.setAgentImageryLoading).toHaveBeenLastCalledWith(false);
+    expect(active.setAgentImagery.mock.calls.at(-1)[0](null).flood_detection.tile_url).toBe('new');
   });
 });

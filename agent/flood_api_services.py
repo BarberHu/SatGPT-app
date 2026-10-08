@@ -20,6 +20,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from project_env import load_project_env, required_env
+from boundary_geometry import exact_polygon_geometry
 
 
 load_project_env()
@@ -39,8 +40,6 @@ AGENT_RASTER_LAYER_KEYS = {
     "populationDensity",
     "soilTexture",
 }
-JRC_YEARLY_HISTORY_MIN_YEAR = 1984
-JRC_YEARLY_HISTORY_MAX_YEAR = 2021
 DEFAULT_RISK_WINDOW_DAYS = 60
 WILDFIRE_RISK_PALETTE = ["#2E7D32", "#FDD835", "#FF8F00", "#E53935", "#B71C1C"]
 LANDSLIDE_RISK_PALETTE = ["#1565C0", "#42A5F5", "#FFC107", "#FF6F00", "#D84315"]
@@ -52,6 +51,22 @@ def _load_layer_catalog() -> Dict[str, Any]:
 
 def get_basic_layer_catalog() -> Dict[str, Any]:
     return _load_layer_catalog()["basic"]
+
+
+JRC_YEARLY_HISTORY_CONFIG = get_basic_layer_catalog()["jrcYearlyHistory"]
+JRC_YEARLY_HISTORY_MIN_YEAR = JRC_YEARLY_HISTORY_CONFIG["minYear"]
+JRC_YEARLY_HISTORY_MAX_YEAR = JRC_YEARLY_HISTORY_CONFIG["maxYear"]
+
+
+def _build_jrc_yearly_history_collection() -> ee.ImageCollection:
+    """Merge annual history without duplicating the reprocessed 2016-2021 years."""
+    collection = ee.ImageCollection([])
+    for source in JRC_YEARLY_HISTORY_CONFIG["sources"]:
+        annual_history = ee.ImageCollection(source["dataset"]).filter(
+            ee.Filter.calendarRange(source["startYear"], source["endYear"], "year")
+        ).select("waterClass")
+        collection = collection.merge(annual_history)
+    return collection.sort("system:time_start")
 
 
 def _deserialize_payload_value(value: Any) -> Any:
@@ -120,7 +135,7 @@ def parse_aoi_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 def aoi_to_ee_geometry(aoi: Dict[str, Any]) -> ee.Geometry:
     geometry = extract_geojson_geometry(aoi.get("geojson"))
     if geometry:
-        return ee.Geometry(geometry)
+        return ee.Geometry(exact_polygon_geometry(aoi["geojson"]))
 
     bounds = aoi.get("bounds")
     if is_valid_bounds(bounds):
@@ -132,97 +147,13 @@ def aoi_to_ee_geometry(aoi: Dict[str, Any]) -> ee.Geometry:
         ])
 
     raise ValueError("AOI payload does not include geojson or bounds.")
-
-
-# Earth Engine rejects download requests whose serialized payload exceeds ~48 MB
-# ("Total request size (X bytes) must be less than or equal to Y bytes."). Complex AOI
-# polygons (uploaded boundaries, basin outlines) dominate that payload and are embedded
-# twice for downloads (once by .clip(), once as the region parameter), so thin oversized
-# geometries on the client before handing them to Earth Engine.
-DOWNLOAD_GEOMETRY_BUDGET_BYTES = 2_000_000
-_GEOJSON_BYTES_PER_POINT = 48
-
-
-def _geojson_geometry_byte_size(geometry: Dict[str, Any]) -> int:
-    try:
-        return len(json.dumps(geometry, separators=(",", ":")))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _decimate_ring(ring: list, keep_every: int) -> list:
-    if keep_every <= 1 or len(ring) <= 4:
-        return ring
-    thinned = ring[::keep_every]
-    if ring and ring[0] == ring[-1] and (not thinned or thinned[-1] != thinned[0]):
-        thinned.append(thinned[0])
-    # GEE 要求闭合环至少 4 个点（3 个独立点 + 闭合点），否则报
-    # "GeometryConstructors.MultiPolygon: At least 4 points are required ..."。
-    # 混合大小的环统一按 keep_every 抽稀时，小环可能被抽到不足 4 点，保留原环。
-    if len(thinned) < 4:
-        return ring
-    return thinned
-
-
-def _thin_polygon_rings(rings: list, keep_every: int) -> list:
-    return [_decimate_ring(ring, keep_every) for ring in rings if isinstance(ring, list)]
-
-
-def _thin_geojson_geometry(geometry: Dict[str, Any], keep_every: int) -> Dict[str, Any]:
-    geo_type = geometry.get("type")
-    coords = geometry.get("coordinates")
-    if geo_type == "Polygon" and isinstance(coords, list):
-        return {**geometry, "coordinates": _thin_polygon_rings(coords, keep_every)}
-    if geo_type == "MultiPolygon" and isinstance(coords, list):
-        return {
-            **geometry,
-            "coordinates": [
-                _thin_polygon_rings(polygon, keep_every)
-                for polygon in coords
-                if isinstance(polygon, list)
-            ],
-        }
-    return geometry
-
-
-def _thin_geojson_geometry_to_budget(geometry: Dict[str, Any], budget_bytes: int) -> Dict[str, Any]:
-    """Uniformly thin polygon rings until the serialized geometry fits the byte budget."""
-    if _geojson_geometry_byte_size(geometry) <= budget_bytes:
-        return geometry
-
-    coordinates = geometry.get("coordinates")
-    geo_type = geometry.get("type")
-    if geo_type not in ("Polygon", "MultiPolygon") or not isinstance(coordinates, list):
-        return geometry
-
-    if geo_type == "Polygon":
-        point_total = sum(len(ring) for ring in coordinates if isinstance(ring, list))
-    else:
-        point_total = sum(
-            len(ring)
-            for polygon in coordinates
-            if isinstance(polygon, list)
-            for ring in polygon
-            if isinstance(ring, list)
-        )
-    target_points = max(256, budget_bytes // _GEOJSON_BYTES_PER_POINT)
-    keep_every = max(2, -(-point_total // target_points))
-
-    thinned = _thin_geojson_geometry(geometry, keep_every)
-    attempts = 0
-    while _geojson_geometry_byte_size(thinned) > budget_bytes and attempts < 6:
-        keep_every *= 2
-        thinned = _thin_geojson_geometry(geometry, keep_every)
-        attempts += 1
-    return thinned
 
 
 def build_download_region(aoi: Dict[str, Any]) -> ee.Geometry:
-    """AOI geometry for GeoTIFF downloads, thinned when it would blow up the request size."""
+    """Use the selected boundary exactly for GeoTIFF downloads."""
     geometry = extract_geojson_geometry(aoi.get("geojson"))
     if geometry:
-        thinned = _thin_geojson_geometry_to_budget(geometry, DOWNLOAD_GEOMETRY_BUDGET_BYTES)
-        return ee.Geometry(thinned)
+        return ee.Geometry(exact_polygon_geometry(aoi["geojson"]))
 
     bounds = aoi.get("bounds")
     if is_valid_bounds(bounds):
@@ -236,8 +167,7 @@ def build_download_region(aoi: Dict[str, Any]) -> ee.Geometry:
     raise ValueError("AOI payload does not include geojson or bounds.")
 
 
-# 影像场景的几何预算：约 2500 个顶点。流域尺度下显示无差别，
-# 但能避免数万顶点的 AOI 拖慢 GEE 检索与每片瓦片的 clip 计算。
+# Retained default argument for compatibility; no automatic geometry sampling.
 IMAGERY_GEOMETRY_BUDGET_BYTES = 64 * 1024
 
 
@@ -245,16 +175,12 @@ def thin_geojson_geometry(
     geometry: Dict[str, Any],
     budget_bytes: int = IMAGERY_GEOMETRY_BUDGET_BYTES,
 ) -> Dict[str, Any]:
-    """公开接口：把 GeoJSON geometry 均匀抽稀到字节预算内。
+    """Legacy name retained for callers; preserve the exact checked AOI now.
 
-    影像/瓦片场景对边界精度要求低，但超大 AOI（如流域边界，动辄数万顶点）
-    会让 GEE 的 filterBounds/clip 每次瓦片请求都显著变慢，统一抽稀可大幅加速。
-
-    会先把 Feature / FeatureCollection 解包成纯几何（ee.Geometry 不接受
-    Feature 包裹结构，否则报 "Invalid GeoJSON geometry"），非多边形类型原样返回。
+    Sampling vertices can move a coastline, break rings, or change small islands.
+    Large requests must fail explicitly rather than silently reshape the area.
     """
-    unpacked = extract_geojson_geometry(geometry) or geometry
-    return _thin_geojson_geometry_to_budget(unpacked, budget_bytes)
+    return exact_polygon_geometry(geometry)
 
 
 def visualize_image(image: ee.Image, vis_params: Dict[str, Any]) -> ee.Image:
@@ -392,17 +318,18 @@ def _build_single_inundation_images(payload: Dict[str, Any], region: ee.Geometry
     else:
         start_year = max(start_year, JRC_YEARLY_HISTORY_MIN_YEAR)
         end_year = min(end_year, JRC_YEARLY_HISTORY_MAX_YEAR)
+        water_history = _build_jrc_yearly_history_collection().filter(
+            ee.Filter.calendarRange(start_year, end_year, "year")
+        )
         jrc_surface_water = (
-            ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
-            .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
+            water_history
             .map(lambda image: image.select(water_band).eq(historical_catalog["water"]["matchValue"]))
             .sum()
             .rename(water_band)
             .clip(region)
         )
         jrc_surface_flood = (
-            ee.ImageCollection(historical_catalog["jrcYearlyHistory"]["dataset"])
-            .filter(ee.Filter.calendarRange(start_year, end_year, "year"))
+            water_history
             .map(lambda image: image.select(flood_band).eq(historical_catalog["flood"]["matchValue"]))
             .sum()
             .rename(flood_band)
@@ -1253,7 +1180,7 @@ def _build_flood_hotspot_images(payload: Dict[str, Any], region: ee.Geometry) ->
     water_esa1 = ee.ImageCollection(hotspot_catalog["worldCoverLegacyWater"]["dataset"]).first().eq(
         hotspot_catalog["worldCoverLegacyWater"]["classValue"]
     ).selfMask()
-    water_history = ee.ImageCollection(hotspot_catalog["jrcYearlyHistory"]["dataset"]).filter(
+    water_history = _build_jrc_yearly_history_collection().filter(
         ee.Filter.calendarRange(year_start, year_end, "year")
     )
 

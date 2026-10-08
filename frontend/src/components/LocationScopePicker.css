@@ -191,6 +191,8 @@
 }
 
 .location-scope-picker-feedback {
+  background: #eff6ff;
+  color: #1e40af;
   padding: 7px 9px;
   border-radius: 9px;
   font-size: 12px;
@@ -261,7 +263,7 @@
 .location-scope-candidate-meta {
   color: #3f3f46;
   font-size: 11px;
-  text-transform: lowercase;
+  line-height: 1.4;
 }
 
 .location-scope-candidate-check {

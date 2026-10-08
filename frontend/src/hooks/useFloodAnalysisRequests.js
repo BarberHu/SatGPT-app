@@ -5,6 +5,7 @@ import { trackUxEvent } from '../utils/analytics';
 import { startAgentDiagnosticSpan } from '../utils/agentDiagnostics';
 import { finalizeLatestRequest } from '../utils/latestRequest';
 import { formatCoordinatePart } from './useFloodAgentStateAdapter';
+import { summarizeFloodImagery } from '../utils/floodWorkflow';
 
 export default function useFloodAnalysisRequests({
   analysisDisplayEnabled,
@@ -32,10 +33,14 @@ export default function useFloodAnalysisRequests({
   const impactAbortControllerRef = useRef(null);
 
   useEffect(() => () => {
+    imageryRequestKeyRef.current = null;
+    impactRequestKeyRef.current = null;
     imageryAbortControllerRef.current?.abort();
     imageryAbortControllerRef.current = null;
     impactAbortControllerRef.current?.abort();
     impactAbortControllerRef.current = null;
+    setAgentImageryLoading(false);
+    setAgentImpactLoading(false);
   }, []);
 
   const fetchAgentImagery = useCallback(async (agentState, aoi) => {
@@ -61,7 +66,11 @@ export default function useFloodAnalysisRequests({
     impactAbortControllerRef.current = null;
     impactRequestKeyRef.current = null;
     setAgentImpactLoading(false);
-    setAgentImagery(null);
+    const aoiSignature = buildAoiSignature(aoi, agentState.bounds);
+    setAgentImagery((previous) => previous?.imagery_aoi_signature === aoiSignature
+      ? { imagery_aoi_signature: aoiSignature, imagery_window: previous.imagery_window,
+        custom_range: previous.custom_range }
+      : null);
     setAgentImpactData(null);
     setAgentTileError(null);
     setAgentImageryLoading(true);
@@ -89,7 +98,7 @@ export default function useFloodAnalysisRequests({
         geojson: aoi?.geojson?.geometry || agentState.geojson?.geometry || null,
       }, { signal: requestController.signal });
 
-      if (imageryRequestKeyRef.current !== requestKey) {
+      if (requestController.signal.aborted || imageryRequestKeyRef.current !== requestKey) {
         finishImagerySpan({ status: 'stale' });
         return;
       }
@@ -98,19 +107,25 @@ export default function useFloodAnalysisRequests({
         throw new Error('Flood imagery response was not successful.');
       }
 
-      setAgentImagery(result.data);
-      setWarning('');
+      const imagerySummary = summarizeFloodImagery(result.data);
+      releaseRequestKeyForRetry = !imagerySummary.hasTiles;
+      setAgentImagery((previous) => ({
+        ...(previous?.imagery_aoi_signature === aoiSignature ? previous : {}),
+        ...result.data,
+        imagery_aoi_signature: aoiSignature,
+      }));
+      setWarning(imagerySummary.warning);
       finishImagerySpan({
-        status: 'success',
-        hasFloodDetection: Boolean(result?.data?.flood_detection),
+        status: imagerySummary.hasTiles ? 'success' : 'unavailable',
+        hasFloodDetection: Boolean(result?.data?.flood_detection?.tile_url),
         periods: Object.keys(result?.data || {}).filter((key) => key.endsWith('_date')),
       });
-      trackUxEvent('imagery_request_success', {
+      trackUxEvent(imagerySummary.hasTiles ? 'imagery_request_success' : 'imagery_request_fail', {
         source: aoi?.source || 'agent',
         mode: 'agent',
       });
     } catch (error) {
-      if (error?.isCanceled) {
+      if (requestController.signal.aborted || error?.isCanceled) {
         finishImagerySpan({ status: 'cancelled' });
         return;
       }
@@ -121,6 +136,11 @@ export default function useFloodAnalysisRequests({
       releaseRequestKeyForRetry = true;
       finishImagerySpan({ status: 'error', error: error?.message || 'unknown' });
       setWarning(error?.message || 'Flood imagery request failed.');
+      setAgentImagery((previous) => ({
+        ...(previous?.imagery_aoi_signature === aoiSignature ? previous : {}),
+        imagery_aoi_signature: aoiSignature,
+        flood_detection: { error: error?.message || 'Flood imagery request failed.' },
+      }));
       trackUxEvent('imagery_request_fail', {
         mode: 'agent',
         error: error?.message || 'Unknown imagery error',
@@ -128,13 +148,13 @@ export default function useFloodAnalysisRequests({
     } finally {
       if (imageryAbortControllerRef.current === requestController) {
         imageryAbortControllerRef.current = null;
+        finalizeLatestRequest({
+          requestKeyRef: imageryRequestKeyRef,
+          requestKey,
+          setLoading: setAgentImageryLoading,
+          releaseForRetry: releaseRequestKeyForRetry,
+        });
       }
-      finalizeLatestRequest({
-        requestKeyRef: imageryRequestKeyRef,
-        requestKey,
-        setLoading: setAgentImageryLoading,
-        releaseForRetry: releaseRequestKeyForRetry,
-      });
     }
   }, [
     setAgentImagery,
@@ -217,7 +237,7 @@ export default function useFloodAnalysisRequests({
         geojson: effectiveAoi?.geojson?.geometry || currentGeojson || null,
       }, { signal: requestController.signal });
 
-      if (impactRequestKeyRef.current !== requestKey) {
+      if (requestController.signal.aborted || impactRequestKeyRef.current !== requestKey) {
         finishImpactSpan({ status: 'stale' });
         return;
       }
@@ -232,7 +252,7 @@ export default function useFloodAnalysisRequests({
         });
       }
     } catch (error) {
-      if (error?.isCanceled) {
+      if (requestController.signal.aborted || error?.isCanceled) {
         finishImpactSpan({ status: 'cancelled' });
         return;
       }
@@ -250,13 +270,13 @@ export default function useFloodAnalysisRequests({
     } finally {
       if (impactAbortControllerRef.current === requestController) {
         impactAbortControllerRef.current = null;
+        finalizeLatestRequest({
+          requestKeyRef: impactRequestKeyRef,
+          requestKey,
+          setLoading: setAgentImpactLoading,
+          releaseForRetry: releaseRequestKeyForRetry,
+        });
       }
-      finalizeLatestRequest({
-        requestKeyRef: impactRequestKeyRef,
-        requestKey,
-        setLoading: setAgentImpactLoading,
-        releaseForRetry: releaseRequestKeyForRetry,
-      });
     }
   }, [
     analysisDisplayEnabled,

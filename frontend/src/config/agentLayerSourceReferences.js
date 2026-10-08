@@ -1,3 +1,5 @@
+import layerCatalog from './layerCatalog.json';
+
 export const AGENT_LAYER_SOURCE_REFERENCES = {
   sentinel1: {
     datasetId: 'COPERNICUS/S1_GRD',
@@ -33,15 +35,15 @@ export const AGENT_LAYER_SOURCE_REFERENCES = {
     officialUrl: 'https://developers.google.com/earth-engine/datasets/catalog/JRC_GSW1_4_GlobalSurfaceWater',
   },
   jrcGswYearlyHistory: {
-    datasetId: 'JRC/GSW1_4/YearlyHistory',
+    datasetId: layerCatalog.basic.jrcYearlyHistory.sources.map((source) => source.dataset).join(' + '),
     producer: 'EC JRC / Google',
     resolution: '30m Landsat-derived yearly water classification',
-    contentDate: '1984 to 2021 yearly history in Earth Engine catalog',
+    contentDate: '1984-2024; v1.4 for 1984-2015, corrected v1.5 for 2016-2021, v1.5 for 2022-2024',
     license: 'Copernicus Programme; free use with proper acknowledgement',
     overview: 'JRC Yearly Water Classification History stores annual surface-water classes. SatGPT uses class 3 as permanent water, class 2 as seasonal inundation, and multi-year frequency to identify inundation hotspots.',
-    cautions: 'The layer is historical and Landsat-derived. It is not a real-time flood product; hotspot frequency depends on the selected baseline year, duration, AOI, and long-term water classification quality.',
+    cautions: 'Annual data ends in 2024; use Flood Detection for 2025-2026 events. Seasonal water is not proof of a flood event. The Landsat Collection 1/2 transition can introduce spatial offsets from 2022 onward.',
     citation: 'Pekel et al. 2016. High-resolution mapping of global surface water and its long-term changes. Nature 540, 418-422. doi:10.1038/nature20584.',
-    officialUrl: 'https://developers.google.com/earth-engine/datasets/catalog/JRC_GSW1_4_YearlyHistory',
+    officialUrl: 'https://global-surface-water.appspot.com/download',
   },
   populationDensity: {
     datasetId: 'CIESIN/GPWv411/GPW_UNWPP-Adjusted_Population_Density',

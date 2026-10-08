@@ -21,6 +21,8 @@ export const DEFAULT_FLOOD_AGENT_STATE = {
   search_sources: null,
   gee_code: null,
   is_valid_flood_query: false,
+  user_confirmed: false,
+  stage: 'initial',
 };
 
 export const createDefaultFloodAgentState = () => ({
@@ -30,6 +32,9 @@ export const createDefaultFloodAgentState = () => ({
 });
 
 export const createDefaultAgentAnalysisContext = () => ({
+  event: null,
+  user_confirmed: false,
+  stage: 'initial',
   pre_date: null,
   after_date: null,
   peek_date: null,

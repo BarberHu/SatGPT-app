@@ -3,6 +3,7 @@ import { useCopilotContext } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import { trackUxEvent } from '../utils/analytics';
 import AgentChatPane from './AgentChatPane';
+import FloodImageryStatus from './FloodImageryStatus';
 import './AgentWorkspaceSidebar.css';
 
 const AGENT_MODULE_TITLE = {
@@ -83,9 +84,12 @@ function AgentWorkspaceSidebar() {
       </div>
 
       {!agentSidebarCollapsed ? (
-        <div className="agent-workspace-sidebar__body">
-          <AgentChatPane />
-        </div>
+        <>
+          <FloodImageryStatus />
+          <div className="agent-workspace-sidebar__body">
+            <AgentChatPane />
+          </div>
+        </>
       ) : null}
     </aside>
   );

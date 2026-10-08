@@ -5,7 +5,7 @@
  * Supports Human-in-the-Loop (HITL)
  */
 
-import React, { Profiler, startTransition, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { Profiler, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useAppContext } from '../context/AppContext';
 import AgentGeeCodeDownload from './AgentGeeCodeDownload';
@@ -22,7 +22,6 @@ import useAgentLayerManagerGroups, {
   resolveSingleInundationDateWindow,
 } from '../hooks/useAgentLayerManagerGroups';
 import useAgentRasterLayerRequest from '../hooks/useAgentRasterLayerRequest';
-import useFloodAnalysisRequests from '../hooks/useFloodAnalysisRequests';
 import useFloodAgentStateAdapter, {
   areAoiScopesEquivalent,
   buildLayerSignature,
@@ -41,6 +40,7 @@ import { buildCatalogLayerContextKey } from '../utils/catalogLayerContext';
 import { isBusinessLayerAoiSource } from '../utils/businessLayerStore';
 import { FLOOD_RASTER_LAYER_CONFIG } from '../config/agentRasterLayerConfig';
 import { DEFAULT_FLOOD_AGENT_STATE } from '../config/floodAgentState';
+import { canStartFloodAnalysis } from '../utils/floodWorkflow';
 import {
   createReactProfilerHandler,
   updateAgentDiagnosticsContext,
@@ -52,26 +52,14 @@ import './AgentPanel.css';
 const EMPTY_ARRAY = [];
 function AgentPanel() {
   const { 
-    setAgentAnalysisContext,
     agentAnalysisContext,
     setWarning,
-    setAgentImagery,
-    setAgentImageryLoading,
     agentImagery,
-    agentImageryLoading,
+    agentFloodImageryLoading: agentImageryLoading,
     // Agent control states from context
     agentShowFloodDetection,
     setAgentShowFloodDetection,
-    agentShowPopulationLayer,
-    setAgentShowPopulationLayer,
-    agentShowUrbanLayer,
-    setAgentShowUrbanLayer,
-    agentShowLandcoverLayer,
-    setAgentShowLandcoverLayer,
-    agentImpactData,
-    setAgentImpactData,
     agentImpactLoading,
-    setAgentImpactLoading,
     layerData,
     agentRecommendedLayerData,
     setAgentRecommendedLayerData,
@@ -84,7 +72,6 @@ function AgentPanel() {
     agentLayerLoading,
     setAgentLayerLoading,
     agentLayerProgress,
-    setAgentTileError,
     mergeLayerData,
     mapInstance,
     selectedAOI,
@@ -129,17 +116,7 @@ function AgentPanel() {
   const previousSelectedAoiSignatureRef = useRef('no-aoi');
   const {
     currentState,
-    hasCoAgentState,
-    viewState: sharedAgentState,
   } = useFloodAgentStateAdapter({ state, fallbackState: agentAnalysisContext });
-
-  useEffect(() => {
-    if (hasCoAgentState) {
-      startTransition(() => {
-        setAgentAnalysisContext(sharedAgentState);
-      });
-    }
-  }, [hasCoAgentState, setAgentAnalysisContext, sharedAgentState]);
 
   const currentConfirmedAoi = currentState?.confirmed_aoi || null;
   const currentResolvedAoi = currentState?.resolved_aoi || null;
@@ -147,7 +124,6 @@ function AgentPanel() {
   const currentBounds = currentState?.bounds || null;
   const currentGeojson = currentState?.geojson || null;
   const currentConfirmationVersion = currentState?.confirmation_version || 0;
-  const currentCoordinates = currentState?.coordinates || null;
   const currentPreDate = currentState?.pre_date || null;
   const currentPeekDate = currentState?.peek_date || null;
   const currentAfterDate = currentState?.after_date || null;
@@ -155,7 +131,6 @@ function AgentPanel() {
   const currentSelectedLayerIds = currentState?.selected_layer_ids || EMPTY_ARRAY;
   const currentGeeCode = currentState?.gee_code || null;
   const currentEvent = currentState?.event || null;
-  const currentRecommendedLayerSignature = buildLayerSignature(currentRecommendedLayers);
   const agentDerivedAoi = useMemo(() => buildAoiFromAgentState({
     confirmed_aoi: currentConfirmedAoi,
     resolved_aoi: currentResolvedAoi,
@@ -176,13 +151,7 @@ function AgentPanel() {
   const analysisScopeMatchesSelection = selectedBusinessScope
     ? areAoiScopesEquivalent(selectedBusinessScope, agentDerivedAoi)
     : true;
-  const hasResolvedAnalysisContext = Boolean(
-    currentEvent
-    && currentPreDate
-    && currentPeekDate
-    && currentAfterDate
-    && (agentDerivedAoi || currentCoordinates)
-  );
+  const hasResolvedAnalysisContext = canStartFloodAnalysis(currentState, agentDerivedAoi);
   const analysisDisplayEnabled = hasResolvedAnalysisContext && analysisScopeMatchesSelection;
   const effectiveAoi = analysisDisplayEnabled ? agentDerivedAoi : null;
   const activeAnalysisAoi = useMemo(
@@ -365,26 +334,6 @@ function AgentPanel() {
     layer,
     dateWindow: getCatalogLayerDateWindow(layer),
   }), [getCatalogLayerDateWindow, recommendedLayerBaseContextKey]);
-  useFloodAnalysisRequests({
-    analysisDisplayEnabled,
-    currentAfterDate,
-    currentBounds,
-    currentCoordinates,
-    currentGeojson,
-    currentPeekDate,
-    currentPreDate,
-    effectiveAoi,
-    effectiveAoiSignature,
-    impactLayerVisible: agentShowPopulationLayer || agentShowUrbanLayer || agentShowLandcoverLayer,
-    agentImpactData,
-    agentImpactLoading,
-    setAgentImagery,
-    setAgentImageryLoading,
-    setAgentImpactData,
-    setAgentImpactLoading,
-    setAgentTileError,
-    setWarning,
-  });
   useRecommendedLayerRenderer({
     agentRecommendedLayerData,
     agentRecommendedLayerVisibility,
@@ -484,6 +433,7 @@ function AgentPanel() {
   const layerManagerGroups = useAgentLayerManagerGroups({
     activeAnalysisAoi,
     agentImagery,
+    agentFloodImageryLoading: agentImageryLoading,
     agentLayerLoading,
     agentLayerProgress,
     agentRasterLayerVisibility,
@@ -555,31 +505,6 @@ function AgentPanel() {
     setAgentLayerOrder,
     setAgentRecommendedLayerData,
     setAgentRecommendedLayerVisibility,
-  ]);
-
-  useEffect(() => {
-    if (!analysisDisplayEnabled) {
-      setAgentShowFloodDetection(false);
-      setAgentShowPopulationLayer(false);
-      setAgentShowUrbanLayer(false);
-      setAgentShowLandcoverLayer(false);
-      return;
-    }
-
-    const selectedIds = new Set(currentSelectedLayerIds);
-    setAgentShowFloodDetection(selectedIds.has('core:flood_detection'));
-    setAgentShowPopulationLayer(false);
-    setAgentShowUrbanLayer(false);
-    setAgentShowLandcoverLayer(false);
-  }, [
-    analysisDisplayEnabled,
-    currentConfirmationVersion,
-    currentSelectedLayerIds,
-    currentRecommendedLayerSignature,
-    setAgentShowFloodDetection,
-    setAgentShowLandcoverLayer,
-    setAgentShowPopulationLayer,
-    setAgentShowUrbanLayer,
   ]);
 
   // Human-in-the-Loop: Handle LangGraph interrupt events

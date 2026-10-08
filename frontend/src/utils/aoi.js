@@ -1,4 +1,13 @@
 const AOI_VERSION = 1;
+export const isUsableAnalysisAoi = (aoi) => {
+  if (!aoi || aoi.can_analyze === false) return false;
+  const properties = aoi.geojson?.properties || {};
+  const sources = [aoi.source, aoi.boundary_source, properties.source, properties.boundary_source];
+  return properties.can_analyze !== false
+    && !sources.some((source) => ['bounds_fallback', 'approximate_boundary', 'unresolved', 'ambiguous'].includes(source))
+    && aoi.status !== 'Approximate boundary' && properties.status !== 'Approximate boundary';
+};
+
 const createAoiId = () =>
   (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
     ? crypto.randomUUID()
@@ -416,7 +425,14 @@ export const buildAoiFromAgentState = (state, overrides = {}) => {
   const preferredAoi = state.confirmed_aoi || state.resolved_aoi || null;
 
   if (preferredAoi?.geojson) {
-    return parseSerializedAoi(preferredAoi);
+    const parsed = parseSerializedAoi(preferredAoi);
+    const geometry = normalizeGeoJSONGeometry(parsed.geojson);
+    const bounds = parsed.bounds || getBoundsFromGeometry(geometry);
+    return bounds ? {
+      ...parsed,
+      bounds,
+      center: parsed.center || getCenterFromBounds(bounds),
+    } : null;
   }
 
   if (state.geojson) {

@@ -149,6 +149,7 @@ export const AppProvider = ({ children }) => {
   // Flood Agent 当前加载的影像结果，用于地图渲染与图层面板显示。
   const [agentImagery, setAgentImagery] = useState(null);
   const [agentImageryLoading, setAgentImageryLoading] = useState(false);
+  const [agentFloodImageryLoading, setAgentFloodImageryLoading] = useState(false);
   const [agentImageryDateWindow, setAgentImageryDateWindow] = useState(defaultAgentImageryDateWindow);
   
   // ========== Agent Mode Control States ==========
@@ -178,6 +179,7 @@ export const AppProvider = ({ children }) => {
   const clearAgentVisualState = useCallback(() => {
     setAgentImagery(null);
     setAgentImageryLoading(false);
+    setAgentFloodImageryLoading(false);
     setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentImpactData(null);
     setAgentImpactLoading(false);
@@ -404,6 +406,7 @@ export const AppProvider = ({ children }) => {
     setAgentAnalysisContext(createDefaultAgentAnalysisContext());
     setAgentImagery(null);
     setAgentImageryLoading(false);
+    setAgentFloodImageryLoading(false);
     setAgentImageryDateWindow(defaultAgentImageryDateWindow);
     setAgentImpactData(null);
     setAgentImpactLoading(false);
@@ -807,6 +810,8 @@ export const AppProvider = ({ children }) => {
     setAgentImagery,
     agentImageryLoading,
     setAgentImageryLoading,
+    agentFloodImageryLoading,
+    setAgentFloodImageryLoading,
     agentImageryDateWindow,
     setAgentImageryDateWindow,
     

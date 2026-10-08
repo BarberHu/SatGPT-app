@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { Calendar, Check, Edit2, Info, Layers3, MapPin, X } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import './EventConfirmation.css';
+import { hasValidFloodDates } from '../utils/floodWorkflow';
+import { isUsableAnalysisAoi } from '../utils/aoi';
 
 const buildEmptySelection = (layers = [], selectedLayerIds = []) =>
   (layers || []).reduce((accumulator, layer) => {
@@ -44,7 +46,8 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
   );
 
   const activeAoi = selectedAOI || formData.confirmed_aoi || formData.resolved_aoi || null;
-  const canConfirm = Boolean(activeAoi && selectedLayerIds.length);
+  const validDates = hasValidFloodDates(formData);
+  const canConfirm = Boolean(isUsableAnalysisAoi(activeAoi) && selectedLayerIds.length && formData.event?.trim() && formData.location?.trim() && validDates);
 
   const handleFieldChange = (field, value) => {
     setFormData((previous) => ({
@@ -61,7 +64,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
   };
 
   const handleConfirm = () => {
-    if (!activeAoi) return;
+    if (!canConfirm) return;
     shouldRestoreAoiRef.current = false;
     onConfirm({
       ...formData,
@@ -216,6 +219,8 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
           </div>
 
           <div className="confirmation-actions">
+            {!isUsableAnalysisAoi(activeAoi) && <span role="alert">Select or upload a usable boundary before confirming.</span>}
+            {!validDates && <span role="alert">Enter valid dates in pre-flood, peak, post-flood order.</span>}
             <button className="btn-cancel" onClick={handleCancel}>
               <X size={16} />
               Cancel

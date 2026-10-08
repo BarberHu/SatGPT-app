@@ -80,6 +80,52 @@ describe('useAgentLayerManagerGroups', () => {
     });
   });
 
+  test('shows a flood-detection error instead of leaving the layer pending', () => {
+    const options = createOptions();
+    options.agentImagery = { flood_detection: { error: 'Insufficient SAR imagery for change detection' } };
+    act(() => root.render(<HookHarness options={options} expose={expose} />));
+    const detection = expose.current[0].items[0];
+    expect(detection).toMatchObject({ checked: false, disabled: true, status: 'Unavailable' });
+    expect(detection.detailText).toContain('Insufficient SAR imagery');
+    expect(detection.infoWarnings).toContain('Insufficient SAR imagery for change detection');
+  });
+
+  test('shows server analysis loading before any map tile URL exists', () => {
+    act(() => root.render(<HookHarness options={{ ...createOptions(), agentImagery: null,
+      agentFloodImageryLoading: true }} expose={expose} />));
+    expect(expose.current[0].items[0]).toMatchObject({ status: 'Loading', loading: true,
+      detailText: 'Loading satellite analysis...', checked: false, disabled: true });
+  });
+
+  test('loads 2024 annual history through both flood sliders', () => {
+    const options = createOptions();
+    options.agentRasterLayerVisibility = { singleInundationEvent: true, inundationHotspot: true };
+    act(() => root.render(<HookHarness options={options} expose={expose} />));
+    const items = expose.current[0].items;
+    const single = items.find((item) => item.id === 'raster-singleInundationEvent');
+    const hotspot = items.find((item) => item.id === 'raster-inundationHotspot');
+
+    expect(single.sliderControl).toMatchObject({ min: 1984, max: 2024, value: [2024, 2024] });
+    expect(hotspot.sliderControl).toMatchObject({ max: 2024, valueLabel: '1984-2024 (41 years)' });
+    single.sliderControl.onCommit([2024, 2024]);
+    hotspot.sliderControl.onCommit([2022, 2024]);
+    expect(options.fetchAgentRasterLayer).toHaveBeenCalledWith('singleInundationEvent', {
+      time_start: '2024-01-01', time_end: '2024-12-31',
+    });
+    expect(options.fetchAgentRasterLayer).toHaveBeenCalledWith('inundationHotspot', {
+      year_start: 2022, year_end: 2024,
+    });
+  });
+
+  test('keeps v1.4 catalog year selection within its own coverage', () => {
+    expect(resolveCatalogLayerDateWindow({
+      temporal_type: 'yearly',
+      execution_profile: { requires_date_range: true },
+    }, { year: 2024 }, { currentPeekDate: '2026-08-01' })).toMatchObject({
+      year: 2021, start_date: '2021-01-01', end_date: '2022-01-01',
+    });
+  });
+
   test('keeps explicit monthly catalog selection deterministic', () => {
     const window = resolveCatalogLayerDateWindow({
       temporal_type: 'monthly',

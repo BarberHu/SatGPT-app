@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getFloodImages } from '../services/agentApi';
 import {
   buildAoiSignature,
+  buildAoiFromAgentState,
   buildAskMapRequestParams,
   resolveAgentAnalysisAoi,
 } from '../utils/aoi';
@@ -9,6 +10,7 @@ import { useAppContext } from '../context/AppContext';
 import useAgentRasterDownload from '../hooks/useAgentRasterDownload';
 import useAgentRasterLayerRequest from '../hooks/useAgentRasterLayerRequest';
 import LayerManager from './LayerManager';
+import { summarizeFloodImagery } from '../utils/floodWorkflow';
 import 'rc-slider/assets/index.css';
 import './AgentPanel.css';
 import './WildfirePanel.css';
@@ -165,9 +167,15 @@ function DisasterLayerPanel({
   } = useAppContext();
 
   const [layerWindows, setLayerWindows] = useState(() => buildDefaultLayerWindows(rasterLayerConfig));
+  const confirmedAnalysisAoi = useMemo(
+    () => agentAnalysisContext?.user_confirmed === true
+      ? buildAoiFromAgentState(agentAnalysisContext)
+      : null,
+    [agentAnalysisContext]
+  );
   const activeAnalysisAoi = useMemo(
-    () => resolveAgentAnalysisAoi(selectedAOI),
-    [selectedAOI]
+    () => resolveAgentAnalysisAoi(selectedAOI, confirmedAnalysisAoi),
+    [selectedAOI, confirmedAnalysisAoi]
   );
   const selectedAoiSignature = useMemo(
     () => buildAoiSignature(activeAnalysisAoi),
@@ -286,6 +294,7 @@ function DisasterLayerPanel({
       if (!result?.success) {
         throw new Error('Imagery response was not successful.');
       }
+      setWarning(summarizeFloodImagery(result.data).warning);
       setAgentImagery((previous) => ({
         ...(previous || {}),
         ...(result.data || {}),

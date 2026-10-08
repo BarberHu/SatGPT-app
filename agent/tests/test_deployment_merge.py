@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+from boundary_geometry import exact_polygon_geometry
 
 
 def load_handlers():
@@ -37,7 +38,7 @@ def load_handlers():
         '_ensure_gee_ready': lambda: None, '_summarize_flood_image_request': lambda request: {},
         '_duration_ms': lambda started: 0,
         'get_default_map_payload': lambda: {'ok': True},
-        'thin_geojson_geometry': lambda geojson: geojson,
+        'thin_geojson_geometry': exact_polygon_geometry,
         'get_default_flood_layer_catalog': lambda: {
             'recommended_layers': [{'id': 'asset:catalog', 'layer_family': 'catalog'}],
             'selected_layer_ids': [],
@@ -100,7 +101,7 @@ class DeploymentMergeTests(unittest.IsolatedAsyncioTestCase):
     async def test_imagery_window_preserves_each_aoi_mode(self):
         base = {'imagery_start_date': '2026-07-01', 'imagery_end_date': '2026-07-03', 'longitude': 118, 'latitude': 32}
         for scope, kind in [
-            ({'geojson': {'type': 'Polygon', 'coordinates': []}}, 'window-geojson'),
+            ({'geojson': {'type': 'Polygon', 'coordinates': [[[117, 31], [119, 31], [119, 33], [117, 31]]]}}, 'window-geojson'),
             ({'bounds': {'west': 117, 'south': 31, 'east': 119, 'north': 33}}, 'window-bounds'),
             ({}, 'window-center'),
         ]:
@@ -111,11 +112,31 @@ class DeploymentMergeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_event_imagery_still_uses_event_dates(self):
         payload = {'pre_date': '2026-07-01', 'peek_date': '2026-07-02', 'after_date': '2026-07-03',
-                   'longitude': 118, 'latitude': 32, 'geojson': {'type': 'Polygon', 'coordinates': []}}
+                   'longitude': 118, 'latitude': 32, 'geojson': {'type': 'Polygon', 'coordinates': [[[117, 31], [119, 31], [119, 33], [117, 31]]]}}
         response = await self.client.post('/api/flood-images', json=payload)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()['data']['kind'], 'event-geojson')
         self.assertEqual(self.ns['gee_service'].get_flood_imagery_by_geojson.call_args.kwargs['peek_date'], payload['peek_date'])
+
+    async def test_invalid_aoi_fails_before_imagery_instead_of_reshaping_it(self):
+        response = await self.client.post('/api/flood-images', json={
+            'pre_date': '2026-07-01', 'peek_date': '2026-07-02', 'after_date': '2026-07-03',
+            'longitude': 0, 'latitude': 0, 'geojson': {'type': 'Polygon', 'coordinates': [
+                [[0, 0], [1, 1], [0, 1], [1, 0], [0, 0]],
+            ]},
+        })
+        self.assertEqual(response.status_code, 400)
+        self.ns['gee_service'].get_flood_imagery_by_geojson.assert_not_called()
+
+    async def test_complex_bangkok_boundary_reaches_imagery_without_vertex_sampling(self):
+        import json
+        feature = json.loads((Path(__file__).resolve().parents[1] / 'data/boundaries/bangkok.geojson').read_text(encoding='utf-8'))
+        response = await self.client.post('/api/flood-images', json={
+            'pre_date': '2026-07-01', 'peek_date': '2026-07-02', 'after_date': '2026-07-03',
+            'longitude': 100.5, 'latitude': 13.7, 'geojson': feature,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.ns['gee_service'].get_flood_imagery_by_geojson.call_args.kwargs['geojson'], feature['geometry'])
 
     async def test_flood_layer_catalog_is_available_before_agent_confirmation(self):
         response = await self.client.get('/api/flood-layer-catalog')

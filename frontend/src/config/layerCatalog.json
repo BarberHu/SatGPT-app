@@ -1,5 +1,26 @@
 {
   "basic": {
+    "jrcYearlyHistory": {
+      "minYear": 1984,
+      "maxYear": 2024,
+      "sources": [
+        {
+          "dataset": "JRC/GSW1_4/YearlyHistory",
+          "startYear": 1984,
+          "endYear": 2015
+        },
+        {
+          "dataset": "projects/global-surface-water/assets/GSW1_5/YearlyHistory_2016_2021",
+          "startYear": 2016,
+          "endYear": 2021
+        },
+        {
+          "dataset": "projects/global-surface-water/assets/GSW1_5/YearlyHistory_2022_2024",
+          "startYear": 2022,
+          "endYear": 2024
+        }
+      ]
+    },
     "unsupervised": {
       "globalSurfaceWater": {
         "dataset": "JRC/GSW1_4/GlobalSurfaceWater",
@@ -9,10 +30,6 @@
       }
     },
     "historical": {
-      "jrcYearlyHistory": {
-        "dataset": "JRC/GSW1_4/YearlyHistory",
-        "version": "1.4"
-      },
       "water": {
         "band": "waterClass",
         "matchValue": 3,
@@ -33,10 +50,6 @@
       }
     },
     "hotspot": {
-      "jrcYearlyHistory": {
-        "dataset": "JRC/GSW1_4/YearlyHistory",
-        "version": "1.4"
-      },
       "worldCoverPrimaryWater": {
         "dataset": "ESA/WorldCover/v200",
         "version": "v200",

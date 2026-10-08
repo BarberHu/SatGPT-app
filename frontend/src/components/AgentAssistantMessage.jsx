@@ -1,6 +1,7 @@
 import React from 'react';
 import { AssistantMessage as DefaultAssistantMessage } from '@copilotkit/react-ui';
 import ReactMarkdown from 'react-markdown';
+import { hasRawToolMarkup, UNSUPPORTED_TOOL_MESSAGE } from '../utils/floodWorkflow';
 
 function getMessageText(content) {
   if (typeof content === 'string') {
@@ -93,6 +94,11 @@ function ReferenceSourcesDisclosure({ markdown }) {
 function AgentAssistantMessage(props) {
   const text = getMessageText(props.message?.content);
   const referenceSections = splitReferenceSources(text);
+
+  if (hasRawToolMarkup(text)) {
+    if (props.isLoading || props.isGenerating) return <AgentThinkingMessage />;
+    return <DefaultAssistantMessage {...props} message={{ ...props.message, content: UNSUPPORTED_TOOL_MESSAGE }} />;
+  }
 
   if (isIntentPayload(text)) {
     return props.isCurrentMessage || props.isLoading ? <AgentThinkingMessage /> : null;

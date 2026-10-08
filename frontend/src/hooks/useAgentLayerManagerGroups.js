@@ -8,18 +8,28 @@ import {
 } from '../utils/catalogTimeDefaults';
 import SOURCE_REFERENCES from '../config/agentLayerSourceReferences';
 import { FLOOD_RASTER_LAYER_CONFIG } from '../config/agentRasterLayerConfig';
+import layerCatalog from '../config/layerCatalog.json';
 
+// Catalog products still use their original v1.4 coverage.
 const JRC_YEARLY_MIN_YEAR = 1984;
 const JRC_YEARLY_MAX_YEAR = 2021;
+const FLOOD_HISTORY_MIN_YEAR = layerCatalog.basic.jrcYearlyHistory.minYear;
+const FLOOD_HISTORY_MAX_YEAR = layerCatalog.basic.jrcYearlyHistory.maxYear;
 export const DEFAULT_HOTSPOT_YEAR_RANGE = resolveDefaultCatalogHistoryRange({
-  minYear: JRC_YEARLY_MIN_YEAR,
-  maxYear: JRC_YEARLY_MAX_YEAR,
+  minYear: FLOOD_HISTORY_MIN_YEAR,
+  maxYear: FLOOD_HISTORY_MAX_YEAR,
 });
 const YEAR_RANGE_MARKS = {
   1984: '1984',
   2000: '2000',
   2010: '2010',
   2021: '2021',
+};
+const FLOOD_HISTORY_YEAR_MARKS = {
+  [FLOOD_HISTORY_MIN_YEAR]: String(FLOOD_HISTORY_MIN_YEAR),
+  2000: '2000',
+  2010: '2010',
+  [FLOOD_HISTORY_MAX_YEAR]: String(FLOOD_HISTORY_MAX_YEAR),
 };
 const MONTH_OPTIONS = [
   { value: 1, label: 'Jan' },
@@ -59,11 +69,19 @@ const clampYear = (value, fallback = JRC_YEARLY_MAX_YEAR) => {
   return Math.min(JRC_YEARLY_MAX_YEAR, Math.max(JRC_YEARLY_MIN_YEAR, Math.trunc(numeric)));
 };
 
+const clampFloodHistoryYear = (value, fallback = FLOOD_HISTORY_MAX_YEAR) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(FLOOD_HISTORY_MAX_YEAR, Math.max(FLOOD_HISTORY_MIN_YEAR, Math.trunc(numeric)));
+};
+
 export const normalizeYearRange = (start, end, fallback = DEFAULT_HOTSPOT_YEAR_RANGE) => {
-  const fallbackStart = Array.isArray(fallback) ? fallback[0] : JRC_YEARLY_MIN_YEAR;
-  const fallbackEnd = Array.isArray(fallback) ? fallback[1] : JRC_YEARLY_MAX_YEAR;
-  const yearStart = clampYear(start, fallbackStart);
-  const yearEnd = Math.max(yearStart, clampYear(end, fallbackEnd));
+  const fallbackStart = Array.isArray(fallback) ? fallback[0] : FLOOD_HISTORY_MIN_YEAR;
+  const fallbackEnd = Array.isArray(fallback) ? fallback[1] : FLOOD_HISTORY_MAX_YEAR;
+  const yearStart = clampFloodHistoryYear(start, fallbackStart);
+  const yearEnd = Math.max(yearStart, clampFloodHistoryYear(end, fallbackEnd));
   return [yearStart, yearEnd];
 };
 
@@ -116,11 +134,11 @@ export const resolveSingleInundationDateWindow = (override = {}, dates = {}) => 
     startDate: dates.currentPreDate,
     peakDate: dates.currentPeekDate,
     endDate: dates.currentAfterDate,
-    minYear: JRC_YEARLY_MIN_YEAR,
-    maxYear: JRC_YEARLY_MAX_YEAR,
+    minYear: FLOOD_HISTORY_MIN_YEAR,
+    maxYear: FLOOD_HISTORY_MAX_YEAR,
   });
-  const yearStart = clampYear(override.year_start ?? defaultStartYear, defaultStartYear);
-  const yearEnd = Math.max(yearStart, clampYear(override.year_end ?? defaultEndYear, defaultEndYear));
+  const yearStart = clampFloodHistoryYear(override.year_start ?? defaultStartYear, defaultStartYear);
+  const yearEnd = Math.max(yearStart, clampFloodHistoryYear(override.year_end ?? defaultEndYear, defaultEndYear));
   return {
     mode: 'year_range',
     year_start: yearStart,
@@ -360,6 +378,7 @@ const LAYER_META = {
 export default function useAgentLayerManagerGroups({
   activeAnalysisAoi,
   agentImagery,
+  agentFloodImageryLoading,
   agentLayerLoading,
   agentLayerProgress,
   agentRasterLayerVisibility,
@@ -394,13 +413,18 @@ export default function useAgentLayerManagerGroups({
   return useMemo(() => {
     const floodDetectionDescriptor = agentImagery?.flood_detection || null;
     const floodDetectionAvailable = Boolean(floodDetectionDescriptor?.tile_url);
-    const floodDetectionLoading = Boolean(agentShowFloodDetection && agentLayerLoading?.['flood-detection']);
+    const floodDetectionLoading = Boolean(agentFloodImageryLoading
+      || (agentShowFloodDetection && agentLayerLoading?.['flood-detection']));
+    const floodDetectionStatus = floodDetectionLoading ? 'Loading'
+      : floodDetectionDescriptor?.error ? 'Unavailable'
+        : floodDetectionAvailable ? (agentShowFloodDetection ? 'Visible' : 'Ready') : 'Pending';
     const floodDetectionItem = analysisDisplayEnabled ? [{
       id: 'core-flood-detection',
       orderId: 'agent-flood-detection',
       defaultOrder: 0,
       draggable: true,
       title: 'Flood Detection',
+      detailText: agentFloodImageryLoading ? 'Loading satellite analysis...' : floodDetectionDescriptor?.error || null,
       infoKicker: 'Analysis layer',
       infoMeta: `${currentPreDate || 'pre-date'} -> ${currentPeekDate || 'peak-date'}`,
       infoText: LAYER_META.flood_detection.description,
@@ -411,7 +435,7 @@ export default function useAgentLayerManagerGroups({
         { label: 'Resolution', value: LAYER_META.flood_detection.resolution },
         { label: 'Content date', value: `${SOURCE_REFERENCES.sentinel1.contentDate}; ${SOURCE_REFERENCES.jrcGsw.contentDate}` },
         { label: 'License', value: `${SOURCE_REFERENCES.sentinel1.license}; JRC: ${SOURCE_REFERENCES.jrcGsw.license}` },
-        { label: 'Status', value: floodDetectionLoading ? 'Loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'Visible' : 'Pending') : (floodDetectionAvailable ? 'Ready' : 'Pending')) },
+        { label: 'Status', value: floodDetectionStatus },
       ],
       infoSections: [
         {
@@ -437,7 +461,10 @@ export default function useAgentLayerManagerGroups({
           text: `${SOURCE_REFERENCES.sentinel1.citation} ${SOURCE_REFERENCES.jrcGsw.citation}`,
         },
       ],
-      infoWarnings: ['Threshold-based flood detection is sensitive to date choice, AOI quality, permanent water masking, and SAR noise.'],
+      infoWarnings: [
+        ...(floodDetectionDescriptor?.error ? [floodDetectionDescriptor.error] : []),
+        'Threshold-based flood detection is sensitive to date choice, AOI quality, permanent water masking, and SAR noise.',
+      ],
       infoLinks: [
         { label: 'Sentinel-1 catalog', href: SOURCE_REFERENCES.sentinel1.officialUrl },
         { label: 'JRC water catalog', href: SOURCE_REFERENCES.jrcGsw.officialUrl },
@@ -448,7 +475,7 @@ export default function useAgentLayerManagerGroups({
       loading: floodDetectionLoading,
       loadProgress: agentLayerProgress?.['flood-detection'],
       checkboxState: floodDetectionLoading ? 'loading' : (floodDetectionAvailable ? 'ready' : 'idle'),
-      status: floodDetectionLoading ? 'Loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'Visible' : 'Pending') : (floodDetectionAvailable ? 'Ready' : 'Pending')),
+      status: floodDetectionStatus,
       tone: floodDetectionLoading ? 'loading' : (agentShowFloodDetection ? (floodDetectionAvailable ? 'ready' : 'pending') : (floodDetectionAvailable ? 'off' : 'pending')),
       onToggle: (event) => {
         if (!floodDetectionAvailable) {
@@ -510,6 +537,7 @@ export default function useAgentLayerManagerGroups({
         defaultOrder: 10 + index,
         draggable: true,
         title: layer.title,
+        detailText: layer.detailText,
         infoKicker: 'Context raster',
         infoMeta: layer.sourceRef.datasetId,
         infoText: layer.infoText,
@@ -583,13 +611,13 @@ export default function useAgentLayerManagerGroups({
           label: 'Hotspot period',
           value: hotspotRange,
           valueLabel: `${hotspotRange[0]}-${hotspotRange[1]} (${hotspotYearCount} years)`,
-          min: JRC_YEARLY_MIN_YEAR,
-          max: JRC_YEARLY_MAX_YEAR,
+          min: FLOOD_HISTORY_MIN_YEAR,
+          max: FLOOD_HISTORY_MAX_YEAR,
           step: 1,
-          marks: YEAR_RANGE_MARKS,
+          marks: FLOOD_HISTORY_YEAR_MARKS,
           pushable: 1,
           disabled: !hasScope || loading,
-          helpText: 'Frequency is computed across the selected inclusive year range.',
+          helpText: 'JRC annual history covers 1984-2024. Use Flood Detection for newer events.',
           onChange: (nextRange) => {
             if (Array.isArray(nextRange)) {
               setHotspotYearRange(normalizeYearRange(nextRange[0], nextRange[1], hotspotRange));
@@ -613,13 +641,13 @@ export default function useAgentLayerManagerGroups({
           label: 'Year range',
           value: [singleEventWindow.year_start, singleEventWindow.year_end],
           valueLabel: singleEventWindow.valueLabel,
-          min: JRC_YEARLY_MIN_YEAR,
-          max: JRC_YEARLY_MAX_YEAR,
+          min: FLOOD_HISTORY_MIN_YEAR,
+          max: FLOOD_HISTORY_MAX_YEAR,
           step: 1,
-          marks: YEAR_RANGE_MARKS,
+          marks: FLOOD_HISTORY_YEAR_MARKS,
           pushable: 1,
           disabled: !hasScope || loading,
-          helpText: 'JRC yearly classes are annual, so the slider uses whole years.',
+          helpText: 'JRC annual history covers 1984-2024. Use Flood Detection for newer events.',
           onChange: (nextRange) => {
             if (!Array.isArray(nextRange)) {
               return;
@@ -959,6 +987,7 @@ export default function useAgentLayerManagerGroups({
     return groups;
   }, [
     agentImagery,
+    agentFloodImageryLoading,
     agentLayerLoading,
     agentLayerProgress,
     agentRasterLayerVisibility,

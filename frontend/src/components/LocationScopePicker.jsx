@@ -3,10 +3,23 @@ import { createPortal } from 'react-dom';
 import { Search } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { searchLocationCandidates } from '../services/agentApi';
+import { isUsableAnalysisAoi } from '../utils/aoi';
 import './LocationScopePicker.css';
 
 const PREVIEW_SOURCE = 'location_search_preview';
 const IMPORT_SOURCE = 'place_search';
+
+function getBoundarySourceLabel(candidate) {
+  if (candidate.source_label) return candidate.source_label;
+  const labels = {
+    osm_boundary: 'OpenStreetMap boundary',
+    official_boundary: 'Administrative boundary',
+    reference_boundary: 'Reference boundary',
+    bounds_fallback: 'Approximate search area',
+    approximate_boundary: 'Approximate boundary',
+  };
+  return labels[candidate.source] || 'Search boundary';
+}
 
 function buildPlaceScopeLabel(rawLabel) {
   const normalized = String(rawLabel || '').trim();
@@ -14,16 +27,12 @@ function buildPlaceScopeLabel(rawLabel) {
     return '';
   }
 
-  const firstSegment = normalized
-    .split(/[，,]/)[0]
-    ?.trim();
-
-  return firstSegment || normalized;
+  return normalized;
 }
 
 function normalizeImportedAoi(candidate) {
   const baseAoi = candidate?.resolved_aoi;
-  if (!baseAoi?.geojson) {
+  if (!baseAoi?.geojson || !isUsableAnalysisAoi(baseAoi)) {
     return null;
   }
 
@@ -36,6 +45,7 @@ function normalizeImportedAoi(candidate) {
     ...baseAoi,
     id: nextId,
     source: IMPORT_SOURCE,
+    boundary_source: baseAoi.boundary_source || candidate.source,
     origin: 'geocode',
     label: nextLabel,
     geojson: {
@@ -45,6 +55,7 @@ function normalizeImportedAoi(candidate) {
         id: nextId,
         label: nextLabel,
         source: IMPORT_SOURCE,
+        boundary_source: baseAoi.boundary_source || candidate.source,
       },
     },
   };
@@ -52,7 +63,7 @@ function normalizeImportedAoi(candidate) {
 
 function buildPreviewAoi(candidate) {
   const baseAoi = candidate?.resolved_aoi;
-  if (!baseAoi?.geojson) {
+  if (!baseAoi?.geojson || !isUsableAnalysisAoi(baseAoi)) {
     return null;
   }
 
@@ -65,6 +76,7 @@ function buildPreviewAoi(candidate) {
     ...baseAoi,
     id: nextId,
     source: PREVIEW_SOURCE,
+    boundary_source: baseAoi.boundary_source || candidate.source,
     origin: 'geocode',
     label: nextLabel,
     geojson: {
@@ -74,6 +86,7 @@ function buildPreviewAoi(candidate) {
         id: nextId,
         label: nextLabel,
         source: PREVIEW_SOURCE,
+        boundary_source: baseAoi.boundary_source || candidate.source,
       },
     },
   };
@@ -212,6 +225,7 @@ export default function LocationScopePicker({
     }
 
     setLoading(true);
+    restorePreviousSelection();
     setError('');
     setCandidates([]);
     setCheckedIds([]);
@@ -226,16 +240,18 @@ export default function LocationScopePicker({
         limit: 5,
       }, { signal: requestController.signal });
 
+      if (requestController.signal.aborted || searchControllerRef.current !== requestController) return;
+
       const nextCandidates = response?.data || [];
       setCandidates(nextCandidates);
 
       if (!nextCandidates.length) {
-        setError('No boundary candidates found. Try a more specific place name.');
+        setError('No usable administrative boundary found. Include the country/region, or draw/upload your area.');
         restorePreviousSelection();
         return;
       }
 
-      previewCandidateOnMap(nextCandidates[0]);
+      if (nextCandidates.length === 1) previewCandidateOnMap(nextCandidates[0]);
     } catch (searchError) {
       if (searchError?.isCanceled) {
         return;
@@ -250,13 +266,16 @@ export default function LocationScopePicker({
     }
   }, [previewCandidateOnMap, query, restorePreviousSelection]);
 
-  const toggleChecked = useCallback((candidateId) => {
+  const toggleChecked = useCallback((candidate) => {
+    if (!isUsableAnalysisAoi(candidate.resolved_aoi)) return;
+    const candidateId = candidate.id;
+    if (!checkedSet.has(candidateId)) previewCandidateOnMap(candidate);
     setCheckedIds((previous) => (
       previous.includes(candidateId)
         ? previous.filter((id) => id !== candidateId)
         : [...previous, candidateId]
     ));
-  }, []);
+  }, [checkedSet, previewCandidateOnMap]);
 
   const handleConfirm = useCallback(() => {
     const selectedCandidates = candidates.filter((candidate) => checkedSet.has(candidate.id));
@@ -265,7 +284,7 @@ export default function LocationScopePicker({
       return;
     }
 
-      const shouldActivateImportedScope = !(appMode === 'agent' && agentAnalysisContext?.confirmation_version);
+    const shouldActivateImportedScope = !(appMode === 'agent' && agentAnalysisContext?.confirmation_version);
     if (shouldActivateImportedScope) {
       clearAgentVisualState();
     }
@@ -383,6 +402,11 @@ export default function LocationScopePicker({
       </div>
 
       {error ? <div className="location-scope-picker-feedback error">{error}</div> : null}
+      {candidates.length > 1 ? (
+        <div className="location-scope-picker-feedback" role="status">
+          Multiple administrative regions match. Select the intended city, province or country to preview and add it.
+        </div>
+      ) : null}
 
       {candidates.length ? (
         <div className="location-scope-picker-results">
@@ -402,15 +426,20 @@ export default function LocationScopePicker({
                 >
                   <span className="location-scope-candidate-title">{candidate.label}</span>
                   <span className="location-scope-candidate-meta">
-                    {candidate.source}
-                    {candidate.raw_type ? ` - ${candidate.raw_type}` : ''}
+                    {getBoundarySourceLabel(candidate)}
+                    {candidate.boundary_kind ? ` · ${candidate.boundary_kind}` : candidate.raw_type ? ` · ${candidate.raw_type}` : ''}
+                    {candidate.admin_level ? ` · admin level ${candidate.admin_level}` : ''}
                   </span>
+                  {candidate.boundary_notice ? (
+                    <span className="location-scope-candidate-meta">{candidate.boundary_notice}</span>
+                  ) : null}
                 </button>
                 <label className="location-scope-candidate-check">
                   <input
                     type="checkbox"
                     checked={isChecked}
-                    onChange={() => toggleChecked(candidate.id)}
+                    onChange={() => toggleChecked(candidate)}
+                    disabled={!isUsableAnalysisAoi(candidate.resolved_aoi)}
                   />
                   <span>Add</span>
                 </label>

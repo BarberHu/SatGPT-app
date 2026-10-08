@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { buildAoiSignature } from '../utils/aoi';
 import DisasterLayerPanel from './DisasterLayerPanel';
+import { getFloodImages } from '../services/agentApi';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -54,6 +55,13 @@ const aoiB = {
   id: 'scope-b',
   label: 'Scope B',
   bounds: { west: 119.0, south: 32.1, east: 119.2, north: 32.3 },
+  geojson: {
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[[119, 32.1], [119.2, 32.1], [119.2, 32.3], [119, 32.3], [119, 32.1]]],
+    },
+  },
 };
 
 const createContext = (overrides = {}) => ({
@@ -150,5 +158,66 @@ describe('DisasterLayerPanel AOI switching', () => {
 
     expect(testState.context.setAgentImagery).toHaveBeenCalledWith(null);
     expect(testState.context.setAgentImageryLoading).toHaveBeenCalledWith(false);
+  });
+
+  test('shows the selected-window error even when the API reports success', async () => {
+    getFloodImages.mockResolvedValueOnce({ success: true, data: {
+      custom_range: { sentinel1: { error: 'No SAR imagery in window' }, sentinel2: { error: 'No optical imagery in window' } },
+    } });
+    testState.context = createContext();
+    renderPanel();
+    const imageryGroup = testState.layerManagerProps.groups.find((group) => group.key === 'imagery');
+    await act(async () => imageryGroup.timeWindowControl.action.onClick());
+    expect(testState.context.setWarning).toHaveBeenLastCalledWith(expect.stringContaining('No displayable imagery'));
+    expect(testState.context.setWarning).toHaveBeenLastCalledWith(expect.stringContaining('No SAR imagery in window'));
+  });
+
+  test('loads the chat-confirmed region and event dates without a separate map selection', async () => {
+    getFloodImages.mockResolvedValueOnce({ success: true, data: {
+      custom_range: { sentinel2: { tile_url: 'optical-tile' } },
+    } });
+    testState.context = createContext({
+      selectedAOI: null,
+      agentImageryDateWindow: {},
+      agentAnalysisContext: {
+        confirmed_aoi: { ...aoiA, bounds: null }, user_confirmed: true,
+        pre_date: '2026-08-19', peek_date: '2026-08-26', after_date: '2026-09-02',
+      },
+    });
+    renderPanel();
+    const group = testState.layerManagerProps.groups.find((item) => item.key === 'imagery');
+    expect(group.timeWindowControl.action.disabled).toBe(false);
+    await act(async () => group.timeWindowControl.action.onClick());
+    expect(getFloodImages).toHaveBeenLastCalledWith(expect.objectContaining({
+      imagery_start_date: '2026-08-19', imagery_end_date: '2026-09-02',
+      bounds: aoiA.bounds, geojson: aoiA.geojson.geometry,
+    }), expect.any(Object));
+  });
+
+  test('does not enable imagery for an unconfirmed chat candidate', () => {
+    testState.context = createContext({
+      selectedAOI: null,
+      agentAnalysisContext: { resolved_aoi: aoiA, user_confirmed: false },
+    });
+    renderPanel();
+    const group = testState.layerManagerProps.groups.find((item) => item.key === 'imagery');
+    expect(group.timeWindowControl.action.disabled).toBe(true);
+  });
+
+  test('uses a newly selected map scope instead of the earlier chat scope', async () => {
+    getFloodImages.mockResolvedValueOnce({ success: true, data: {
+      custom_range: { sentinel1: { tile_url: 'sar-tile' } },
+    } });
+    testState.context = createContext({
+      selectedAOI: aoiB,
+      agentAnalysisContext: { user_confirmed: true, confirmed_aoi: aoiA },
+    });
+    renderPanel();
+    const group = testState.layerManagerProps.groups.find((item) => item.key === 'imagery');
+    await act(async () => group.timeWindowControl.action.onClick());
+    expect(getFloodImages).toHaveBeenLastCalledWith(expect.objectContaining({
+      bounds: aoiB.bounds,
+      geojson: aoiB.geojson.geometry,
+    }), expect.any(Object));
   });
 });

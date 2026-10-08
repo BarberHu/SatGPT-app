@@ -5,6 +5,14 @@ import {
   parseSerializedAoi,
 } from '../utils/aoi';
 
+const createYearlyHistoryExpression = () => (
+  layerCatalog.basic.jrcYearlyHistory.sources.map((source) => (
+    `ee.ImageCollection('${source.dataset}')\n    .filter(ee.Filter.calendarRange(${source.startYear}, ${source.endYear}, 'year')).select('waterClass')`
+  )).reduce((expression, source, index) => (
+    index === 0 ? source : `${expression}\n    .merge(${source})`
+  ), '')
+);
+
 export const createCodeSnippet = (params, dataType) => {
   const catalog = layerCatalog.basic;
   const aoi =
@@ -38,13 +46,16 @@ var time_end = '${params.time_end}';
 var start_year = parseInt(time_start.split("-")[0]);
 var end_year = parseInt(time_end.split("-")[0]);
 
-var jrcSurfaceWater = ee.ImageCollection('${historicalCatalog.jrcYearlyHistory.dataset}')
+// Annual history through 2024, including corrected 2016-2021 classes.
+var yearlyHistory = ${createYearlyHistoryExpression()};
+
+var jrcSurfaceWater = yearlyHistory
     .filter(ee.Filter.calendarRange(start_year, end_year, 'year'))
     .map(function(image) { return image.select('${historicalCatalog.water.band}').eq(${historicalCatalog.water.matchValue}); })
     .sum()
     .clip(AoI);
 
-var jrcSurfaceFlood = ee.ImageCollection('${historicalCatalog.jrcYearlyHistory.dataset}')
+var jrcSurfaceFlood = yearlyHistory
     .filter(ee.Filter.calendarRange(start_year, end_year, 'year'))
     .map(function(image) { return image.select('${historicalCatalog.flood.band}').eq(${historicalCatalog.flood.matchValue}); })
     .sum()
@@ -79,7 +90,8 @@ year_count = year_to - year_from + 1;
 
 var WaterESA2 = ee.ImageCollection('${hotspotCatalog.worldCoverPrimaryWater.dataset}').first().eq(${hotspotCatalog.worldCoverPrimaryWater.classValue}).selfMask();
 var WaterESA1 = ee.ImageCollection('${hotspotCatalog.worldCoverLegacyWater.dataset}').first().eq(${hotspotCatalog.worldCoverLegacyWater.classValue}).selfMask();
-var waterHistory = ee.ImageCollection("${hotspotCatalog.jrcYearlyHistory.dataset}")
+// Annual history through 2024, including corrected 2016-2021 classes.
+var waterHistory = ${createYearlyHistoryExpression()}
     .filter(ee.Filter.calendarRange(year_from, year_to, 'year'));
 
 var masks = waterHistory.map(function(image) {

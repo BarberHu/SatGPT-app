@@ -14,11 +14,13 @@ import AoiUploadPanel from './AoiUploadPanel';
 import './AgentChatPane.css';
 
 const AGENT_MENTION_INSTRUCTIONS = `
+Write all explanatory text and confirmation instructions in English, even when the user asks in Chinese. Keep JSON field names, dates, source URLs and identifiers unchanged.
+For flood workflows, a standalone @ scope after an event query requests analysis. Once the event, dates, and scope are ready, ask the user to reply confirm in chat. Keep all confirmation and cancellation instructions in English. Do not require a Confirm button or promise a popup.
 If the user's message contains a metadata block wrapped by <<SATGPT_MENTION_CONTEXT>> and <<END_SATGPT_MENTION_CONTEXT>>, parse that JSON first.
 Treat it as authoritative metadata for the spatial scope the user explicitly referenced in the text.
 The metadata only provides lightweight ids, labels, types, and sources. Do not treat it as raw geometry or as the full dataset payload.
 For normal flood information questions, do not require an @ spatial scope. Answer using general reasoning and web/tool search when needed.
-Only require an explicit uploaded or drawn @ spatial scope when the user asks to run spatial execution, such as map rendering, satellite imagery retrieval, raster layers, impact analysis, or a confirmed analysis workflow tied to a user-defined AOI.
+Only require an explicit @ spatial scope when the user asks to run spatial execution, such as map rendering, satellite imagery retrieval, raster layers, impact analysis, or a confirmed analysis workflow tied to a user-defined AOI. The scope may be a selected uploaded/drawn layer or a typed place name whose boundary the application resolves before confirmation.
 If spatial execution is requested without an explicit scope, ask for @ only at that point.
 When you explain your reasoning, refer to the visible @label the user typed, but do not expose the raw metadata block back to the user unless they explicitly ask for it.
 `;

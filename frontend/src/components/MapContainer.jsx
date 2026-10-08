@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react';
+import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { useAppContext } from '../context/AppContext';
 import {
   buildAoiSignature,
+  buildAoiFromAgentState,
   buildAoiFromDrawFeature,
   buildAoiFromDrawFeatures,
   buildAoiFromGridSelection,
@@ -276,6 +277,10 @@ function MapContainer() {
     clearAgentVisualState,
   } = useAppContext();
 
+  const confirmedContextAoi = useMemo(
+    () => buildAoiFromAgentState(agentAnalysisContext),
+    [agentAnalysisContext]
+  );
   const shouldPreserveAgentActiveScope = appMode === 'agent'
     && Boolean(agentAnalysisContext?.confirmation_version)
     && aoiEditorMode !== 'edit';
@@ -1988,6 +1993,8 @@ function MapContainer() {
     ? null
     : appMode === 'ask' || selectedAOI?.source === 'location_search_preview'
     ? selectedAOI
+    : !selectedAOI && agentAnalysisContext?.user_confirmed === true
+    ? confirmedContextAoi
     : null;
 
   useEffect(() => {
@@ -2141,10 +2148,7 @@ function MapContainer() {
       return;
     }
 
-    const confirmedAoi = selectedAOI
-      || agentAnalysisContext?.confirmed_aoi
-      || agentAnalysisContext?.resolved_aoi
-      || null;
+    const confirmedAoi = selectedAOI || confirmedContextAoi;
     const confirmationVersion = agentAnalysisContext?.confirmation_version || 0;
 
     if (!confirmedAoi?.bounds || !confirmationVersion) {
@@ -2164,6 +2168,7 @@ function MapContainer() {
     appMode,
     fitAoiBounds,
     agentAnalysisContext,
+    confirmedContextAoi,
     isAoiEditing,
     selectedAOI,
   ]);

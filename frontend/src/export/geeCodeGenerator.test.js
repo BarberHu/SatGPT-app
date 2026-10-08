@@ -44,4 +44,15 @@ describe('createCodeSnippet', () => {
   test('returns no export when no AOI can be resolved', () => {
     expect(createCodeSnippet({ coordinates: '[]' }, 'historical')).toBe('');
   });
+
+  test.each(['historical', 'flood_hotspot'])('exports the complete annual record for %s', (dataType) => {
+    const code = createCodeSnippet({
+      aoi, time_start: '2022-01-01', time_end: '2024-12-31',
+      year_start: 2022, year_end: 2024,
+    }, dataType);
+    expect(() => new Function('ee', 'Map', code)).not.toThrow();
+    expect(code).toContain("calendarRange(1984, 2015, 'year')");
+    expect(code).toContain('GSW1_5/YearlyHistory_2016_2021');
+    expect(code).toContain('GSW1_5/YearlyHistory_2022_2024');
+  });
 });
