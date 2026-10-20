@@ -12,11 +12,18 @@ export default function useAgentRasterLayerRequest({
   currentAoiSignatureRef.current = aoiSignature;
 
   useEffect(() => () => {
-    Object.values(pendingRequestsRef.current).forEach(({ controller }) => {
+    const pending = Object.entries(pendingRequestsRef.current);
+    pending.forEach(([, { controller }]) => {
       controller.abort();
     });
     pendingRequestsRef.current = {};
-  }, []);
+    if (pending.length) {
+      setAgentLayerLoading((previous) => ({
+        ...previous,
+        ...Object.fromEntries(pending.map(([layerKey]) => [`raster-${layerKey}`, false])),
+      }));
+    }
+  }, [aoiSignature, setAgentLayerLoading]);
 
   return useCallback(async ({ layerKey, params, requestKey, errorMessage }) => {
     const requestAoiSignature = currentAoiSignatureRef.current;

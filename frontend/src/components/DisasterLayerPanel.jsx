@@ -444,6 +444,29 @@ function DisasterLayerPanel({
     setWarning,
   ]);
 
+  const loadedRasterAoiRef = useRef(null);
+  useEffect(() => {
+    if (!activeAnalysisAoi) {
+      loadedRasterAoiRef.current = null;
+      return;
+    }
+    if (loadedRasterAoiRef.current === selectedAoiSignature) return;
+    loadedRasterAoiRef.current = selectedAoiSignature;
+    rasterLayerConfig.forEach((layer) => {
+      if (!layer.unsupportedReason && agentRasterLayerVisibility?.[layer.key]) {
+        const descriptor = layerData?.[layer.key];
+        const windowConfig = getLayerWindowConfig(layer);
+        const dateWindow = windowConfig ? buildRecentDateWindow(clampWindowValue(
+          layerWindows[layer.key], windowConfig.min, windowConfig.max, windowConfig.defaultValue
+        )) : {};
+        const expectedKey = buildRasterRequestKey(layer.key, dateWindow);
+        if (!descriptor?.tileUrl || descriptor.aoiSignature !== selectedAoiSignature || descriptor.requestKey !== expectedKey) {
+          fetchRasterLayer(layer.key);
+        }
+      }
+    });
+  }, [activeAnalysisAoi, selectedAoiSignature, rasterLayerConfig, agentRasterLayerVisibility, layerData, layerWindows, buildRasterRequestKey, fetchRasterLayer]);
+
   const handleLayerWindowChange = useCallback((layerKey, nextWindow, commit = false) => {
     const layerConfig = getRasterLayerConfig(layerKey);
     const windowConfig = getLayerWindowConfig(layerConfig);

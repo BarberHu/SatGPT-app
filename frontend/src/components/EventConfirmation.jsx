@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar, Check, Edit2, Info, Layers3, MapPin, X } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import { getEventDateError } from '../utils/eventDates';
 import './EventConfirmation.css';
 
 const buildEmptySelection = (layers = [], selectedLayerIds = []) =>
@@ -44,7 +45,8 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
   );
 
   const activeAoi = selectedAOI || formData.confirmed_aoi || formData.resolved_aoi || null;
-  const canConfirm = Boolean(activeAoi && selectedLayerIds.length);
+  const dateError = getEventDateError(formData);
+  const canConfirm = Boolean(activeAoi && selectedLayerIds.length && !dateError);
 
   const handleFieldChange = (field, value) => {
     setFormData((previous) => ({
@@ -61,7 +63,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
   };
 
   const handleConfirm = () => {
-    if (!activeAoi) return;
+    if (!canConfirm) return;
     shouldRestoreAoiRef.current = false;
     onConfirm({
       ...formData,
@@ -215,6 +217,7 @@ function EventConfirmation({ data, message, onConfirm, onCancel }) {
             </section>
           </div>
 
+          {dateError ? <div className="confirmation-validation-error" role="alert">{dateError}</div> : null}
           <div className="confirmation-actions">
             <button className="btn-cancel" onClick={handleCancel}>
               <X size={16} />

@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { buildAoiFromAgentState, buildAoiFromGeoJSON } from '../utils/aoi';
+import { getAoiValidationError } from '../utils/aoiValidation';
 import { trackUxEvent } from '../utils/analytics';
 
 const readFileAsText = (file) =>
@@ -106,6 +107,8 @@ const AoiUploadPanel = forwardRef(function AoiUploadPanel({
 
     try {
       const parsed = await parseSpatialScopeFile(file);
+      const validationError = getAoiValidationError(parsed);
+      if (validationError) throw new Error(validationError);
       const aoi = buildAoiFromGeoJSON(parsed, {
         source: 'upload',
         origin: 'upload',

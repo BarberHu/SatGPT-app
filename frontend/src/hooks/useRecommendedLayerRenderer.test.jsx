@@ -58,7 +58,8 @@ describe('useRecommendedLayerRenderer', () => {
       setAgentRecommendedLayerData: vi.fn((update) => {
         if (typeof update === 'function') update({});
       }),
-      setWarning: vi.fn(),
+      setOwnedWarning: vi.fn(),
+      clearOwnedWarning: vi.fn(),
     };
   });
 
@@ -83,5 +84,17 @@ describe('useRecommendedLayerRenderer', () => {
     expect(firstSignal.aborted).toBe(true);
     expect(secondSignal.aborted).toBe(true);
     expect(loadingState).toEqual({ one: false, two: false });
+  });
+
+  test('clears only the recovered catalog layer warning on a successful retry', async () => {
+    renderRecommendedLayer.mockReset().mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce({ success: true, data: { tile_url: 'tile' } });
+    options.controlPanelCatalogLayers = [{ id: 'one' }];
+    options.agentRecommendedLayerVisibility = { one: true };
+    await act(async () => root.render(<HookHarness options={options} />));
+    expect(options.setOwnedWarning).toHaveBeenCalledWith('catalog:one', 'temporary failure');
+    await act(async () => root.render(<HookHarness options={{ ...options, agentRecommendedLayerVisibility: { one: false } }} />));
+    await act(async () => root.render(<HookHarness options={options} />));
+    expect(options.clearOwnedWarning).toHaveBeenCalledWith('catalog:one');
   });
 });

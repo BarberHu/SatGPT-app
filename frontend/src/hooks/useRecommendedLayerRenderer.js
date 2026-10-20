@@ -18,7 +18,8 @@ export default function useRecommendedLayerRenderer({
   recommendedLayerBaseContextKey,
   setAgentLayerLoading,
   setAgentRecommendedLayerData,
-  setWarning,
+  setOwnedWarning,
+  clearOwnedWarning,
 }) {
   const pendingRequestsRef = useRef(new Set());
   const recommendedLayerDataRef = useRef(agentRecommendedLayerData);
@@ -116,10 +117,11 @@ export default function useRecommendedLayerRenderer({
             context_key: contextKey,
           },
         }));
+        clearOwnedWarning(`catalog:${layer.id}`);
         finishLayerSpan({ status: 'success', hasTileUrl: Boolean(result?.data?.tile_url) });
       } catch (error) {
         if (!cancelled && !error?.isCanceled) {
-          setWarning(error?.message || 'Failed to render recommended layer.');
+          setOwnedWarning(`catalog:${layer.id}`, error?.message || 'Failed to render recommended layer.');
         }
         finishLayerSpan({
           status: cancelled || error?.isCanceled ? 'cancelled' : 'error',
@@ -179,6 +181,7 @@ export default function useRecommendedLayerRenderer({
     getRecommendedLayerContextKey,
     setAgentLayerLoading,
     setAgentRecommendedLayerData,
-    setWarning,
+    setOwnedWarning,
+    clearOwnedWarning,
   ]);
 }

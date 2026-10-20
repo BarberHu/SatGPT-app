@@ -73,9 +73,12 @@ function ChatBox() {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      handleSubmit();
-    }
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+
+    // The prompt auto-focuses OK; consume Enter so its default action cannot
+    // immediately activate that newly focused button and dismiss the prompt.
+    e.preventDefault();
+    handleSubmit();
   };
 
   const handleSubmit = async () => {

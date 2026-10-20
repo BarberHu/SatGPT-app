@@ -397,6 +397,8 @@ async def get_agent_raster_layers(request: Request):
         return await _run_heavy_operation(get_agent_raster_layers_payload, payload)
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

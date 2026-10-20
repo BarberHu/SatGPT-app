@@ -10,6 +10,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const testState = vi.hoisted(() => ({
   context: null,
   layerManagerProps: null,
+  rasterRequest: null,
 }));
 
 vi.mock('../context/AppContext', () => ({
@@ -25,7 +26,7 @@ vi.mock('../hooks/useAgentRasterDownload', () => ({
 }));
 
 vi.mock('../hooks/useAgentRasterLayerRequest', () => ({
-  default: () => vi.fn(),
+  default: () => testState.rasterRequest,
 }));
 
 vi.mock('./LayerManager', () => ({
@@ -105,6 +106,7 @@ describe('DisasterLayerPanel AOI switching', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     testState.layerManagerProps = null;
+    testState.rasterRequest = vi.fn();
   });
 
   afterEach(() => {
@@ -112,7 +114,7 @@ describe('DisasterLayerPanel AOI switching', () => {
     container.remove();
   });
 
-  const renderPanel = () => act(() => root.render(
+  const renderPanel = (props = {}) => act(() => root.render(
     <DisasterLayerPanel
       moduleName="imagery"
       moduleLabel="Imagery"
@@ -120,6 +122,7 @@ describe('DisasterLayerPanel AOI switching', () => {
       showRaster={false}
       showImagery
       showVector
+      {...props}
     />
   ));
 
@@ -150,5 +153,19 @@ describe('DisasterLayerPanel AOI switching', () => {
 
     expect(testState.context.setAgentImagery).toHaveBeenCalledWith(null);
     expect(testState.context.setAgentImageryLoading).toHaveBeenCalledWith(false);
+  });
+
+  test('reloads a selected raster for a new AOI without repeatedly retrying a failure', () => {
+    const layers = [{ key: 'slopeSteepness', title: 'Slope' }];
+    const props = { rasterLayerConfig: layers, showRaster: true };
+    testState.context = createContext({ agentRasterLayerVisibility: { slopeSteepness: true } });
+    renderPanel(props);
+    expect(testState.rasterRequest).toHaveBeenCalledTimes(1);
+    testState.context = { ...testState.context, selectedAOI: aoiB };
+    renderPanel(props);
+    expect(testState.rasterRequest).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(testState.rasterRequest.mock.calls[1][0].params.aoi).id).toBe('scope-b');
+    renderPanel(props);
+    expect(testState.rasterRequest).toHaveBeenCalledTimes(2);
   });
 });

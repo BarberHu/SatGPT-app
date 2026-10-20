@@ -55,6 +55,8 @@ function AgentPanel() {
     setAgentAnalysisContext,
     agentAnalysisContext,
     setWarning,
+    setOwnedWarning,
+    clearOwnedWarning,
     setAgentImagery,
     setAgentImageryLoading,
     agentImagery,
@@ -399,7 +401,8 @@ function AgentPanel() {
     recommendedLayerBaseContextKey,
     setAgentLayerLoading,
     setAgentRecommendedLayerData,
-    setWarning,
+    setOwnedWarning,
+    clearOwnedWarning,
   });
   const panelProfiler = useMemo(
     () => createReactProfilerHandler('AgentPanel', () => ({

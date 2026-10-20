@@ -15,7 +15,7 @@ from typing import Optional
 from unittest.mock import Mock
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -27,16 +27,18 @@ def load_handlers():
     names = {
         '_run_heavy_operation', 'GeoBounds', 'FloodImageRequest', 'ScriptPdfRequest',
         'get_default_map', 'get_flood_imagery', 'get_flood_layer_catalog', 'get_pdf',
+        'get_agent_raster_layers', '_get_request_payload',
     }
     definitions = [node for node in tree.body if getattr(node, 'name', None) in names]
     namespace = {
         'app': FastAPI(), 'asyncio': asyncio, 'time': time, 'Optional': Optional,
-        'BaseModel': BaseModel, 'HTTPException': HTTPException, 'Response': Response,
+        'BaseModel': BaseModel, 'HTTPException': HTTPException, 'Response': Response, 'Request': Request,
         'run_in_threadpool': run_in_threadpool, 'logger': logging.getLogger(__name__),
         '_HEAVY_OPERATION_SEMAPHORE': asyncio.Semaphore(1), '_HEAVY_QUEUE_TIMEOUT_SECONDS': 0.03,
         '_ensure_gee_ready': lambda: None, '_summarize_flood_image_request': lambda request: {},
         '_duration_ms': lambda started: 0,
         'get_default_map_payload': lambda: {'ok': True},
+        'get_agent_raster_layers_payload': Mock(return_value={'eeMapURLSlopeSteepness': 'tile-url'}),
         'thin_geojson_geometry': lambda geojson: geojson,
         'get_default_flood_layer_catalog': lambda: {
             'recommended_layers': [{'id': 'asset:catalog', 'layer_family': 'catalog'}],
@@ -71,6 +73,31 @@ class DeploymentMergeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.headers['retry-after'], '5')
         finally:
             self.ns['_HEAVY_OPERATION_SEMAPHORE'].release()
+
+    async def test_invalid_raster_layer_parameters_return_400(self):
+        for message in (
+            'Unsupported agent raster layer key(s): NOT_A_LAYER',
+            'layer_keys must include at least one layer key.',
+        ):
+            with self.subTest(message=message):
+                self.ns['get_agent_raster_layers_payload'].side_effect = ValueError(message)
+                response = await self.client.post('/api/agent-raster-layers', json={'layer_keys': ['NOT_A_LAYER']})
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(response.json()['detail'], message)
+
+    async def test_raster_runtime_failures_remain_500(self):
+        self.ns['get_agent_raster_layers_payload'].side_effect = RuntimeError('upstream unavailable')
+        response = await self.client.post('/api/agent-raster-layers', json={'layer_keys': ['slopeSteepness']})
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()['detail'], 'upstream unavailable')
+
+    async def test_raster_requests_still_succeed_after_validation_failure(self):
+        self.ns['get_agent_raster_layers_payload'].side_effect = ValueError('invalid layer')
+        await self.client.post('/api/agent-raster-layers', json={'layer_keys': ['NOT_A_LAYER']})
+        self.ns['get_agent_raster_layers_payload'].side_effect = None
+        response = await self.client.post('/api/agent-raster-layers', json={'layer_keys': ['slopeSteepness']})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {'eeMapURLSlopeSteepness': 'tile-url'})
 
     async def test_failed_operation_releases_capacity(self):
         def fail():

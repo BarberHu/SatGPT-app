@@ -10,6 +10,7 @@ import {
 } from '../utils/businessLayerStore';
 import businessLayerRepository from '../repositories/businessLayerRepository';
 import useBusinessLayerPersistence from '../hooks/useBusinessLayerPersistence';
+import useWarningState from '../hooks/useWarningState';
 import {
   buildDefaultAgentLayerOrder,
   buildDefaultAgentRasterLayerVisibility,
@@ -78,7 +79,7 @@ export const AppProvider = ({ children }) => {
   // UI State
   const [isPanelVisible, setIsPanelVisible] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
-  const [warning, setWarning] = useState('');
+  const { warning, setWarning, setOwnedWarning, clearOwnedWarning } = useWarningState();
   
   // 应用主模式：`ask` 表示传统问答流，`agent` 表示 Flood Agent 工作流。
   const [appMode, dispatchAppMode] = useReducer(appModeReducer, 'ask');
@@ -708,6 +709,8 @@ export const AppProvider = ({ children }) => {
     setIsLoading,
     warning,
     setWarning,
+    setOwnedWarning,
+    clearOwnedWarning,
     
     // Modal State
     activeModal,

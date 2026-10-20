@@ -1,3 +1,5 @@
+import { getAoiValidationError } from './aoiValidation';
+
 const AOI_VERSION = 1;
 const createAoiId = () =>
   (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
@@ -213,6 +215,7 @@ export const getBoundsFromGeometry = (geometry) => {
 };
 
 export const buildAoiFromGeoJSON = (input, overrides = {}) => {
+  if (getAoiValidationError(input)) return null;
   const geometry = normalizeGeoJSONGeometry(input);
   const bounds = getBoundsFromGeometry(geometry);
   const center = getCenterFromBounds(bounds);

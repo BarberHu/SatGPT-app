@@ -133,6 +133,7 @@ describe('useAgentRasterLayerRequest', () => {
     act(() => {
       root.render(<HookHarness options={{ ...options, aoiSignature: 'aoi-2' }} expose={expose} />);
     });
+    expect(getAgentRasterLayers.mock.calls[0][1].signal.aborted).toBe(true);
     request.resolve({ eeMapURLSlopeSteepness: 'stale' });
     await pendingRequest;
 

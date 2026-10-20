@@ -34,6 +34,7 @@ from gee_code_generator import generate_flood_gee_code
 from flood_aoi import aoi_to_geo_fields
 from flood_dataset_service import build_confirmation_context
 from mention_context import resolve_mention_context
+from event_validation import validate_flood_event_dates
 from project_env import load_project_env, required_env
 
 load_project_env()
@@ -1124,57 +1125,68 @@ async def confirmation_node(
     mentioned_aoi = state.get("mentioned_aoi")
     mentioned_aoi_source = state.get("mentioned_aoi_source")
     
-    # 使用 interrupt 暂停执行，等待用户确认
-    confirmed_data_raw = interrupt({
-        "type": "confirm_flood_event",
-        "message": "Please confirm or modify the following flood event information:",
-        "data": {
-            "event": event,
-            "event_description": event_description,
-            "location": location,
-            "pre_date": pre_date,
-            "peek_date": peek_date,
-            "after_date": after_date,
-            "resolved_aoi": resolved_aoi,
-            "aoi_resolution_meta": aoi_resolution_meta,
-            "recommended_layers": recommended_layers,
-            "selected_layer_ids": selected_layer_ids,
-            "recommendation_strategy": recommendation_strategy,
-            "recommendation_source": recommendation_source,
-            "confirmed_aoi": confirmed_aoi,
-            "confirmation_version": confirmation_version,
-            "mentioned_layer_refs": mentioned_layer_refs,
-            "mentioned_aoi": mentioned_aoi,
-            "mentioned_aoi_source": mentioned_aoi_source,
-        }
-    })
-    
-    # 解析用户确认数据
-    confirmed_data = {}
-    if isinstance(confirmed_data_raw, str):
+    confirmation_data = {
+        "event": event,
+        "event_description": event_description,
+        "location": location,
+        "pre_date": pre_date,
+        "peek_date": peek_date,
+        "after_date": after_date,
+        "resolved_aoi": resolved_aoi,
+        "aoi_resolution_meta": aoi_resolution_meta,
+        "recommended_layers": recommended_layers,
+        "selected_layer_ids": selected_layer_ids,
+        "recommendation_strategy": recommendation_strategy,
+        "recommendation_source": recommendation_source,
+        "confirmed_aoi": confirmed_aoi,
+        "confirmation_version": confirmation_version,
+        "mentioned_layer_refs": mentioned_layer_refs,
+        "mentioned_aoi": mentioned_aoi,
+        "mentioned_aoi_source": mentioned_aoi_source,
+    }
+    validation_error = None
+    while True:
+        confirmed_data_raw = interrupt({
+            "type": "confirm_flood_event",
+            "message": validation_error or "Please confirm or modify the following flood event information:",
+            "data": confirmation_data,
+        })
+        confirmed_data = {}
+        if isinstance(confirmed_data_raw, str):
+            try:
+                confirmed_data = json.loads(confirmed_data_raw)
+            except json.JSONDecodeError:
+                confirmed_data = {}
+        elif isinstance(confirmed_data_raw, dict):
+            confirmed_data = confirmed_data_raw
+
+        if not isinstance(confirmed_data, dict) or not confirmed_data or confirmed_data.get("cancelled"):
+            cancel_message = AIMessage(content="Cancelled. If you'd like to query again, please tell me which flood event you'd like to learn about.")
+            return Command(
+                goto="__end__",
+                update={
+                    "messages": cancel_message,
+                    "stage": "initial",
+                    "user_confirmed": False,
+                    "mentioned_layer_refs": [],
+                    "mentioned_aoi": None,
+                    "mentioned_aoi_source": None,
+                }
+            )
+        confirmation_data = {**confirmation_data, **confirmed_data}
         try:
-            confirmed_data = json.loads(confirmed_data_raw)
-        except json.JSONDecodeError:
-            confirmed_data = {}
-    elif isinstance(confirmed_data_raw, dict):
-        confirmed_data = confirmed_data_raw
+            validate_flood_event_dates(
+                confirmation_data.get("pre_date"),
+                confirmation_data.get("peek_date"),
+                confirmation_data.get("after_date"),
+            )
+        except ValueError as exc:
+            validation_error = str(exc)
+            continue
+        confirmed_data = confirmation_data
+        break
     
-    # 用户取消
-    if not confirmed_data or confirmed_data.get("cancelled"):
-        cancel_message = AIMessage(content="Cancelled. If you'd like to query again, please tell me which flood event you'd like to learn about.")
-        return Command(
-            goto="__end__",
-            update={
-                "messages": cancel_message,
-                "stage": "initial",
-                "user_confirmed": False,
-                "mentioned_layer_refs": [],
-                "mentioned_aoi": None,
-                "mentioned_aoi_source": None,
-            }
-        )
-    
-    # 用户确认，更新数据并进入处理节点
+    # 用户确认，更新制图状态（报告/导出流程另行处理）。
     print("[INFO] User confirmed event details")
     mapping_message = AIMessage(
         content=(
