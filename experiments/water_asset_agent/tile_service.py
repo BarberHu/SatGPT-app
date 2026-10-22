@@ -38,6 +38,47 @@ def resolve_tile_template(url_template: str, x_tile: int, y_tile: int, zoom: int
     return (url_template or "").replace("{x}", str(x_tile)).replace("{y}", str(y_tile)).replace("{z}", str(zoom))
 
 
+def apply_configured_value_remap(image: ee.Image, processing_hints: Dict[str, Any]) -> ee.Image:
+    """Map dataset-native class codes to compact display classes when configured."""
+    remap = (processing_hints or {}).get("value_remap") or {}
+    source_values = remap.get("source_values") or []
+    display_values = remap.get("display_values") or []
+    if not source_values and not display_values:
+        return image
+    if not source_values or len(source_values) != len(display_values):
+        raise ValueError("value_remap requires equally sized source_values and display_values")
+
+    band_name = remap.get("band")
+    remapped = image.remap(
+        source_values,
+        display_values,
+        bandName=band_name,
+    )
+    return remapped.rename(band_name) if band_name else remapped
+
+
+def apply_configured_valid_data_mask(image: ee.Image, processing_hints: Dict[str, Any]) -> ee.Image:
+    """Mask pixels without valid observations and restore the requested output bands."""
+    mask_config = (processing_hints or {}).get("valid_data_mask") or {}
+    mask_band = mask_config.get("band")
+    if not mask_band:
+        return image
+
+    valid_value = mask_config.get("valid_value", 1)
+    masked = image.updateMask(image.select(mask_band).eq(valid_value))
+    output_bands = list((processing_hints or {}).get("select_bands") or [])
+    return masked.select(output_bands) if output_bands else masked
+
+
+def resolve_calendar_month(start_date: Optional[str]) -> int:
+    """Extract a 1-12 calendar month from the existing date-shaped request value."""
+    match = re.match(r"^\d{4}-(\d{2})-\d{2}$", str(start_date or ""))
+    month = int(match.group(1)) if match else 0
+    if month < 1 or month > 12:
+        raise ValueError("calendar_month_property selection requires a valid start_date month")
+    return month
+
+
 def _bootstrap_env(project_root: Path) -> None:
     env_path = project_root / ".env"
     if not env_path.exists():
@@ -346,7 +387,17 @@ class GEETileService:
             image = ee.Image(asset.asset_id)
             return (image.clip(region) if region is not None else image, "single_image", [])
 
-        filter_candidates = self._collection_filter_candidates(region, start_date, end_date)
+        processing_hints = asset.collection_processing_hints or {}
+        time_selection = processing_hints.get("time_selection") or {}
+        uses_calendar_month = time_selection.get("mode") == "calendar_month_property"
+        calendar_month = resolve_calendar_month(start_date) if uses_calendar_month else None
+        if uses_calendar_month:
+            filter_candidates = [
+                ("region_and_calendar_month", True, "none"),
+                ("calendar_month_only", False, "none"),
+            ]
+        else:
+            filter_candidates = self._collection_filter_candidates(region, start_date, end_date)
         selected_collection: Optional[ee.ImageCollection] = None
         selected_strategy = "unfiltered"
         filter_notes: List[str] = []
@@ -354,14 +405,23 @@ class GEETileService:
         for label, use_region, date_mode in filter_candidates:
             collection = ee.ImageCollection(asset.asset_id)
             notes: List[str] = []
-            select_bands = list((asset.collection_processing_hints or {}).get("select_bands") or [])
-            if select_bands:
-                collection = collection.select(select_bands)
+            select_bands = list(processing_hints.get("select_bands") or [])
+            mask_band = (processing_hints.get("valid_data_mask") or {}).get("band")
+            query_bands = list(select_bands)
+            if mask_band and mask_band not in query_bands:
+                query_bands.append(mask_band)
+            if query_bands:
+                collection = collection.select(query_bands)
                 notes.append("select_bands_applied")
             if use_region and region is not None:
                 collection = collection.filterBounds(region)
                 notes.append("filter_bounds_applied")
-            if date_mode == "between" and start_date and end_date:
+            if uses_calendar_month:
+                collection = collection.filter(
+                    ee.Filter.eq(time_selection.get("property", "month"), calendar_month)
+                )
+                notes.append(f"calendar_month_property_filter:{calendar_month}")
+            elif date_mode == "between" and start_date and end_date:
                 collection = collection.filterDate(start_date, end_date)
                 notes.append("filter_date_between_applied")
             elif date_mode == "open_end" and start_date:
@@ -378,7 +438,7 @@ class GEETileService:
                 selected_collection = collection
                 selected_strategy = label
                 filter_notes = notes
-                if label != "region_and_date":
+                if label != filter_candidates[0][0]:
                     filter_notes.append(f"fallback_strategy:{label}")
                 break
 
@@ -387,12 +447,12 @@ class GEETileService:
                 f"No imagery found after applying filters for {asset.asset_id}. tried={', '.join(tried_labels)}"
             )
 
-        reducer = (asset.collection_processing_hints or {}).get("reducer", "median")
+        reducer = processing_hints.get("reducer", "median")
         if reducer == "mosaic":
             image = selected_collection.sort("system:time_start", False).mosaic()
         elif reducer == "mode":
             image = selected_collection.reduce(ee.Reducer.mode())
-            select_bands = list((asset.collection_processing_hints or {}).get("select_bands") or [])
+            select_bands = list(processing_hints.get("select_bands") or [])
             if len(select_bands) == 1:
                 image = image.rename(select_bands[0])
         elif reducer == "mean":
@@ -407,6 +467,8 @@ class GEETileService:
             image = selected_collection.sum()
         else:
             image = selected_collection.sort("system:time_start", False).median()
+        image = apply_configured_value_remap(image, processing_hints)
+        image = apply_configured_valid_data_mask(image, processing_hints)
         return (image.clip(region) if region is not None else image, selected_strategy, filter_notes)
 
     @staticmethod

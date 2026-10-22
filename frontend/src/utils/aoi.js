@@ -1,3 +1,5 @@
+import { getAoiValidationError } from './aoiValidation';
+
 const AOI_VERSION = 1;
 const createAoiId = () =>
   (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
@@ -64,6 +66,35 @@ export const getCenterFromBounds = (bounds) => {
     lat: (south + north) / 2,
   };
 };
+
+export const formatAoiCoordinatePart = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue.toFixed(6) : '';
+};
+
+export const buildAoiBoundsSignature = (bounds) => {
+  if (!bounds) {
+    return 'no-bounds';
+  }
+
+  return [
+    formatAoiCoordinatePart(bounds.west),
+    formatAoiCoordinatePart(bounds.south),
+    formatAoiCoordinatePart(bounds.east),
+    formatAoiCoordinatePart(bounds.north),
+  ].join(':');
+};
+
+export const buildAoiSignature = (aoi, fallbackBounds = null) => [
+  aoi?.id || aoi?.label || aoi?.source || 'aoi',
+  buildAoiBoundsSignature(aoi?.bounds || fallbackBounds),
+].join('|');
+
+export const isFishnetAoi = (aoi) =>
+  String(aoi?.source || '').toLowerCase() === 'fishnet';
+
+export const resolveAgentAnalysisAoi = (...candidates) =>
+  candidates.find((aoi) => aoi && !isFishnetAoi(aoi)) || null;
 
 const mergeBounds = (boundsList = []) => {
   const validBounds = boundsList.filter(Boolean);
@@ -184,6 +215,7 @@ export const getBoundsFromGeometry = (geometry) => {
 };
 
 export const buildAoiFromGeoJSON = (input, overrides = {}) => {
+  if (getAoiValidationError(input)) return null;
   const geometry = normalizeGeoJSONGeometry(input);
   const bounds = getBoundsFromGeometry(geometry);
   const center = getCenterFromBounds(bounds);

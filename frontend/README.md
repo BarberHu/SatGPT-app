@@ -2,6 +2,10 @@
 
 React frontend for the SatGPT flood analysis platform.
 
+Local development and production builds use Vite. The production output stays
+in `frontend\build` so the existing Node gateway, Nginx image, and Windows
+deployment scripts keep the same artifact contract.
+
 The current local development stack is:
 
 ```text
@@ -10,11 +14,11 @@ React Frontend :3000
   -> CopilotKit Runtime :5000 for /copilotkit
 ```
 
-Use the repository root setup and start scripts for normal development:
+From the repository root, use the Windows launcher for normal development:
 
 ```powershell
-..\scripts\windows\setup_windows.bat
-..\scripts\windows\start_windows.bat
+..\scripts\windows\satgpt.bat setup
+..\scripts\windows\satgpt.bat dev
 ```
 
 When running only the frontend:
@@ -24,7 +28,17 @@ npm install
 npm start
 ```
 
+Useful frontend checks:
+
+```powershell
+npm test
+npm run build
+npm run verify:proxy
+```
+
 The frontend reads public variables from `frontend\.env.local`, which is generated from the repository root `.env` by `scripts\windows\helpers\sync_frontend_env.ps1`.
+Browser API calls always use same-origin `/api`, `/health`, `/agent`, and
+`/copilotkit` paths, so separate frontend API URL variables are not needed.
 
 ## API Routes
 

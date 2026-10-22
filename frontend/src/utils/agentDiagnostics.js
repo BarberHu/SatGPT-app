@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 const STORAGE_KEY = 'satgpt.agentDiagnostics';
-const DEFAULT_ENABLED = process.env.NODE_ENV !== 'production';
+const DEFAULT_ENABLED = !import.meta.env.PROD;
 
 const readStoredFlag = () => {
   if (typeof window === 'undefined') {

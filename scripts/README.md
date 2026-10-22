@@ -1,62 +1,80 @@
-# Scripts
+# Deployment Scripts
 
-## Windows
+The scripts are separated by execution environment. This directory contains
+only local Windows operations, formal Docker deployment, and pre-release
+capacity validation.
 
-- `scripts\windows\setup_windows.bat`
-  - Create the shared Python virtual environment.
-  - Pin `setuptools<81` for legacy `pkg_resources` compatibility.
-  - Install Python dependencies from `requirements.txt` and `agent\requirements.txt`.
-  - Install `frontend` and `runtime` Node dependencies.
-  - Create `.env` from `.env.example` when missing.
-  - Sync public `REACT_APP_*` variables from the root `.env` into `frontend\.env.local`.
+## Directory layout
 
-- `scripts\windows\start_windows.bat`
-  - Treat the repository root `.env` as the actual runtime config file.
-  - Read Agent / Runtime / Frontend ports from the root `.env`.
-  - Sync public `REACT_APP_*` variables from the root `.env` into `frontend\.env.local`.
-  - Fail fast when Agent / Runtime / Frontend ports are already occupied, and print the owning PID / command.
-  - Start FastAPI agent on `8000`.
-  - Start CopilotKit runtime on `5000`.
-  - Start React frontend on `3000`.
+```text
+scripts/
+  windows/                Windows local testing and production-like deployment
+    satgpt.bat             Single Windows command entry point
+    setup_windows.bat      Validate and install the local toolchain
+    start_windows.bat      Start all development services
+    build_production.bat   Build optimized frontend and Runtime assets
+    start_production.bat   Start an existing production-like build
+    helpers/               Frontend public environment synchronization
+  docker/                 Formal server deployment
+    compose.yml            Agent + Runtime + Nginx frontend stack
+  performance/            Cross-platform deployment capacity validation
+    load_test.py
+    payloads/state.json
+```
 
-## Port conflicts
+The old native Linux multi-process launchers were removed. Linux servers use
+Docker Compose so their Python, Node.js, Nginx, networking, and restart policy
+are defined by the same deployment configuration.
 
-The local development chain is:
+## Windows local workflow
 
-`React frontend (3000) -> CopilotKit runtime (5000) -> FastAPI agent (8000)`
+Run these commands from the repository root:
 
-If one of these ports is already occupied, do not keep launching another copy of the app. Stop the owning process first, or change the matching port in the repository root `.env`:
+| Command | Purpose |
+| --- | --- |
+| `scripts\windows\satgpt.bat setup` | Validate prerequisites and install dependencies |
+| `scripts\windows\satgpt.bat dev` | Start Agent, Runtime, and the CRA development server |
+| `scripts\windows\satgpt.bat build` | Build optimized production assets |
+| `scripts\windows\satgpt.bat prod` | Start an existing production-like build |
+| `scripts\windows\satgpt.bat deploy` | Build and start the production-like stack |
 
-- `FRONTEND_PORT` for React
-- `RUNTIME_PORT` for CopilotKit runtime
-- `AGENT_PORT` for FastAPI agent
+The Windows production-like path uses the Node gateway and is intended for
+local acceptance testing or a Windows-only host.
 
-After changing ports, rerun `scripts\windows\start_windows.bat` so `frontend\.env.local` is regenerated with the correct proxy targets.
+## Docker server workflow
 
-## Recommended onboarding flow
+Run the platform-independent Docker Compose commands documented in
+[`docker/README.md`](docker/README.md). Docker is the canonical formal server
+deployment path and uses the Nginx frontend as the only public gateway.
 
-1. Run `scripts\windows\setup_windows.bat`
-2. Copy `.env.example` to `.env`, then fill in the repository root `.env`
-3. Run `scripts\windows\start_windows.bat`
+## Configuration and ports
 
-## Optional proxy
+The repository-root `.env` is the only editable configuration source. The
+default service chain is:
 
-If Google Earth Engine or other services require a proxy, set:
+```text
+Frontend gateway :3000
+  |-- /api, /health, /agent -> FastAPI Agent :8000
+  `-- /copilotkit            -> CopilotKit Runtime :5000
+```
 
-`set SATGPT_HTTP_PROXY=http://127.0.0.1:7890`
+Ports 5000 and 8000 remain internal in Docker. Only `FRONTEND_PORT` is
+published. Presentation tooling lives under `experiments/presentations` and is
+not part of deployment.
 
-before launching `start_windows.bat`.
+## Merge regression checks
 
-When proxy is enabled, local service-to-service calls should bypass the proxy:
+Run after building the frontend. The gateway checks start isolated local mock
+upstreams; the Python checks exercise the merged handlers without GEE or LLM
+network calls.
 
-`set NO_PROXY=localhost,127.0.0.1,::1`
+```powershell
+node --test scripts/tests/gateway.test.cjs
+.\flood-venv\Scripts\python.exe -m unittest discover -s agent/tests -v
+```
 
-`start_windows.bat` now sets this automatically.
-
-## Manual startup note
-
-If you start services manually, make sure Python points to the project virtual environment first, for example:
-
-`SatGPT-app\flood-venv\Scripts\python.exe SatGPT-app\agent\server.py`
-
-Using a global Python interpreter may cause dependency/version drift and unstable local behavior.
+When upgrading an existing checkout, rename `REACT_APP_MAPBOX_ACCESS_KEY` to
+`REACT_APP_MAPBOX_ACCESS_TOKEN`, add `REACT_APP_MAPBOX_STYLE_URL`, and copy any
+missing gateway/queue settings from `.env.example`. `SATGPT_HEAVY_CONCURRENCY`
+replaces `GEE_MAX_CONCURRENCY`; carry over the previous value when configured.
+Keep existing secrets and provider URLs, then run the frontend environment sync.

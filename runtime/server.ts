@@ -3,9 +3,7 @@
  * 使用 Express 暴露运行时接口，并把请求转发给 Python LangGraph Agent。
  */
 import express, { Request, Response, NextFunction } from "express";
-import cors from "cors";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import {
   CopilotRuntime,
   copilotRuntimeNodeHttpEndpoint,
@@ -15,57 +13,26 @@ import { LangGraphHttpAgent } from '@copilotkit/runtime/langgraph';
 
 import dotenv from "dotenv";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-dotenv.config({ path: resolve(__dirname, "..", ".env") });
+dotenv.config({ path: resolve(process.cwd(), "..", ".env") });
 
-const app = express();
-const FRONTEND_PORT = process.env.FRONTEND_PORT || "3000";
-const PUBLIC_HOST = process.env.SATGPT_PUBLIC_HOST || "localhost";
-
-function getAllowedCorsOrigins(): string[] {
-  const configured = (process.env.SATGPT_CORS_ORIGINS || "").trim();
-  if (configured) {
-    return configured
-      .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean);
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
   }
-
-  const origins = new Set([
-    `http://localhost:${FRONTEND_PORT}`,
-    `http://127.0.0.1:${FRONTEND_PORT}`,
-  ]);
-
-  if (!["localhost", "127.0.0.1", "0.0.0.0"].includes(PUBLIC_HOST)) {
-    origins.add(`http://${PUBLIC_HOST}:${FRONTEND_PORT}`);
-  }
-
-  return [...origins];
+  return value;
 }
 
-const allowedCorsOrigins = getAllowedCorsOrigins();
-
-// CORS 配置：允许前端从不同来源访问运行时服务。
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedCorsOrigins.includes(origin)) {
-      callback(null, true);
-      return;
-    }
-
-    callback(new Error(`Origin not allowed by CORS: ${origin}`));
-  },
-  credentials: true,
-}));
+const app = express();
+const SERVICE_HOST = requireEnv("SATGPT_SERVICE_HOST");
 
 // 允许较大的 JSON 请求体，兼容地图与分析结果载荷。
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Python LangGraph 后端地址（FastAPI）。
-const AGENT_PORT = process.env.AGENT_PORT || "8000";
-const AGENT_URL = process.env.AGENT_URL || `http://${PUBLIC_HOST}:${AGENT_PORT}`;
+const AGENT_PORT = requireEnv("AGENT_PORT");
+const AGENT_URL = `http://${SERVICE_HOST}:${AGENT_PORT}`;
 
 // CopilotKit 需要的空服务适配器。
 const serviceAdapter = new EmptyAdapter();
@@ -137,12 +104,15 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 // 启动 Runtime 服务。
-const PORT = parseInt(process.env.RUNTIME_PORT || "5000");
-const HOST = process.env.RUNTIME_HOST || "0.0.0.0";
+const PORT = Number.parseInt(requireEnv("RUNTIME_PORT"), 10);
+const HOST = requireEnv("RUNTIME_HOST");
+
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  throw new Error("RUNTIME_PORT must be an integer between 1 and 65535");
+}
 
 app.listen(PORT, HOST, () => {
   console.log("[INFO] CopilotKit runtime started");
   console.log(`   - Runtime URL: http://${HOST}:${PORT}/copilotkit`);
   console.log(`   - LangGraph backend: ${AGENT_URL}`);
-  console.log(`   - CORS origins: ${allowedCorsOrigins.join(", ")}`);
 });
