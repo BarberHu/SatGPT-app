@@ -26,6 +26,16 @@ export class MapboxAdapter {
     return () => this.map.off('moveend', callback);
   }
 
+  onViewportChange(callback) {
+    this.map.on('move', callback);
+    this.map.on('resize', callback);
+    return () => { this.map.off('move', callback); this.map.off('resize', callback); };
+  }
+
+  measureGroundDistance(start, end) {
+    return this.map.unproject(start).distanceTo(this.map.unproject(end));
+  }
+
   getView() {
     const center = this.map.getCenter();
     const bounds = this.map.getBounds();

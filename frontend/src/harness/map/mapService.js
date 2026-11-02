@@ -24,6 +24,8 @@ export class MapService {
   captureSnapshot() { return this.engine.captureSnapshot(); }
   resize() { this.engine.resize?.(); }
   subscribeView(listener) { return this.engine.onViewChange?.(() => listener(this.getCurrentView())) || (() => {}); }
+  subscribeViewport(listener) { return this.engine.onViewportChange?.(listener) || (() => {}); }
+  measureGroundDistance(start, end) { return this.engine.measureGroundDistance?.(start, end) ?? null; }
   listLayers() { return [...this.layers.values()]; }
 
   addLayer(input) {

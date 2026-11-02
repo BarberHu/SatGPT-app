@@ -143,14 +143,79 @@
 .harness-app .agent-map-canvas-area { position: relative; flex: 1; min-height: 0; }
 .harness-app .harness-map { position: absolute; inset: 0; }.harness-app .mapboxgl-map { font-family: inherit; }
 .harness-app .agent-map-context { position: absolute; display: flex; gap: 7px; align-items: center; top: 17px; left: 16px; background: #fffffff0; padding: 7px 10px; border: 1px solid #e7e5df; border-radius: 7px; color: #89867c; font-size: 10px; pointer-events: none; box-shadow: 0 2px 7px #31281706; }
-.harness-app .agent-map-layers { position: absolute; bottom: 30px; left: 16px; right: 16px; background: #fffffff2; border: 1px solid #e8e6df; border-radius: 10px; box-shadow: 0 6px 20px #29200c0a; }
-.harness-app .agent-map-layers > summary { display: flex; align-items: center; gap: 8px; padding: 12px 14px; font-size: 11px; color: #77776a; }
-.harness-app .agent-map-layers > summary span { flex: 1; color: #b1af9e; }
-.harness-app .agent-map-layer-list { max-height: 220px; overflow: auto; padding: 0 14px 12px; }.harness-app .agent-map-layer-list > p { color: #b4b09f; font-size: 10px; padding: 0 0 3px; }
-.harness-app .agent-map-layer { display: flex; justify-content: space-between; align-items: center; gap: 5px; border-top: 1px solid #eeece4; min-height: 40px; }
-.harness-app .agent-map-layer label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; color: #6c7262; }
-.harness-app .agent-map-layer input { accent-color: #718f73; margin: 0; }.harness-app .agent-map-layer label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.harness-app .agent-map-layer > div { display: flex; }.harness-app .agent-map-layer button { width: 28px; height: 28px; color: #9b9c8c; }.harness-app .agent-map-layer button svg { width: 13px; height: 13px; }
+.harness-app .agent-map-footer { position: absolute; bottom: 30px; left: 16px; right: 16px; display: flex; flex-direction: column; gap: 9px; pointer-events: none; }
+.harness-app .agent-map-layers { position: relative; pointer-events: auto; background: #fffffff7; border: 1px solid #e2e6ed; border-radius: 14px; box-shadow: 0 5px 24px #27344916; padding-top: 8px; color: #313a4b; container-type: inline-size; container-name: agent-layer-panel; }
+.harness-app .agent-map-layers::before { content: ''; position: absolute; width: 34px; height: 4px; border-radius: 3px; background: #d7dae1; top: 7px; left: calc(50% - 17px); }
+.harness-app .agent-map-layers > summary { display: flex; align-items: center; gap: 8px; padding: 8px 14px 9px; font-size: 13px; font-weight: 600; color: #333e51; list-style: none; }
+.harness-app .agent-map-layers > summary::-webkit-details-marker { display: none; }
+.harness-app .agent-map-layers > summary > svg { margin-left: auto; transition: transform .15s; }
+.harness-app .agent-map-layers:not([open]) > summary > svg { transform: rotate(180deg); }
+.harness-app .agent-layer-count { display: inline-flex; align-items: center; justify-content: center; border: 1px solid #dce2ec; border-radius: 20px; min-width: 22px; height: 22px; font-size: 11px; font-weight: 500; color: #60708c; padding: 0 5px; background: #fafbfe; }
+.harness-app .agent-map-layer-list { max-height: min(48dvh, 380px); overflow: auto; padding: 0 8px 8px; overscroll-behavior: contain; }
+.harness-app .agent-map-layer-list > p { color: #9299a5; font-size: 11px; padding: 5px 6px; }
+.harness-app .agent-map-layer { border: 1px solid #e7ebf1; border-radius: 9px; padding: 8px; background: #fff; }
+.harness-app .agent-map-layer + .agent-map-layer { margin-top: 8px; }
+.harness-app .agent-layer-heading { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(120px, 27%) 30px 28px; align-items: center; gap: 10px; min-width: 0; min-height: 52px; }
+.harness-app .agent-layer-thumbnail { display: block; width: 64px; height: 52px; flex: none; border: 1px solid #e4e8ee; border-radius: 7px; background: #f4f6f8; overflow: hidden; padding: 0; }
+.harness-app .agent-layer-thumbnail img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.harness-app .agent-layer-thumbnail:focus-visible, .harness-app .agent-layer-eye:focus-within { outline: 2px solid #5574b5; outline-offset: 3px; }
+.harness-app .agent-layer-no-preview { display: flex; flex-direction: column; gap: 5px; align-items: center; justify-content: center; color: #a1a9b5; font-size: 9px; }
+.harness-app .agent-layer-info { min-width: 0; }
+.harness-app .agent-layer-info > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 13px; color: #303b50; line-height: 1.6; }
+.harness-app .agent-layer-meta { display: flex; align-items: center; gap: 6px; color: #929baa; font-size: 10px; margin-top: 6px; min-width: 0; }
+.harness-app .agent-layer-meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-app .agent-layer-meta > span:first-child { flex-shrink: 0; max-width: 57%; }
+.harness-app .agent-layer-meta > span[aria-hidden] { flex: none; }
+.harness-app .agent-layer-eye { display: flex; align-items: center; justify-content: center; position: relative; color: #5576bc; width: 30px; height: 32px; border-radius: 6px; flex: none; cursor: pointer; }
+.harness-app .agent-layer-eye:hover { background: #f0f4fb; }
+.harness-app .agent-layer-eye input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.harness-app .agent-map-layer.is-hidden .agent-layer-eye { color: #a1a8b5; }
+.harness-app .agent-layer-more { flex: none; width: 28px; height: 32px; padding: 0; color: #7b869a; }
+.harness-app .agent-layer-legend { min-width: 0; margin: 0; color: #7b8799; font-size: 10px; }
+.harness-app .agent-layer-legend-title { display: block; margin-bottom: 3px; }
+.harness-app .agent-layer-scale { width: 100%; }
+.harness-app .agent-layer-colorbar { height: 6px; border: 1px solid #0000000b; border-radius: 3px; }
+.harness-app .agent-layer-scale-labels { display: flex; justify-content: space-between; gap: 10px; margin-top: 3px; font-variant-numeric: tabular-nums; font-size: 10px; color: #69768b; }
+.harness-app .agent-layer-scale > small { display: block; margin-top: 3px; font-size: 10px; }
+.harness-app .agent-layer-categories { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); list-style: none; padding: 0; margin: 0; gap: 4px 10px; max-height: 34px; overflow-y: auto; overscroll-behavior: contain; }
+.harness-app .agent-layer-categories li { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.harness-app .agent-layer-categories li > span:nth-child(2) { overflow-wrap: anywhere; }
+.harness-app .agent-layer-categories small { margin-left: auto; color: #a3abb7; }
+.harness-app .agent-layer-swatch { display: block; width: 10px; height: 10px; border: 1px solid #00000012; border-radius: 2px; flex: none; }
+.harness-app .agent-layer-legend-missing { min-width: 0; margin: 0; color: #a2aab6; font-size: 10px; }
+.harness-app .agent-layer-rgb > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 3px; overflow-wrap: anywhere; }
+.harness-app .agent-layer-details { margin-top: 12px; border-top: 1px solid #edf0f5; padding-top: 10px; color: #7e899b; font-size: 11px; }
+.harness-app .agent-layer-details dl { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 7px 10px; margin: 0; }
+.harness-app .agent-layer-details dt { font-weight: 400; color: #9ba4b1; }
+.harness-app .agent-layer-details dd { margin: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.harness-app .agent-layer-details > p { margin: 10px 0 0; line-height: 1.7; overflow-wrap: anywhere; }
+.harness-app .agent-layer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.harness-app .agent-layer-actions button { font-size: 11px; color: #5877b7; height: 30px; }
+.harness-app .agent-layer-actions .agent-layer-remove { color: #a46565; }
+/* Respond to the map panel width, including desktop split-pane resizing. */
+@container agent-layer-panel (max-width: 620px) {
+  .harness-app .agent-layer-heading { grid-template-columns: 52px minmax(0, 1fr) minmax(108px, 28%) 28px 24px; gap: 8px; }
+  .harness-app .agent-layer-thumbnail { width: 52px; height: 48px; }
+  .harness-app .agent-layer-info > strong { font-size: 12px; }
+  .harness-app .agent-layer-meta { flex-wrap: wrap; gap: 2px 5px; font-size: 9px; margin-top: 4px; }
+  .harness-app .agent-layer-meta > span:first-child { max-width: 100%; }
+  .harness-app .agent-layer-more { width: 24px; }
+}
+@container agent-layer-panel (max-width: 420px) {
+  .harness-app .agent-layer-heading { grid-template-columns: 48px minmax(0, 1fr) 28px 24px; column-gap: 8px; row-gap: 5px; }
+  .harness-app .agent-layer-thumbnail { width: 48px; height: 48px; grid-column: 1; grid-row: 1 / 3; }
+  .harness-app .agent-layer-info { grid-column: 2; grid-row: 1; }
+  .harness-app .agent-layer-legend, .harness-app .agent-layer-legend-missing { grid-column: 2; grid-row: 2; }
+  .harness-app .agent-layer-legend-title { font-size: 9px; margin-bottom: 2px; }
+  .harness-app .agent-layer-scale { max-width: 180px; }
+  .harness-app .agent-layer-eye { grid-column: 3; grid-row: 1 / 3; }
+  .harness-app .agent-layer-more { grid-column: 4; grid-row: 1 / 3; }
+}
+.harness-app .agent-distance-scale { align-self: flex-end; width: min(232px, 100%); height: 32px; padding: 0 30px 0 10px; display: flex; align-items: flex-end; justify-content: flex-end; color: #3b485c; text-shadow: 0 0 3px #fff, 0 1px 2px #fff; font-size: 11px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.harness-app .agent-distance-axis { position: relative; height: 2px; margin-bottom: 3px; background: #3b485c; box-shadow: 0 1px 1px #ffffffa0; flex: none; }
+.harness-app .agent-distance-tick { position: absolute; bottom: -3px; height: 11px; width: 1.5px; background: #3b485c; transform: translateX(-50%); }
+.harness-app .agent-distance-tick > span { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); white-space: nowrap; line-height: 1; }
+
 .harness-app .agent-map-placeholder { position: absolute; top: 34%; left: 12%; right: 12%; text-align: center; color: #969886; display: flex; flex-direction: column; align-items: center; gap: 14px; font-size: 11px; }.harness-app .agent-map-placeholder strong { font-weight: 500; color: #7c806d; }
 .harness-app .agent-map-error { position: absolute; bottom: 140px; left: 20px; right: 20px; background: #fff4ea; color: #9b6d44; padding: 12px; font-size: 11px; border-radius: 8px; }
 .harness-app .agent-mobile-tabs { display: none; }

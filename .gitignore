@@ -83,3 +83,4 @@ coverage/
 **/local-config*.json
 **/credentials*.json
 /.worktrees/
+/design-qa.md

@@ -1,3 +1,4 @@
+import { layerPresentation } from './layerPresentation';
 const GEE_TILE = /^https:\/\/earthengine\.googleapis\.com\/v1\/projects\/[\w./-]+\/tiles\/\{z\}\/\{x\}\/\{y\}$/;
 
 export function normalizeLayer(spec) {
@@ -19,6 +20,7 @@ export function normalizeLayer(spec) {
   if (!Number.isFinite(opacity)) throw new TypeError('Invalid layer opacity');
   const renderAs = ['line', 'fill', 'circle'].includes(spec.renderAs) ? spec.renderAs : 'line';
   return {
+    ...layerPresentation(spec),
     id, name, kind, url: spec.url || null, data: spec.data || null,
     sourceLayer: spec.sourceLayer || null, visible: spec.visible !== false,
     renderAs, opacity: Math.max(0, Math.min(1, opacity)),

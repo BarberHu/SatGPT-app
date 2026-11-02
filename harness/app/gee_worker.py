@@ -192,10 +192,46 @@ def execute(payload: dict) -> dict:
             "visualization": options,
         }
     }
+    # -I workers resolve local helpers explicitly, independent of startup cwd.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from layer_details import layer_metadata, legend_labels
+    output['layer']['metadata'] = layer_metadata(payload.get('metadata'))
+    labels = legend_labels(payload.get('legend'), options)
+    if labels:
+        output['layer']['legend'] = labels
+    bounds = payload.get('bounds')
+    if bounds is not None:
+        output['layer']['bounds'] = bounds
+        try:
+            output['layer']['thumbnail'] = save_thumbnail(image, options, bounds, ee)
+        except Exception:
+            # A failed optional preview must not discard an already-created map.
+            output['layer']['thumbnail_status'] = 'unavailable'
+    else:
+        output['layer']['thumbnail_status'] = 'missing_bounds'
     analysis_code = payload.get("analysis_code")
     if isinstance(analysis_code, str) and analysis_code.strip():
         output["analysis"] = jsonable(run_code(ee, analysis_code))
     return output
+
+
+def save_thumbnail(image, visualization, bounds, ee):
+    if (not isinstance(bounds, list) or len(bounds) != 4
+            or not all(isinstance(v, (int, float)) for v in bounds)
+            or not (-180 <= bounds[0] < bounds[2] <= 180 and -85 <= bounds[1] < bounds[3] <= 85)):
+        raise ValueError('Invalid layer thumbnail bounds')
+    url = image.getThumbURL({**visualization, 'format': 'png', 'dimensions': 256,
+                             'region': ee.Geometry.Rectangle(bounds)})
+    with urlopen(url, timeout=20) as response:
+        png = response.read(4_000_001)
+    if len(png) > 4_000_000 or len(png) < 24 or not png.startswith(b'\x89PNG\r\n\x1a\n'):
+        raise ValueError('Invalid layer thumbnail PNG')
+    directory = Path(__file__).resolve().parent.parent / 'state' / 'previews'
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = f'{uuid.uuid4().hex}.png'
+    (directory / filename).write_bytes(png)
+    return {'url': f'/api/previews/{filename}', 'width': int.from_bytes(png[16:20], 'big'),
+            'height': int.from_bytes(png[20:24], 'big')}
 
 
 def main() -> None:

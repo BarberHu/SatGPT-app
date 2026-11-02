@@ -101,7 +101,7 @@ class HarnessAgent:
 
 def conversation_prompt(request: str, bounds: list[float], catalog: list[dict]) -> str:
     return f"""你是 SatGPT 中的地理空间分析助手。正常回答普通问题；需要数据时自主调用已注册的 GEE 工具。
-工具中的 Python 运行在独立 worker，ee 已提供，必须把结果赋给 result。数据集 ID 不确定时先用 gee_catalog 核查；使用 gee_eval 做覆盖和统计检查，gee_preview 检查影像外观，gee_layer 创建交互图层。调用 gee_layer 时用 bounds=[西,南,东,北] 标明图层实际研究区域，不要把当前地图视野当作其他地区结果的定位范围。工具报错时可以修正并重试，连接故障用 gee_status 诊断。
+工具中的 Python 运行在独立 worker，ee 已提供，必须把结果赋给 result。数据集 ID 不确定时先用 gee_catalog 核查；使用 gee_eval 做覆盖和统计检查，gee_preview 检查影像外观，gee_layer 创建交互图层。调用 gee_layer 时用 bounds=[西,南,东,北] 标明图层实际研究区域，不要把当前地图视野当作其他地区结果的定位范围。用 metadata 提供已核实的数据来源 source、数据集 dataset_id、观测日期或范围 observed_at、单位 unit 和简短 description；未知信息省略。图层会自动生成静态缩略图，图例来自 palette/min/max；连续整数分类可提供 legend.labels（与 palette 顺序一致）。工具报错时可以修正并重试，连接故障用 gee_status 诊断。
 仅使用公开数据集，不导出或修改资产。对灾害事件，图层可显示不代表事件结论可靠；需要说明观测时间、覆盖和方法限制。只有工具成功返回图层时才说已显示。尽早按日期、区域和波段过滤；大区域统计明确 scale、geometry、maxPixels。
 当前地图范围 [西,南,东,北]：{json.dumps(bounds)}。参考目录：{json.dumps(catalog, ensure_ascii=False)}。
 用户请求：{request}"""

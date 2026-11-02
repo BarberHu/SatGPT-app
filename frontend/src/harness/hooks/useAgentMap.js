@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MapService } from '../map/mapService';
 import { mapOptions } from '../map/config';
 import { latestLayerBounds, messageLayerBounds, readAgentView, saveAgentView } from '../map/viewState';
+import { messageLayerPresentation } from '../map/layerPresentation';
 
 const choicesKey = id => `satgpt:harness:layers:${id}`;
 export function readLayerChoices(id) {
@@ -60,7 +61,7 @@ export function useAgentMap(conversationId, messages) {
       (message.layers || []).forEach((layer, index) => {
         const id = `${message.job_id}-${index}`;
         if (!choices.current.removed.has(id) && !map.listLayers().some(item => item.id === id)) {
-          try { map.addLayer({ ...layer, id, kind: 'gee', bounds: messageLayerBounds(message, layer),
+          try { map.addLayer({ ...messageLayerPresentation(layer, message), id, kind: 'gee', bounds: messageLayerBounds(message, layer),
             visible: choices.current.visibility[id] ?? layer.visible }); }
           catch (cause) { setError(`图层无法加载：${cause.message}`); }
         }
@@ -89,6 +90,8 @@ export function useAgentMap(conversationId, messages) {
   };
   const focusLayer = layer => { if (layer.bounds) service.current?.setView({ bounds: layer.bounds }); };
   const bounds = useCallback(() => service.current?.getCurrentView().bounds, []);
+  const measureGroundDistance = useCallback((start, end) => service.current?.measureGroundDistance(start, end), []);
+  const subscribeViewport = useCallback(listener => service.current?.subscribeViewport(listener) || (() => {}), []);
   const snapshot = () => {
     try {
       const link = document.createElement('a');
@@ -96,5 +99,5 @@ export function useAgentMap(conversationId, messages) {
     } catch (cause) { setError(`截图失败：${cause.message}`); }
   };
   return { container, ready, layers, error, configured: Boolean(mapOptions.token && mapOptions.style),
-    toggleLayer, removeLayer, focusLayer, bounds, snapshot };
+    toggleLayer, removeLayer, focusLayer, bounds, snapshot, measureGroundDistance, subscribeViewport };
 }

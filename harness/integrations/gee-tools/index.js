@@ -128,7 +128,7 @@ export function apply(ctx) {
 
   ctx.tools.register({
     name: 'gee_layer',
-    description: 'Create an interactive Earth Engine raster map layer from read-only Python code. ee is available; assign an ee.Image to result. Set bounds to the actual layer area [west,south,east,north], especially when it differs from the current map view or the code has no literal ee.Geometry.Rectangle. The runner disallows imports, file access, definitions, and private attributes.',
+    description: 'Create an interactive Earth Engine layer and a static thumbnail from read-only Python code. Assign an ee.Image to result. Set bounds to the actual layer area [west,south,east,north]. Supply known source, dataset_id, observed_at (observation date/range), unit and description in metadata; omit unknown facts. Palette/min/max generate the numeric legend. For consecutive integer classes only, provide legend.type=categorical and labels in palette order. The runner disallows imports, file access, definitions, and private attributes.',
     parameters: {
       type: 'object',
       properties: {
@@ -137,8 +137,16 @@ export function apply(ctx) {
         bands: { type: 'array', items: { type: 'string' } },
         min: { type: 'number' }, max: { type: 'number' },
         palette: { type: 'array', items: { type: 'string' } },
+        metadata: { type: 'object', properties: {
+          source: { type: 'string' }, dataset_id: { type: 'string' },
+          observed_at: { type: 'string' }, unit: { type: 'string' }, description: { type: 'string' },
+        }, additionalProperties: false },
+        legend: { type: 'object', properties: {
+          type: { type: 'string', enum: ['categorical'] },
+          labels: { type: 'array', items: { type: 'string' }, description: 'Labels for consecutive integer values min..max, exactly matching palette order.' },
+        }, required: ['type', 'labels'], additionalProperties: false },
       },
-      required: ['name', 'code'], additionalProperties: false,
+      required: ['name', 'code', 'bounds'], additionalProperties: false,
     },
     output: {
       schema: { type: 'object', properties: { layer: { type: 'object', additionalProperties: true } }, required: ['layer'], additionalProperties: true },
@@ -148,7 +156,8 @@ export function apply(ctx) {
       const bounds = focusBounds(args.bounds);
       const visualization = { name: args.name };
       for (const key of ['bands', 'min', 'max', 'palette']) if (args[key] !== undefined) visualization[key] = args[key];
-      const value = await runWorker({ layer_code: args.code, visualization }, exec.signal);
+      const value = await runWorker({ layer_code: args.code, visualization, bounds,
+        metadata: args.metadata, legend: args.legend }, exec.signal);
       if (bounds) value.layer.bounds = bounds;
       await fs.appendFile(eventFile, JSON.stringify({ layer: value.layer, code: args.code,
         created_at: Date.now() }) + '\n');
