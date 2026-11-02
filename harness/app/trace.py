@@ -15,11 +15,11 @@ def clean_text(value, secrets: tuple[str, ...] = (), limit: int = 16000) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
     for secret in secrets:
         if secret:
-            text = text.replace(secret, "[已隐藏密钥]")
-    text = PRIVATE_KEY.sub("[已隐藏私钥]", text)
-    text = BEARER.sub("Bearer [已隐藏令牌]", text)
+            text = text.replace(secret, "[REDACTED KEY]")
+    text = PRIVATE_KEY.sub("[REDACTED PRIVATE KEY]", text)
+    text = BEARER.sub("Bearer [REDACTED TOKEN]", text)
     if len(text) > limit:
-        return text[:limit] + f"\n…（已截断，原始长度 {len(text)} 字符）"
+        return text[:limit] + f"\n… (truncated; original length: {len(text)} characters)"
     return text
 
 
@@ -63,7 +63,7 @@ def add_harness_event(trace: list[dict], event: dict, secrets: tuple[str, ...] =
         call_id = str(data.get("callId") or "")
         trace.append({
             "kind": "tool", "call_id": call_id,
-            "name": clean_text(data.get("name") or "工具", secrets, 120),
+            "name": clean_text(data.get("name") or "Tool", secrets, 120),
             "arguments": clean_text(data.get("arguments") or "", secrets),
             "result": "", "status": "running", "step": step, "time": when,
         })
@@ -79,7 +79,7 @@ def add_harness_event(trace: list[dict], event: dict, secrets: tuple[str, ...] =
                 item["finished_at"] = when
                 return True
         trace.append({
-            "kind": "tool", "call_id": call_id, "name": "工具", "arguments": "",
+            "kind": "tool", "call_id": call_id, "name": "Tool", "arguments": "",
             "result": result, "status": "error" if message.get("isError") else "done",
             "step": step, "time": when, "finished_at": when,
         })

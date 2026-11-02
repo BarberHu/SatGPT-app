@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 def selected_provider() -> str:
     provider = os.getenv("DSH_PROVIDER", "deepseek-official").strip().lower()
     if provider not in {"aihubmix", "deepseek-official"}:
-        raise ValueError("DSH_PROVIDER 只能是 aihubmix 或 deepseek-official")
+        raise ValueError("DSH_PROVIDER must be aihubmix or deepseek-official")
     return provider
 
 
@@ -26,7 +26,7 @@ def selected_reasoning_effort(model: str | None = None) -> str | None:
     if not value:
         value = "high" if "deepseek" in model.lower() else "default"
     if value not in {"default", "off", "low", "high", "max"}:
-        raise ValueError("DSH_REASONING_EFFORT 只能是 default、off、low、high 或 max")
+        raise ValueError("DSH_REASONING_EFFORT must be default, off, low, high, or max")
     return None if value == "default" else value
 
 
@@ -35,9 +35,9 @@ def selected_max_tokens() -> int:
     try:
         value = int(raw)
     except ValueError as exc:
-        raise ValueError("DSH_MAX_TOKENS 必须是整数") from exc
+        raise ValueError("DSH_MAX_TOKENS must be an integer") from exc
     if not 1024 <= value <= 131072:
-        raise ValueError("DSH_MAX_TOKENS 必须在 1024–131072 之间")
+        raise ValueError("DSH_MAX_TOKENS must be between 1024 and 131072")
     return value
 
 
@@ -45,7 +45,7 @@ def harness_model_options(home: Path) -> dict:
     provider = selected_provider()
     model = os.getenv("DSH_MODEL", "deepseek-v4-flash").strip()
     if not model:
-        raise ValueError("DSH_MODEL 不能为空")
+        raise ValueError("DSH_MODEL must not be empty")
     effort = selected_reasoning_effort(model)
     effort_option = {"reasoning_effort": effort} if effort else {}
     if provider == "deepseek-official":
@@ -54,7 +54,7 @@ def harness_model_options(home: Path) -> dict:
     base_url = os.getenv("AIHUBMIX_BASE_URL", "https://aihubmix.com/v1").strip().rstrip("/")
     parsed = urlparse(base_url)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-        raise ValueError("AIHUBMIX_BASE_URL 必须是 HTTPS 地址，且不能包含账号或密钥")
+        raise ValueError("AIHUBMIX_BASE_URL must be an HTTPS URL without credentials or API keys")
     is_deepseek = "deepseek" in model.lower()
     model_entry = {"id": model}
     compat = {"supportsDeveloperRole": False, "maxTokensField": "max_tokens"}

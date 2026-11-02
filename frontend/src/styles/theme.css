@@ -1,0 +1,18 @@
+/* Shared palette follows the Basic layer manager; scoped to the workspace and portals. */
+.satgpt-root, .harness-app, .satgpt-settings-dialog {
+  --satgpt-ui-surface: rgba(255, 255, 255, .96);
+  --satgpt-ui-canvas: #ffffff;
+  --satgpt-ui-soft: #f8fafc;
+  --satgpt-ui-header: linear-gradient(180deg, rgba(248, 250, 252, .98) 0%, rgba(255, 255, 255, .98) 100%);
+  --satgpt-ui-border: rgba(226, 232, 240, .95);
+  --satgpt-ui-input-border: #d9dee7;
+  --satgpt-ui-heading: #0f172a;
+  --satgpt-ui-text: #334155;
+  --satgpt-ui-muted: #64748b;
+  --satgpt-ui-subtle: #94a3b8;
+  --satgpt-ui-hover: #f1f5f9;
+  --satgpt-ui-selected: #eff6ff;
+  --satgpt-ui-accent: #2563eb;
+  --satgpt-ui-focus: 0 0 0 3px rgba(74, 144, 217, .12);
+  --satgpt-ui-shadow: 0 4px 16px rgba(15, 23, 42, .06);
+}

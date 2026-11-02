@@ -7,17 +7,17 @@ import {
   helpSections,
 } from '../content/helpContent';
 
-function Modals() {
+function Modals({ active = true }) {
   const { activeModal, setActiveModal } = useAppContext();
 
   useEffect(() => {
-    if (!activeModal) return undefined;
+    if (!active || !activeModal) return undefined;
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') setActiveModal(null);
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeModal, setActiveModal]);
+  }, [active, activeModal, setActiveModal]);
 
   return (
     <>

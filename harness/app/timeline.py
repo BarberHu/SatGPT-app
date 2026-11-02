@@ -80,7 +80,7 @@ class Timeline:
             if any(row.get('call_id') == call_id for row in self.rows if row['kind'] == 'tool'):
                 return
             self.add('tool', call_id=call_id,
-                     name=clean_text(data.get('name') or '工具', self.secrets, 120),
+                     name=clean_text(data.get('name') or 'Tool', self.secrets, 120),
                      arguments=clean_text(data.get('arguments') or '', self.secrets),
                      result='', status='running', **metadata)
         elif kind == 'tool/result':
@@ -88,14 +88,14 @@ class Timeline:
             call_id = str(message.get('toolCallId') or (message.get('source') or {}).get('callId') or '')
             row = next((row for row in self.rows if row.get('call_id') == call_id and row['kind'] == 'tool'), None)
             if row is None:
-                row = self.add('tool', call_id=call_id, name='工具', arguments='', **metadata)
+                row = self.add('tool', call_id=call_id, name='Tool', arguments='', **metadata)
             text = '\n'.join(block.get('text', '') for block in message.get('content', []) if block.get('type') == 'text')
             row.update(result=clean_text(text, self.secrets), status='error' if message.get('isError') else 'done',
                        result_session_seq=event.get('seq'))
             self.put(row)
         elif kind == 'llm/retry':
             self.retract()
-            self.add('status', text='正在重试', **metadata)
+            self.add('status', text='Retrying', **metadata)
 
     def finish(self, final=''):
         self.retract()

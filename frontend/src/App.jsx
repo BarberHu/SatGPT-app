@@ -13,7 +13,7 @@ import {
   installLongTaskObserver,
   updateAgentDiagnosticsContext,
 } from './utils/agentDiagnostics';
-function App({ onSwitchAgent }) {
+function App({ active = true }) {
   const { appMode, agentSidebarCollapsed, resultText } = useAppContext();
   const mapProfiler = useMemo(
     () => createReactProfilerHandler('MapContainer', () => ({ appMode })),
@@ -35,21 +35,21 @@ function App({ onSwitchAgent }) {
   return (
     <div className="water">
       <Profiler id="MapContainer" onRender={mapProfiler}>
-        <MapContainer />
+        <MapContainer active={active} />
       </Profiler>
       <SettingsButton />
       <div className="ui">
         <Legends />
-        <div className="ask-dock">
-          <ResultBox />
-          <div className="ask-dock-composer" hidden={Boolean(resultText)}>
-            <ChatBox />
-          </div>
-        </div>
-        <ControlPanel onSwitchAgent={onSwitchAgent} />
+        <ControlPanel />
         <Warnings />
       </div>
-      <Modals />
+      <div className="ask-dock">
+        <ResultBox />
+        <div className="ask-dock-composer" hidden={Boolean(resultText)}>
+          <ChatBox />
+        </div>
+      </div>
+      <Modals active={active} />
       <Spinner />
     </div>
   );

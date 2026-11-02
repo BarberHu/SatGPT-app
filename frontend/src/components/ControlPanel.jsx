@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeftRight } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import { trackUxEvent } from '../utils/analytics';
 
-function ControlPanel({ onSwitchAgent }) {
+function ControlPanel() {
   const {
     isPanelVisible,
     setIsPanelVisible,
@@ -39,15 +37,6 @@ function ControlPanel({ onSwitchAgent }) {
 
   const handleCollapsePanel = () => {
     setIsPanelVisible(false);
-  };
-
-  const handleModeToggle = () => {
-    trackUxEvent('mode_switch', {
-      from: 'ask',
-      to: 'agent',
-      entry: 'control_panel_header',
-    });
-    onSwitchAgent?.();
   };
 
   const handleDataTypeChange = (type) => {
@@ -110,22 +99,8 @@ function ControlPanel({ onSwitchAgent }) {
   return (
     <div className="panel">
       <header className="control-panel-header">
-        <img 
-          src="/assets/images/Sat-GPT-Logos-01.png" 
-          alt="SatGPT Logo" 
-          className="control-panel-logo"
-        />
+        <strong className="control-panel-title">Layer controls</strong>
         <div className="control-panel-header-actions">
-          <button
-            type="button"
-            className="panel-mode-toggle-btn"
-            onClick={handleModeToggle}
-            title="Switch to Agent mode"
-            aria-label="Switch to Agent mode"
-          >
-            <ArrowLeftRight size={13} strokeWidth={2.1} />
-            <span>Agent</span>
-          </button>
           <button
             type="button"
             className="collapse-button"

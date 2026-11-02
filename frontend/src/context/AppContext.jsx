@@ -147,7 +147,7 @@ export const AppProvider = ({ children }) => {
   // Basic-map analysis context retained for map and view components.
   const [agentAnalysisContext, setAgentAnalysisContext] = useState(createDefaultAgentAnalysisContext);
   
-  // Flood Agent 当前加载的影像结果，用于地图渲染与图层面板显示。
+  // Flood Agent imagery currently displayed on the map and in the layer panel.
   const [agentImagery, setAgentImagery] = useState(null);
   const [agentImageryLoading, setAgentImageryLoading] = useState(false);
   const [agentImageryDateWindow, setAgentImageryDateWindow] = useState(defaultAgentImageryDateWindow);

@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { sendChatMessage, getHistoricalMap, getFloodHotspotMap } from '../services/api';
 import { createCodeSnippet } from '../export/geeCodeGenerator';
-import { buildAskMapRequestParams } from '../utils/aoi';
+import { buildAskMapRequestParams, buildAoiSignature } from '../utils/aoi';
 
 const SUGGESTIONS = [
   'Tell me about the 2010 Bangkok floods',
@@ -47,6 +47,8 @@ function ChatBox() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionStage, setSubmissionStage] = useState(null);
   const requestControllerRef = useRef(null);
+  const mapRequestState = useRef(null);
+  mapRequestState.current = { aoi: buildAoiSignature(selectedAOI), dataType, yearControl };
 
   useEffect(() => () => {
     requestControllerRef.current?.abort();
@@ -100,8 +102,11 @@ function ChatBox() {
     const requestController = new AbortController();
     requestControllerRef.current = requestController;
 
+    const viewIntent = mapInstance?.createViewLease?.() || mapInstance;
+    const mapRequestOwner = mapRequestState.current;
     try {
       const gptResult = await sendChatMessage(chatInput, { signal: requestController.signal });
+      if (requestControllerRef.current !== requestController || requestController.signal.aborted) return;
       const parsedResponse = typeof gptResult.message === 'string'
         ? JSON.parse(gptResult.message)
         : gptResult.message;
@@ -123,7 +128,7 @@ function ChatBox() {
       if (responseData.CountryCode && countries[responseData.CountryCode]) {
         const countryData = countries[responseData.CountryCode];
         if (mapInstance) {
-          mapInstance.fitBounds([
+          viewIntent.fitBounds([
             [countryData[1][0], countryData[1][1]],
             [countryData[1][2], countryData[1][3]],
           ]);
@@ -162,6 +167,9 @@ function ChatBox() {
         mapData = await getHistoricalMap(params, { signal: requestController.signal });
       }
 
+      const owner = mapRequestState.current;
+      if (requestControllerRef.current !== requestController || requestController.signal.aborted
+        || owner.aoi !== mapRequestOwner.aoi || owner.dataType !== mapRequestOwner.dataType || owner.yearControl !== mapRequestOwner.yearControl) return;
       updateLayerData(mapData);
 
       const codeSnippet = createCodeSnippet(
@@ -236,7 +244,7 @@ function ChatBox() {
 
         {error && <p className="error">{error}</p>}
         {submissionStage && <p className="ask-status" role="status">
-          {submissionStage === 'answer' ? '正在生成回答…' : '回答已显示，地图图层加载中…'}
+          {submissionStage === 'answer' ? 'Generating answer…' : 'Answer ready. Loading map layers…'}
         </p>}
       </div>
 

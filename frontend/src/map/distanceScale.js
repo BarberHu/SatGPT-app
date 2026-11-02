@@ -13,9 +13,9 @@ export function distanceScale(measure, maxWidth) {
     if (!Number.isFinite(value) || value < 0) return null;
     if (value < meters) low = middle; else high = middle;
   }
-  const unit = meters >= 1000 ? '公里' : '米';
+  const unit = meters >= 1000 ? 'km' : 'm';
   const divisor = meters >= 1000 ? 1000 : 1;
-  const format = new Intl.NumberFormat('zh-CN', { maximumSignificantDigits: 6 });
+  const format = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 6 });
   return { meters, width: (low + high) / 2, unit,
     ticks: [0, 0.25, 0.5, 1].map(fraction => ({ fraction, label: format.format(meters * fraction / divisor) })) };
 }

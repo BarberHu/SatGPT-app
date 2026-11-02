@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MapService } from '../map/mapService';
-import { mapOptions } from '../map/config';
-import { latestLayerBounds, messageLayerBounds, readAgentView, saveAgentView } from '../map/viewState';
-import { messageLayerPresentation } from '../map/layerPresentation';
+import { useSharedMap } from '../../map/SharedMapContext';
+import { latestLayerBounds, messageLayerBounds } from '../map/viewState';
+import { messageLayerPresentation } from '../../map/layerPresentation';
 
 const choicesKey = id => `satgpt:harness:layers:${id}`;
 export function readLayerChoices(id) {
@@ -12,92 +11,58 @@ export function readLayerChoices(id) {
   } catch { return { visibility: {}, removed: new Set() }; }
 }
 
+/** Agent results are a session-scoped projection onto the one shared map. */
 export function useAgentMap(conversationId, messages) {
-  const container = useRef(null);
-  const service = useRef(null);
+  const shared = useSharedMap();
+  const current = useRef(null);
   const choices = useRef({ id: null, ...readLayerChoices(null) });
-  const restoredView = useRef(false);
+  const focusIntent = useRef(null);
   const [layers, setLayers] = useState([]);
-  const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
-    if (!container.current || !mapOptions.token || !mapOptions.style) return undefined;
-    let disposed = false;
-    let unsubscribe;
-    let unsubscribeView;
-    const initialView = readAgentView();
-    restoredView.current = Boolean(initialView);
-    let resize;
-    import('../map/mapboxAdapter').then(({ MapboxAdapter }) => {
-      if (disposed) return;
-      const map = new MapService(new MapboxAdapter(container.current, { ...mapOptions, initialView }));
-      service.current = map;
-      unsubscribe = map.subscribe(setLayers);
-      unsubscribeView = map.subscribeView(saveAgentView);
-      if (typeof ResizeObserver !== 'undefined') {
-        resize = new ResizeObserver(() => map.resize());
-        resize.observe(container.current);
-      }
-      setReady(true);
-    }).catch(cause => { if (!disposed) setError(cause.message); });
-    return () => {
-      disposed = true;
-      resize?.disconnect();
-      unsubscribe?.(); unsubscribeView?.();
-      service.current?.dispose(); service.current = null;
-    };
-  }, []);
-
+    if (!shared.service || !shared.ready || !conversationId) return undefined;
+    const scope = shared.service.scope(`agent:${conversationId}`);
+    current.current = scope;
+    shared.service.selectConversation(conversationId);
+    choices.current = { id: conversationId, ...readLayerChoices(conversationId) };
+    setLayers(scope.listLayers());
+    const unsubscribe = scope.subscribe(setLayers);
+    return () => { unsubscribe(); if (current.current === scope) current.current = null; };
+  }, [shared.service, shared.ready, conversationId]);
   useEffect(() => {
-    const map = service.current;
-    if (!map || !conversationId) return;
-    if (choices.current.id !== conversationId) {
-      const switching = Boolean(choices.current.id);
-      for (const layer of map.listLayers()) map.removeLayer(layer.id);
-      choices.current = { id: conversationId, ...readLayerChoices(conversationId) };
-      if (switching) restoredView.current = false;
-    }
+    const map = current.current;
+    if (!map || choices.current.id !== conversationId) return;
+    for (const layer of map.listLayers()) if (choices.current.removed.has(layer.id)) map.removeLayer(layer.id);
     for (const message of messages) {
       (message.layers || []).forEach((layer, index) => {
         const id = `${message.job_id}-${index}`;
-        if (!choices.current.removed.has(id) && !map.listLayers().some(item => item.id === id)) {
-          try { map.addLayer({ ...messageLayerPresentation(layer, message), id, kind: 'gee', bounds: messageLayerBounds(message, layer),
-            visible: choices.current.visibility[id] ?? layer.visible }); }
-          catch (cause) { setError(`图层无法加载：${cause.message}`); }
-        }
+        if (choices.current.removed.has(id)) return;
+        try {
+          if (!map.listLayers().some(item => item.id === id)) map.addLayer({ ...messageLayerPresentation(layer, message),
+            id, kind: 'gee', bounds: messageLayerBounds(message, layer), visible: choices.current.visibility[id] ?? layer.visible });
+        } catch (cause) { setError(`Unable to load layer: ${cause.message}`); }
       });
     }
-    if (!restoredView.current) {
+    // Only an explicit history action may restore a result extent. Mode switches
+    // and arriving task results never claim camera ownership.
+    if (focusIntent.current) {
       const bounds = latestLayerBounds(messages);
-      if (bounds) { map.setView({ bounds }); restoredView.current = true; }
+      if (bounds) focusIntent.current.setView({ bounds });
+      focusIntent.current = null;
     }
-  }, [ready, conversationId, messages]);
-
+  }, [shared.service, shared.ready, conversationId, messages]);
+  const prepareConversationChange = () => { focusIntent.current = shared.captureViewIntent('agent', true); };
   const persist = () => {
     try { localStorage.setItem(choicesKey(choices.current.id), JSON.stringify({
       visibility: choices.current.visibility, removed: [...choices.current.removed],
-    })); } catch { /* map remains usable without browser storage */ }
+    })); } catch { /* Map remains usable without browser storage. */ }
   };
   const toggleLayer = (id, visible) => {
-    service.current?.setVisibility(id, visible);
-    choices.current.visibility[id] = visible;
-    persist();
+    current.current?.setVisibility(id, visible); choices.current.visibility[id] = visible; persist();
   };
-  const removeLayer = id => {
-    service.current?.removeLayer(id);
-    choices.current.removed.add(id);
-    persist();
-  };
-  const focusLayer = layer => { if (layer.bounds) service.current?.setView({ bounds: layer.bounds }); };
-  const bounds = useCallback(() => service.current?.getCurrentView().bounds, []);
-  const measureGroundDistance = useCallback((start, end) => service.current?.measureGroundDistance(start, end), []);
-  const subscribeViewport = useCallback(listener => service.current?.subscribeViewport(listener) || (() => {}), []);
-  const snapshot = () => {
-    try {
-      const link = document.createElement('a');
-      link.href = service.current.captureSnapshot(); link.download = 'satgpt-map.png'; link.click();
-    } catch (cause) { setError(`截图失败：${cause.message}`); }
-  };
-  return { container, ready, layers, error, configured: Boolean(mapOptions.token && mapOptions.style),
-    toggleLayer, removeLayer, focusLayer, bounds, snapshot, measureGroundDistance, subscribeViewport };
+  const removeLayer = id => { current.current?.removeLayer(id); choices.current.removed.add(id); persist(); };
+  const focusLayer = layer => { if (layer.bounds) shared.captureViewIntent('agent').setView({ bounds: layer.bounds }); };
+  const bounds = useCallback(() => shared.service?.getCurrentView().bounds, [shared.service]);
+  return { ready: shared.ready, layers, error, configured: shared.configured,
+    toggleLayer, removeLayer, focusLayer, bounds, prepareConversationChange };
 }

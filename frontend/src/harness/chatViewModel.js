@@ -25,7 +25,7 @@ export function chatViewModel(messages, task, answer) {
     code: message.code || '',
     attachments: (message.previews || []).map((preview, index) => ({
       id: `${message.id}-preview-${index}`, type: 'image', url: preview.url,
-      name: preview.name || 'GEE 影像预览',
+      name: preview.name || 'GEE image preview',
     })),
     layers: (message.layers || []).map((layer, index) => ({ ...layer, id: `${message.job_id}-${index}`,
       bounds: messageLayerBounds(message, layer) })),

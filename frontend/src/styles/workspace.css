@@ -1,0 +1,68 @@
+/* Shared chrome is scoped independently of Basic styles and lazy Agent theme. */
+.satgpt-root { width: 100%; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--satgpt-ui-soft); }
+.satgpt-topbar { position: relative; z-index: 40; flex: 0 0 58px; min-height: 58px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--satgpt-ui-border); background: var(--satgpt-ui-header); color: var(--satgpt-ui-heading); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+.satgpt-topbar-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.satgpt-topbar-logo { display: block; width: 174px; max-width: 100%; height: auto; justify-self: start; }
+.satgpt-mode-tabs { display: inline-flex; align-items: center; padding: 4px; border-radius: 10px; background: var(--satgpt-ui-hover); gap: 3px; }
+.satgpt-mode-tabs > button { appearance: none; border: 0; border-radius: 8px; background: transparent; color: var(--satgpt-ui-muted); font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .2px; height: 36px; min-width: 110px; padding: 0 20px; cursor: pointer; transition: background .15s, color .15s; }
+.satgpt-mode-tabs > button:hover { background: var(--satgpt-ui-border); }
+.satgpt-mode-tabs > button[aria-selected="true"] { background: var(--satgpt-ui-accent); color: #fff; box-shadow: 0 2px 5px #2854a11c; }
+.satgpt-topbar-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+.satgpt-toolbar-button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--satgpt-ui-muted); cursor: pointer; }
+.satgpt-toolbar-button:hover { background: var(--satgpt-ui-hover); color: var(--satgpt-ui-accent); }
+.satgpt-toolbar-button:disabled { opacity: .35; cursor: default; }
+.satgpt-topbar button:focus-visible, .satgpt-settings-dialog button:focus-visible { outline: 2px solid var(--satgpt-ui-accent); outline-offset: 3px; }
+.satgpt-mode-content { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; width: 100%; }
+.satgpt-mode-content > .harness-app.harness-shell { height: 100%; min-height: 0; }
+.satgpt-root .water { position: relative; height: 100%; }
+.satgpt-root .water .ui { bottom: var(--satgpt-panel-gap); }
+.satgpt-root .water .panel { height: 100%; max-height: 100% !important; }
+.satgpt-root .water .settings-button, .satgpt-root .water .ask-dock { position: absolute; }
+.satgpt-root .water .ask-dock { max-height: calc(100% - 28px); }
+.satgpt-root .water .control-panel-title { font-size: 14px; font-weight: 600; color: var(--satgpt-ui-text); }
+.satgpt-mode-loading { padding: 32px; color: var(--satgpt-ui-muted); font-size: 13px; }
+.satgpt-capture-error { position: absolute; top: 64px; right: 18px; z-index: 45; border: 1px solid #efd9cf; border-radius: 8px; padding: 10px 14px; font-size: 12px; background: #fff8f3; color: #a4664b; }
+.satgpt-settings-overlay { position: fixed; inset: 0; background: #15233b44; z-index: 90; }
+.satgpt-settings-dialog { box-sizing: border-box; position: fixed; z-index: 91; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); padding: 26px; border: 1px solid var(--satgpt-ui-border); border-radius: 14px; background: #fff; box-shadow: 0 20px 70px #15233b30; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; color: var(--satgpt-ui-text); }
+.satgpt-settings-dialog h2 { display: flex; align-items: center; gap: 10px; margin: 0 24px 14px 0; font-size: 17px; font-weight: 600; }
+.satgpt-settings-dialog p { margin: 0 0 24px; font-size: 12px; line-height: 1.9; color: var(--satgpt-ui-muted); }
+.satgpt-settings-badge { font-size: 10px; font-weight: 400; border: 1px solid var(--satgpt-ui-border); border-radius: 5px; padding: 3px 6px; color: var(--satgpt-ui-muted); }
+.satgpt-settings-dialog label { display: block; font-size: 12px; margin: 0 0 8px; }
+.satgpt-settings-dialog input { box-sizing: border-box; display: block; width: 100%; border: 1px solid var(--satgpt-ui-input-border); border-radius: 8px; background: var(--satgpt-ui-soft); padding: 11px 12px; font: inherit; font-size: 12px; color: var(--satgpt-ui-subtle); }
+.satgpt-settings-close { display: flex; align-items: center; justify-content: center; position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--satgpt-ui-muted); cursor: pointer; }
+@media (max-width: 640px) {
+  .satgpt-topbar { flex-basis: 100px; min-height: 100px; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 46px 46px; column-gap: 12px; padding: 0 14px 8px; }
+  .satgpt-topbar-logo { width: 136px; }
+  .satgpt-topbar-actions { grid-column: 2; grid-row: 1; gap: 6px; }
+  .satgpt-mode-tabs { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
+  .satgpt-mode-tabs > button { min-width: 110px; height: 32px; padding: 0 18px; font-size: 12px; }
+  .satgpt-capture-error { top: 106px; left: 14px; right: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .satgpt-topbar button { transition: none; } }
+/* One engine surface stays mounted while the business panels change. */
+.satgpt-root [hidden] { display: none !important; }
+.satgpt-map-surface { position: absolute; z-index: 1; inset: 0; visibility: hidden; overflow: hidden; }
+.satgpt-map-canvas { position: absolute; inset: 0; }
+.satgpt-root[data-mode="agent"] .mapboxgl-canvas { cursor: grab; }
+.satgpt-root[data-mode="agent"] .mapboxgl-canvas:active { cursor: grabbing; }
+.satgpt-map-viewport { position: absolute; inset: 0; pointer-events: none; }
+.satgpt-business-panel { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.satgpt-basic-panel .water { pointer-events: none; }
+.satgpt-basic-panel :is(.ui, .ask-dock, .settings-button, .satgpt-map-confirm-card, .modal, .modal-overlay, .spinner-overlay) { pointer-events: auto; }
+.satgpt-business-panel .harness-app.harness-shell { height: 100%; min-height: 0; background: transparent; }
+.satgpt-agent-panel :is(.agent-history, .agent-chat, .agent-mobile-tabs, .agent-resize-handle, .agent-map-layers, .agent-map-error) { pointer-events: auto; }
+.satgpt-business-panel.satgpt-agent-panel .agent-map-workspace { background: transparent; }
+.satgpt-business-panel.satgpt-agent-panel .agent-map-footer { bottom: 71px; }
+.satgpt-basic-panel .satgpt-map-shell { position: absolute; inset: 0; pointer-events: none; }
+.satgpt-map-status { position: absolute; bottom: 140px; left: 20px; right: 20px; background: #fff8f3; color: #a4664b; border-radius: 8px; padding: 12px; font-size: 12px; pointer-events: none; }
+.satgpt-shared-scale { position: absolute; bottom: 30px; left: 16px; right: 16px; display: flex; justify-content: flex-end; pointer-events: none; }
+body:has(.satgpt-root[data-mode="basic"]) .harness-portal { display: none; }
+.workspace-distance-scale { align-self: flex-end; width: min(232px, 100%); height: 32px; padding: 0 30px 0 10px; display: flex; align-items: flex-end; justify-content: flex-end; color: #3b485c; text-shadow: 0 0 3px var(--satgpt-ui-canvas), 0 1px 2px var(--satgpt-ui-canvas); font-size: 11px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.workspace-distance-axis { position: relative; height: 2px; margin-bottom: 3px; background: #3b485c; box-shadow: 0 1px 1px #ffffffa0; flex: none; }
+.workspace-distance-tick { position: absolute; bottom: -3px; height: 11px; width: 1.5px; background: #3b485c; transform: translateX(-50%); }
+.workspace-distance-tick > span { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); white-space: nowrap; line-height: 1; }
+
+.satgpt-basic-panel :is(.overlay, [role="dialog"], .modal_3d, .modal_3d_help) { pointer-events: auto; }
+
+/* Basic chat is positioned against the workspace, not the narrow control panel. */
+.satgpt-basic-panel .water .ask-dock { bottom: 76px; }

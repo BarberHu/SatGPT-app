@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { distanceScale } from '../map/distanceScale';
+import { distanceScale } from './distanceScale';
 
 /** Engine-independent ruler aligned with its real screen position on the map. */
 export default function MapScale({ map }) {
@@ -31,11 +31,11 @@ export default function MapScale({ map }) {
     return () => { disposed = true; if (frame !== null) cancelAnimationFrame(frame); observer?.disconnect(); unsubscribe?.(); };
   }, [map.ready, map.container, map.measureGroundDistance, map.subscribeViewport]);
   if (!map.ready) return null;
-  const description = scale ? `地图比例尺：${scale.ticks.map(tick => tick.label).join('、')}${scale.unit}` : undefined;
-  return <div ref={ruler} className="agent-distance-scale" role="img" aria-label={description}
+  const description = scale ? `Map scale: ${scale.ticks.map(tick => tick.label).join(', ')} ${scale.unit}` : undefined;
+  return <div ref={ruler} className="workspace-distance-scale" role="img" aria-label={description}
     aria-hidden={scale ? undefined : true} style={{ visibility: scale ? 'visible' : 'hidden' }}>
-    {scale ? <div className="agent-distance-axis" style={{ width: `${scale.width}px` }} aria-hidden="true">
-      {scale.ticks.map((tick, index) => <span key={tick.fraction} className="agent-distance-tick" style={{ left: `${tick.fraction * 100}%` }}>
+    {scale ? <div className="workspace-distance-axis" style={{ width: `${scale.width}px` }} aria-hidden="true">
+      {scale.ticks.map((tick, index) => <span key={tick.fraction} className="workspace-distance-tick" style={{ left: `${tick.fraction * 100}%` }}>
         <span>{tick.label}{index === scale.ticks.length - 1 ? ` ${scale.unit}` : ''}</span>
       </span>)}
     </div> : null}

@@ -20,13 +20,13 @@ from .task_stream import TaskStream
 
 def validate_bounds(value) -> list[float]:
     if not isinstance(value, list) or len(value) != 4:
-        raise ValueError("bounds 必须是 [西,南,东,北]")
+        raise ValueError("bounds must be [west,south,east,north]")
     try:
         west, south, east, north = [float(number) for number in value]
     except (TypeError, ValueError) as exc:
-        raise ValueError("bounds 必须都是数字") from exc
+        raise ValueError("bounds must contain only numbers") from exc
     if not (-180 <= west < east <= 180 and -85 <= south < north <= 85):
-        raise ValueError("地图边界超出有效范围")
+        raise ValueError("Map bounds are outside the valid range")
     return [west, south, east, north]
 
 
@@ -125,11 +125,11 @@ class TaskController:
         if isinstance(data, dict):
             conversation_id = data.get("conversation_id")
             if not isinstance(conversation_id, str) or not conversation_id.startswith("webgis-"):
-                raise ValueError("对话会话 ID 无效")
+                raise ValueError("Invalid conversation session ID")
             self.conversation_id = conversation_id
             data = data.get("messages")
         if not isinstance(data, list):
-            raise ValueError("对话历史格式无效")
+            raise ValueError("Invalid conversation history format")
         return data[-100:]
 
     def _save_messages(self) -> None:
@@ -170,7 +170,7 @@ class TaskController:
             records[self.conversation_id] = self.messages
             result = []
             for cid, messages in records.items():
-                title = next((m.get('content', '') for m in messages if m.get('role') == 'user'), '新对话')
+                title = next((m.get('content', '') for m in messages if m.get('role') == 'user'), 'New chat')
                 result.append({'id': cid, 'title': title[:80], 'current': cid == self.conversation_id,
                                'updated_at': messages[-1].get('created_at', '') if messages else '',
                                'message_count': len(messages)})
@@ -178,7 +178,7 @@ class TaskController:
 
     def activate_conversation(self, conversation_id):
         if not re.fullmatch(r'webgis-[A-Za-z0-9_-]{1,80}', conversation_id):
-            raise ValueError('对话 ID 无效')
+            raise ValueError('Invalid conversation ID')
         with self.conversation_lock:
             with self.lock:
                 if conversation_id == self.conversation_id:
@@ -186,13 +186,13 @@ class TaskController:
                             'active_task': next((j['id'] for j in self.jobs.values() if j['conversation_id'] == self.conversation_id
                                                  and j['status'] in {'queued', 'running'}), None)}
                 if any(j['status'] in {'queued', 'running'} for j in self.jobs.values()):
-                    raise RuntimeError('请等待当前任务结束后切换对话')
+                    raise RuntimeError('Wait for the current task to finish before switching conversations')
                 target = self.archive_dir / f'{conversation_id}.json'
                 if not target.is_file():
-                    raise FileNotFoundError('对话不存在')
+                    raise FileNotFoundError('Conversation not found')
                 record = json.loads(target.read_text(encoding='utf-8'))
                 if record.get('conversation_id') != conversation_id or not isinstance(record.get('messages'), list):
-                    raise ValueError('对话历史格式无效')
+                    raise ValueError('Invalid conversation history format')
                 self._archive_current()
             if self._agent is not None:
                 self._agent.__exit__(None, None, None)
@@ -207,7 +207,7 @@ class TaskController:
         with self.conversation_lock:
             with self.lock:
                 if any(job["status"] in {"queued", "running"} for job in self.jobs.values()):
-                    raise RuntimeError("智能体仍在处理消息，请等待当前任务结束后再创建新对话")
+                    raise RuntimeError("The agent is still processing a message. Wait for the current task to finish before starting a new conversation.")
                 self._archive_current()
             if self._agent is not None:
                 self._agent.__exit__(None, None, None)
@@ -231,11 +231,11 @@ class TaskController:
 
     def create(self, prompt: str, bounds, conversation_id=None) -> dict:
         if not isinstance(prompt, str) or not (3 <= len(prompt.strip()) <= 2000):
-            raise ValueError("任务描述需要 3–2000 个字符")
+            raise ValueError("The prompt must contain 3–2000 characters")
         bounds = validate_bounds(bounds)
         with self.conversation_lock:
             if conversation_id and conversation_id != self.conversation_id:
-                raise RuntimeError('当前对话已切换，请刷新后重试')
+                raise RuntimeError('The active conversation has changed. Refresh and try again.')
             job_id = uuid.uuid4().hex[:12]
             job = {
                 "id": job_id, "conversation_id": self.conversation_id,
@@ -323,7 +323,7 @@ class TaskController:
             self._update(job_id, status="running", started_at=started_at)
             if not model_key_configured():
                 key_name = "AIHUBMIX_API_KEY" if selected_provider() == "aihubmix" else "DEEPSEEK_API_KEY"
-                raise RuntimeError(f"缺少 {key_name}；请先配置模型 API 密钥")
+                raise RuntimeError(f"Missing {key_name}. Set the model API key in the project root .env.")
             if self._agent is None:
                 candidate = self.agent_factory(workspace, self.home, job["conversation_id"])
                 candidate.require_resume = any(m.get('role') == 'assistant' and m.get('status') != 'failed'

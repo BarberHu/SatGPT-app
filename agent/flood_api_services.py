@@ -1415,7 +1415,7 @@ def get_chatgpt_response(user_input: str) -> Optional[str]:
     completion = _create_chat_completion(
         model=_get_llm_model(),
         messages=[
-            {"role": "system", "content": "You are a helpful GEE Assistant."},
+            {"role": "system", "content": "You are a helpful GEE Assistant. Write user-facing summaries in English by default, unless the user explicitly requests another language."},
             {"role": "user", "content": prompt},
         ],
         functions=[{

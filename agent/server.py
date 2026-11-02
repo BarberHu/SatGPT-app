@@ -436,7 +436,7 @@ async def get_flood_imagery(request: FloodImageRequest):
     if not gee_service.initialized:
         raise HTTPException(
             status_code=503,
-            detail="GEE服务未初始化，请检查认证配置"
+            detail="GEE service is not initialized. Check your Earth Engine credentials."
         )
 
     try:
@@ -537,7 +537,7 @@ async def gee_status():
     """
     return {
         "initialized": gee_service.initialized,
-        "message": "GEE服务正常" if gee_service.initialized else "GEE服务未初始化"
+        "message": "GEE service is initialized" if gee_service.initialized else "GEE service is not initialized"
     }
 
 
@@ -633,7 +633,7 @@ async def get_flood_impact(request: FloodImpactRequest):
     if not gee_service.initialized:
         raise HTTPException(
             status_code=503,
-            detail="GEE服务未初始化，请检查认证配置"
+            detail="GEE service is not initialized. Check your Earth Engine credentials."
         )
     
     try:
@@ -660,7 +660,7 @@ async def get_flood_impact(request: FloodImpactRequest):
         else:
             raise HTTPException(
                 status_code=400,
-                detail="需要提供 bounds 或 geojson 参数"
+                detail="Provide either bounds or geojson"
             )
         
         if "error" in result:

@@ -24,7 +24,7 @@ def _get_json(url: str) -> dict | None:
 def _build_index() -> dict:
     root = _get_json(f"{STAC_BASE}/catalog.json")
     if not root:
-        raise RuntimeError("无法访问 Earth Engine 公共 STAC 数据目录")
+        raise RuntimeError("Unable to access the public Earth Engine STAC catalog")
     children = [link["href"] for link in root.get("links", [])
                 if link.get("rel") == "child" and link.get("href")]
     with ThreadPoolExecutor(max_workers=24) as pool:
@@ -48,7 +48,7 @@ def _build_index() -> dict:
             "deprecated": bool(document.get("deprecated")),
         })
     if not items:
-        raise RuntimeError("Earth Engine 数据目录未返回数据集")
+        raise RuntimeError("The Earth Engine catalog returned no datasets")
     return {"fetched_at": int(time.time()), "count": len(items), "items": items}
 
 

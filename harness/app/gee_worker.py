@@ -48,31 +48,31 @@ def earth_engine(project: str):
 
 def checked_code(code: str) -> object:
     if not isinstance(code, str):
-        raise ValueError("code 必须是 Python 字符串")
+        raise ValueError("code must be a Python string")
     if len(code) > 16_000:
-        raise ValueError("代码超过 16000 字符限制")
+        raise ValueError("Code exceeds the 16000-character limit")
     try:
         tree = ast.parse(code, mode="exec")
     except SyntaxError as exc:
-        raise ValueError(f"Python 语法错误，第 {exc.lineno} 行：{exc.msg}") from exc
+        raise ValueError(f"Python syntax error on line {exc.lineno}: {exc.msg}") from exc
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom, ast.ClassDef, ast.FunctionDef,
                              ast.AsyncFunctionDef, ast.With, ast.AsyncWith, ast.Try,
                              ast.Raise, ast.Global, ast.Nonlocal, ast.Delete)):
-            raise ValueError(f"不支持的 Python 语句：{type(node).__name__}（第 {node.lineno} 行）")
+            raise ValueError(f"Unsupported Python statement: {type(node).__name__} (line {node.lineno})")
         if isinstance(node, ast.Name) and (node.id.startswith("_") or node.id in DENIED_NAMES):
-            raise ValueError(f"不允许使用名称：{node.id}（第 {node.lineno} 行）")
+            raise ValueError(f"Name is not allowed: {node.id} (line {node.lineno})")
         if isinstance(node, ast.Attribute) and (
             node.attr.startswith("_") or node.attr in DENIED_EE_ATTRIBUTES
         ):
-            raise ValueError(f"不允许访问属性：{node.attr}（第 {node.lineno} 行）")
+            raise ValueError(f"Attribute access is not allowed: {node.attr} (line {node.lineno})")
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and hasattr(builtins, node.func.id) and node.func.id not in SAFE_BUILTINS):
-            hint = "；用 result 返回结果" if node.func.id == "print" else ""
-            raise ValueError(f"此执行器不提供 Python 内置函数 {node.func.id}（第 {node.lineno} 行）{hint}")
+            hint = "; return the output through result" if node.func.id == "print" else ""
+            raise ValueError(f"Python builtin {node.func.id} is unavailable in this executor (line {node.lineno}){hint}")
     if not any(isinstance(node, ast.Name) and node.id == "result" and isinstance(node.ctx, ast.Store)
                for node in ast.walk(tree)):
-        raise ValueError("代码必须给 result 赋值")
+        raise ValueError("Code must assign a value to result")
     return compile(tree, "<gee-code>", "exec")
 
 
@@ -85,12 +85,12 @@ def code_warnings(code: str) -> list[str]:
             isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
             and child.func.attr == "getInfo" for child in ast.walk(node)
         ):
-            warnings.append("循环内的 getInfo() 会逐次阻塞；能在服务端汇总时优先汇总后取一次结果")
+            warnings.append("getInfo() inside a loop blocks on each iteration. Prefer server-side aggregation and retrieve the result once.")
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "reduceRegion" and len(node.args) < 3
                 and not any(keyword.arg in {"scale", "crsTransform"} for keyword in node.keywords)
                 and not any(keyword.arg is None for keyword in node.keywords)):
-            warnings.append("reduceRegion() 建议显式指定 scale 或 crsTransform，避免统计尺度不确定")
+            warnings.append("Set scale or crsTransform explicitly in reduceRegion() to ensure a defined analysis resolution.")
     return list(dict.fromkeys(warnings))
 
 
@@ -98,7 +98,7 @@ def run_code(ee, code: str):
     scope = {"ee": ee, "__builtins__": SAFE_BUILTINS}
     exec(checked_code(code), scope)
     if "result" not in scope:
-        raise ValueError("代码必须给 result 赋值")
+        raise ValueError("Code must assign a value to result")
     return scope["result"]
 
 
@@ -112,7 +112,7 @@ def jsonable(value):
     get_info = getattr(value, "getInfo", None)
     if callable(get_info):
         return jsonable(get_info())
-    raise TypeError(f"无法序列化结果类型：{type(value).__name__}")
+    raise TypeError(f"Cannot serialize result type: {type(value).__name__}")
 
 
 def execute(payload: dict) -> dict:
@@ -140,7 +140,7 @@ def execute(payload: dict) -> dict:
             checked_code(analysis_code)
     project = payload.get("project")
     if not project:
-        raise ValueError("缺少 GEE_PROJECT_ID；请填写项目根目录 .env")
+        raise ValueError("Missing GEE_PROJECT_ID. Set it in the project root .env.")
     ee = earth_engine(project)
     if operation == "status":
         return {"python": sys.version.split()[0], "ee_version": getattr(ee, "__version__", "unknown"),
@@ -151,7 +151,7 @@ def execute(payload: dict) -> dict:
     if operation == "preview":
         image = run_code(ee, payload["code"])
         if not callable(getattr(image, "getThumbURL", None)):
-            raise TypeError("预览代码的 result 必须是 ee.Image")
+            raise TypeError("Preview code must assign an ee.Image to result")
         dimensions = max(64, min(1024, int(payload.get("dimensions") or 768)))
         vis = {"format": "png", "dimensions": dimensions}
         options = payload.get("visualization") or {}
@@ -162,32 +162,32 @@ def execute(payload: dict) -> dict:
         if region is not None:
             if (not isinstance(region, list) or len(region) != 4
                     or not all(isinstance(value, (int, float)) for value in region)):
-                raise ValueError("region 必须是 [西,南,东,北]")
+                raise ValueError("region must be [west,south,east,north]")
             vis["region"] = region
         url = image.getThumbURL(vis)
         with urlopen(url, timeout=120) as response:
             png = response.read(12_000_001)
         if len(png) > 12_000_000 or not png.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise ValueError("GEE 预览不是有效 PNG，或超过 12 MB")
+            raise ValueError("The GEE preview is not a valid PNG or exceeds 12 MB")
         preview_dir = Path(__file__).resolve().parent.parent / "state" / "previews"
         preview_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{uuid.uuid4().hex}.png"
         (preview_dir / filename).write_bytes(png)
-        return {"preview": {"name": str(payload.get("name") or "GEE 影像预览")[:100],
+        return {"preview": {"name": str(payload.get("name") or "GEE image preview")[:100],
                             "url": f"/api/previews/{filename}", "bytes": len(png),
                             "width": int.from_bytes(png[16:20], "big"),
                             "height": int.from_bytes(png[20:24], "big")}}
     image = run_code(ee, payload["layer_code"])
     if not callable(getattr(image, "getMapId", None)):
-        raise TypeError("layer_code 的 result 必须是 ee.Image")
+        raise TypeError("layer_code must assign an ee.Image to result")
     vis = payload.get("visualization") or {}
     options = {key: vis[key] for key in ("bands", "min", "max", "palette") if key in vis}
     map_name = image.getMapId(options)["mapid"]
     if not isinstance(map_name, str) or not map_name.startswith("projects/"):
-        raise ValueError("Earth Engine 未返回有效地图 ID")
+        raise ValueError("Earth Engine did not return a valid map ID")
     output = {
         "layer": {
-            "name": str(vis.get("name") or "GEE 结果图层")[:100],
+            "name": str(vis.get("name") or "GEE result layer")[:100],
             "url": f"https://earthengine.googleapis.com/v1/{map_name}/tiles/{{z}}/{{x}}/{{y}}",
             "visualization": options,
         }

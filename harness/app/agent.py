@@ -19,10 +19,10 @@ def describe_run_failure(result, provider: str) -> str:
         error = event.get("data", {}).get("reason", {}).get("error", {})
         code = error.get("code", "UNKNOWN")
         if code == "AUTH":
-            service = "AIHubMix" if provider == "aihubmix" else "模型服务"
-            return f"{service} 拒绝了 API 密钥（401）。请检查密钥与服务商。"
-        return f"Harness 运行未完成：{result.finish_reason}（{code}）"
-    return f"Harness 运行未完成：{result.finish_reason}"
+            service = "AIHubMix" if provider == "aihubmix" else "Model provider"
+            return f"{service} rejected the API key (401). Check the key and provider."
+        return f"Harness run did not complete: {result.finish_reason} ({code})"
+    return f"Harness run did not complete: {result.finish_reason}"
 
 
 class HarnessAgent:
@@ -71,7 +71,7 @@ class HarnessAgent:
             if f'session "{self.session_id}"' not in str(exc):
                 raise
             if self.require_resume:
-                raise RuntimeError('该对话的 DSH 会话文件不可用，无法继续原有上下文；请新建对话') from exc
+                raise RuntimeError('The DSH session file is unavailable. Start a new conversation to continue.') from exc
             self.session = self.harness.start_session(self.session_id)
         return self
 
@@ -85,7 +85,7 @@ class HarnessAgent:
 
     def run(self, prompt: str, session_id: str, on_event=None, on_stream=None) -> str:
         if self.session is None or session_id != self.session_id:
-            raise RuntimeError("Harness 会话未就绪或 ID 不匹配")
+            raise RuntimeError("Harness session is not ready or the session ID does not match")
         self.bridge.bind(session_id, on_stream)
         try:
             result = self.session.run(prompt, on_notification=on_event)
@@ -100,8 +100,9 @@ class HarnessAgent:
 
 
 def conversation_prompt(request: str, bounds: list[float], catalog: list[dict]) -> str:
-    return f"""你是 SatGPT 中的地理空间分析助手。正常回答普通问题；需要数据时自主调用已注册的 GEE 工具。
-工具中的 Python 运行在独立 worker，ee 已提供，必须把结果赋给 result。数据集 ID 不确定时先用 gee_catalog 核查；使用 gee_eval 做覆盖和统计检查，gee_preview 检查影像外观，gee_layer 创建交互图层。调用 gee_layer 时用 bounds=[西,南,东,北] 标明图层实际研究区域，不要把当前地图视野当作其他地区结果的定位范围。用 metadata 提供已核实的数据来源 source、数据集 dataset_id、观测日期或范围 observed_at、单位 unit 和简短 description；未知信息省略。图层会自动生成静态缩略图，图例来自 palette/min/max；连续整数分类可提供 legend.labels（与 palette 顺序一致）。工具报错时可以修正并重试，连接故障用 gee_status 诊断。
-仅使用公开数据集，不导出或修改资产。对灾害事件，图层可显示不代表事件结论可靠；需要说明观测时间、覆盖和方法限制。只有工具成功返回图层时才说已显示。尽早按日期、区域和波段过滤；大区域统计明确 scale、geometry、maxPixels。
-当前地图范围 [西,南,东,北]：{json.dumps(bounds)}。参考目录：{json.dumps(catalog, ensure_ascii=False)}。
-用户请求：{request}"""
+    return f"""You are SatGPT's geospatial analysis assistant. Answer general questions normally; use the registered GEE tools whenever data is needed.
+Use English by default for answers, progress summaries, layer and preview names, metadata descriptions, and legend labels. Follow an explicit user request for another language.
+Tool Python runs in a separate worker with ee already available. Assign the output to result. Verify uncertain dataset IDs with gee_catalog; use gee_eval to check coverage and statistics, gee_preview to inspect imagery, and gee_layer to create interactive layers. For gee_layer, supply bounds=[west,south,east,north] for the actual study area; do not use the current map extent to locate results for a different area. Use metadata for verified source, dataset_id, observed_at date or range, unit, and a short description; omit unknown information. Layers automatically receive static thumbnails; legends use palette/min/max. For consecutive integer classes, provide legend.labels in palette order. Correct tool errors and retry when appropriate; diagnose connection failures with gee_status.
+Use public datasets only; do not export or modify assets. A visible disaster layer does not establish a reliable event conclusion: explain observation dates, coverage, and methodological limitations. Only claim a layer is displayed after a successful tool result. Filter early by date, region, and bands; specify scale, geometry, and maxPixels for large-area statistics.
+Current map bounds [west,south,east,north]: {json.dumps(bounds)}. Reference catalog: {json.dumps(catalog, ensure_ascii=False)}.
+User request: {request}"""

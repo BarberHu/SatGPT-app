@@ -1,4 +1,6 @@
 import mapboxgl from 'mapbox-gl';
+import { BasicMapPort } from './BasicMapPort';
+import { applyEnglishMapLabels } from '../utils/mapLanguage';
 
 /** The only module that knows Mapbox GL JS source/layer APIs. */
 export class MapboxAdapter {
@@ -7,24 +9,35 @@ export class MapboxAdapter {
     this.styleReady = false;
     this.map = new mapboxgl.Map({
       container, style, center: initialView?.center || [102, 16.5], zoom: initialView?.zoom ?? 5,
+      bearing: initialView?.bearing ?? 0, pitch: initialView?.pitch ?? 0,
       preserveDrawingBuffer: true,
     });
-    this.map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+    this.map.getCanvas().dataset.mapInstance = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    this.navigation = new mapboxgl.NavigationControl();
+    this.map.addControl(this.navigation, 'top-right');
+    this.basic = new BasicMapPort(this.map);
+    this.basic.activate(true);
   }
 
   onStyleReady(callback) {
     const handleReady = () => {
+      applyEnglishMapLabels(this.map);
       this.styleReady = true;
+      this.basic.styleReady = true;
       callback();
     };
     this.map.on('style.load', handleReady);
-    return () => this.map.off('style.load', handleReady);
+    const labels = () => applyEnglishMapLabels(this.map);
+    this.map.on('styledata', labels);
+    if (this.map.isStyleLoaded()) handleReady();
+    return () => { this.map.off('style.load', handleReady); this.map.off('styledata', labels); };
   }
 
   onViewChange(callback) {
     this.map.on('moveend', callback);
     return () => this.map.off('moveend', callback);
   }
+  onError(callback) { this.map.on('error', callback); return () => this.map.off('error', callback); }
 
   onViewportChange(callback) {
     this.map.on('move', callback);
@@ -41,13 +54,14 @@ export class MapboxAdapter {
     const bounds = this.map.getBounds();
     return {
       center: [center.lng, center.lat], zoom: this.map.getZoom(),
+      bearing: this.map.getBearing(), pitch: this.map.getPitch(),
       bounds: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
     };
   }
 
-  setView({ center, zoom, bounds }) {
+  setView({ center, zoom, bounds, bearing, pitch }) {
     if (bounds) this.map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]]);
-    else this.map.easeTo({ center, zoom });
+    else this.map.easeTo({ center, zoom, bearing, pitch });
   }
 
   addLayer(layer) {
@@ -116,5 +130,13 @@ export class MapboxAdapter {
 
   captureSnapshot() { return this.map.getCanvas().toDataURL('image/png'); }
   resize() { this.map.resize(); }
-  dispose() { this.map.remove(); }
+  getBasicPort() { return this.basic.port; }
+  setBasicActive(active) { this.basic.activate(active); }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.basic.dispose();
+    this.map.removeControl(this.navigation);
+    this.map.remove();
+  }
 }
