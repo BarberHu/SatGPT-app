@@ -1,0 +1,3 @@
+- insert:
+    - id: satgpt-assistant-stream
+      name: '@local/satgpt-assistant-stream'

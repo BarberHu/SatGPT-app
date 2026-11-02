@@ -1,0 +1,77 @@
+# =====================
+# Python
+# =====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+*/venv/
+*-venv/
+*/*-venv/
+basic-venv/
+
+# =====================
+# Node.js
+# =====================
+node_modules/
+*/node_modules/
+frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# =====================
+# Build outputs
+# =====================
+dist/
+build/
+*.local
+
+# =====================
+# Sensitive files
+# =====================
+.env
+.env.past
+.env.local
+.env.*.local
+*.pem
+*.key
+.private-key.json
+*private-key*.json
+satgpt-*.json
+*service-account*.json
+
+# =====================
+# IDE / Editor
+# =====================
+.vscode/
+.idea/
+*.suo
+*.sw?
+.DS_Store
+Thumbs.db
+
+# =====================
+# Logs / Cache
+# =====================
+*.log
+test_output.txt
+.cache/
+/.data/
+/harness/state/
+/outputs/
+.codex-model-inspection/
+.codex-skill-validation/
+
+# Keep the release branch focused on runnable source.
+experiments/
+prototype/
+tests/
+*.test.*
+*.spec.*
+*.ipynb
+coverage/
+.venv-deploy/
+/agent/water_assets/cache/*
+!/agent/water_assets/cache/water_asset_catalog.json

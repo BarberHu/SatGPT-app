@@ -1,0 +1,62 @@
+services:
+  agent:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    env_file: ../../.env
+    environment:
+      AGENT_HOST: 0.0.0.0
+      AGENT_PORT: 8000
+      AGENT_WORKERS: 1
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gee-service-account.json
+    volumes:
+      - type: bind
+        source: ../../.private-key.json
+        target: /run/secrets/gee-service-account.json
+        read_only: true
+        bind:
+          create_host_path: false
+    expose: ["8000"]
+    restart: unless-stopped
+    init: true
+
+  harness:
+    build:
+      context: ../..
+      dockerfile: harness/Dockerfile
+    env_file: ../../.env
+    environment:
+      HARNESS_HOST: 0.0.0.0
+      HARNESS_PORT: 8001
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gee-service-account.json
+    volumes:
+      - type: bind
+        source: ../../.private-key.json
+        target: /run/secrets/gee-service-account.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - harness_state:/app/harness/state
+    expose: ["8001"]
+    restart: unless-stopped
+    init: true
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_MAPBOX_ACCESS_TOKEN: ${REACT_APP_MAPBOX_ACCESS_TOKEN}
+        REACT_APP_MAPBOX_STYLE_URL: ${REACT_APP_MAPBOX_STYLE_URL}
+    depends_on:
+      agent:
+        condition: service_healthy
+      harness:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:8080"
+    restart: unless-stopped
+    init: true
+
+volumes:
+  harness_state:

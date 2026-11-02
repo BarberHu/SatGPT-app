@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": false,
+  "tailwind": {
+    "config": "tailwind.config.cjs",
+    "css": "src/harness/app.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "aliases": {
+    "components": "@/harness/components",
+    "ui": "@/harness/ui",
+    "utils": "@/harness/lib/utils",
+    "lib": "@/harness/lib",
+    "hooks": "@/harness/hooks"
+  }
+}

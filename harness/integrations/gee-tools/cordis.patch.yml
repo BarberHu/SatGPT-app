@@ -1,0 +1,3 @@
+- insert:
+    - id: webgis-gee-tools
+      name: '@local/webgis-gee-tools'
