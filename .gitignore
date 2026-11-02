@@ -75,3 +75,11 @@ coverage/
 .venv-deploy/
 /agent/water_assets/cache/*
 !/agent/water_assets/cache/water_asset_catalog.json
+
+# Nested private configurations and auxiliary worktrees.
+**/.env
+**/.env.*
+!.env.example
+**/local-config*.json
+**/credentials*.json
+/.worktrees/

@@ -7,51 +7,16 @@ const frontendRoot = __dirname;
 const projectRoot = path.resolve(frontendRoot, '..');
 const buildRoot = path.join(frontendRoot, 'build');
 
-function loadProjectEnv() {
-  const envPath = path.join(projectRoot, '.env');
-  if (!fs.existsSync(envPath)) return;
-
-  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (!match || process.env[match[1]] !== undefined) continue;
-    process.env[match[1]] = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
-  }
-}
-
-loadProjectEnv();
-
-function requireEnv(name) {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
-
-function requirePort(name) {
-  const portValue = Number.parseInt(requireEnv(name), 10);
-  if (!Number.isInteger(portValue) || portValue < 1 || portValue > 65535) {
-    throw new Error(`${name} must be an integer between 1 and 65535`);
-  }
-  return portValue;
-}
-
-const host = process.env.SATGPT_ALLOW_REMOTE_HARNESS === 'true'
-  ? requireEnv('FRONTEND_HOST')
-  : '127.0.0.1';
-const port = requirePort('FRONTEND_PORT');
-const serviceHost = requireEnv('SATGPT_SERVICE_HOST');
-const basicTarget = new URL(`http://${serviceHost}:${requirePort('AGENT_PORT')}`);
-const harnessTarget = new URL(`http://${serviceHost}:${Number.parseInt(process.env.HARNESS_PORT || '8001', 10)}`);
-const proxyTimeoutMs = Number.parseInt(requireEnv('PROXY_TIMEOUT_MS'), 10);
-const proxyMaxSockets = Number.parseInt(requireEnv('PROXY_MAX_SOCKETS'), 10);
-
-if (!Number.isInteger(proxyTimeoutMs) || proxyTimeoutMs < 1) {
-  throw new Error('PROXY_TIMEOUT_MS must be a positive integer');
-}
-if (!Number.isInteger(proxyMaxSockets) || proxyMaxSockets < 1) {
-  throw new Error('PROXY_MAX_SOCKETS must be a positive integer');
-}
+const config = require('./projectEnv.cjs');
+const env = config.loadProjectEnv(projectRoot);
+config.validateFrontend(env, { map: false }); // map settings are compiled public values
+const host = env.SATGPT_ALLOW_REMOTE_HARNESS === 'true' ? env.FRONTEND_HOST : '127.0.0.1';
+const port = config.port(env, 'FRONTEND_PORT');
+const serviceHost = env.SATGPT_SERVICE_HOST;
+const basicTarget = new URL(`http://${env.BASIC_SERVICE_HOST || serviceHost}:${config.port(env, 'AGENT_PORT')}`);
+const harnessTarget = new URL(`http://${env.HARNESS_SERVICE_HOST || serviceHost}:${config.port(env, 'HARNESS_PORT')}`);
+const proxyTimeoutMs = config.positive(env, 'PROXY_TIMEOUT_MS');
+const proxyMaxSockets = config.positive(env, 'PROXY_MAX_SOCKETS');
 
 const upstreamAgent = new http.Agent({
   keepAlive: true,

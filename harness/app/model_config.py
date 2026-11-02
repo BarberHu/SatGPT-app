@@ -9,9 +9,7 @@ from urllib.parse import urlparse
 
 
 def selected_provider() -> str:
-    provider = os.getenv("DSH_PROVIDER", "").strip().lower()
-    if not provider:
-        provider = "aihubmix" if os.getenv("AIHUBMIX_API_KEY") else "deepseek-official"
+    provider = os.getenv("DSH_PROVIDER", "deepseek-official").strip().lower()
     if provider not in {"aihubmix", "deepseek-official"}:
         raise ValueError("DSH_PROVIDER 只能是 aihubmix 或 deepseek-official")
     return provider

@@ -1,20 +1,21 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import react from '@vitejs/plugin-react';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 
 const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(frontendRoot, '..');
+const config = createRequire(path.join(frontendRoot, 'vite.config.mjs'))('./projectEnv.cjs');
 
 function getPort(env, name, fallback) {
-  const value = Number.parseInt(env[name] || '', 10);
-  return Number.isInteger(value) && value > 0 && value <= 65535 ? value : fallback;
+  return config.port({ [name]: String(fallback), ...env }, name);
 }
 
 export function createProxyConfig(env) {
   const serviceHost = env.SATGPT_SERVICE_HOST || '127.0.0.1';
-  const basicTarget = `http://${serviceHost}:${getPort(env, 'AGENT_PORT', 8000)}`;
-  const harnessTarget = `http://${serviceHost}:${getPort(env, 'HARNESS_PORT', 8001)}`;
+  const basicTarget = `http://${env.BASIC_SERVICE_HOST || serviceHost}:${getPort(env, 'AGENT_PORT', 8000)}`;
+  const harnessTarget = `http://${env.HARNESS_SERVICE_HOST || serviceHost}:${getPort(env, 'HARNESS_PORT', 8001)}`;
 
   return {
     '/api/harness': { target: harnessTarget, changeOrigin: true },
@@ -25,18 +26,15 @@ export function createProxyConfig(env) {
 }
 
 export default defineConfig(({ mode }) => {
-  const projectEnv = loadEnv(mode, projectRoot, '');
-  const frontendEnv = loadEnv(mode, frontendRoot, '');
-  const env = { ...projectEnv, ...frontendEnv, ...process.env };
+  const env = config.loadProjectEnv(projectRoot);
+  config.validateFrontend(env, { map: mode !== 'test' });
 
   return {
     root: frontendRoot,
     plugins: [react()],
-    envPrefix: ['VITE_', 'REACT_APP_'],
-    define: {
-      'import.meta.env.REACT_APP_MAPBOX_ACCESS_TOKEN': JSON.stringify(env.REACT_APP_MAPBOX_ACCESS_TOKEN || ''),
-      'import.meta.env.REACT_APP_MAPBOX_STYLE_URL': JSON.stringify(env.REACT_APP_MAPBOX_STYLE_URL || ''),
-    },
+    envDir: false,
+    envPrefix: [],
+    define: config.publicConfig(env),
     resolve: {
       alias: {
         '@': path.resolve(frontendRoot, 'src'),
@@ -44,9 +42,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: env.SATGPT_ALLOW_REMOTE_HARNESS === 'true'
-        ? (env.FRONTEND_HOST || env.HOST || '0.0.0.0')
+        ? env.FRONTEND_HOST
         : '127.0.0.1',
-      port: getPort(env, 'FRONTEND_PORT', getPort(env, 'PORT', 3000)),
+      port: config.port(env, 'FRONTEND_PORT'),
       strictPort: true,
       proxy: createProxyConfig(env),
     },

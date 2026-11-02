@@ -1,13 +1,10 @@
-# Docker Deployment
+# Docker deployment
 
-Run from the repository root:
+从根目录运行：
 
-```bash
-docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.harness.yml up -d --build
-docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.harness.yml ps
-docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.harness.yml logs --tail 100 -f
-docker compose --project-name satgpt --env-file .env --file scripts/docker/compose.harness.yml down
+```powershell
+docker compose --project-name satgpt --project-directory . --env-file .env -f scripts/docker/compose.harness.yml config --quiet
+docker compose --project-name satgpt --project-directory . --env-file .env -f scripts/docker/compose.harness.yml up -d --build
 ```
 
-The frontend binds to host loopback. Basic port 8000 and Harness port 8001 stay
-inside the Compose network.
+保留 `--project-directory .` 以保证相对凭据/构建路径从根目录解析。Shell 配置优先；只有前端配置端口发布到宿主机回环地址，后端留在容器网络。详见 [PRODUCTION.md](../../PRODUCTION.md)。

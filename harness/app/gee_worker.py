@@ -140,7 +140,7 @@ def execute(payload: dict) -> dict:
             checked_code(analysis_code)
     project = payload.get("project")
     if not project:
-        raise ValueError("缺少 GEE_PROJECT 环境变量")
+        raise ValueError("缺少 GEE_PROJECT_ID；请填写项目根目录 .env")
     ee = earth_engine(project)
     if operation == "status":
         return {"python": sys.version.split()[0], "ee_version": getattr(ee, "__version__", "unknown"),

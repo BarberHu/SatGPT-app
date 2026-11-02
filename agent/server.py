@@ -14,6 +14,10 @@ from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 # 本地模块
+from project_env import load_project_env, required_env, validate_config
+
+load_project_env()
+validate_config("basic")
 from gee_service import gee_service, get_flood_images
 from gee_code_generator import generate_flood_gee_code
 from flood_dataset_service import build_confirmation_context, get_default_flood_layer_catalog, renderer
@@ -33,9 +37,6 @@ from flood_api_services import (
     get_water_regime_change_map_payload,
     thin_geojson_geometry,
 )
-from project_env import load_project_env, required_env
-
-load_project_env()
 logger = logging.getLogger(__name__)
 
 _HEAVY_OPERATION_LIMIT = max(1, int(required_env("SATGPT_HEAVY_CONCURRENCY")))
@@ -261,9 +262,11 @@ async def root():
 async def health():
     """健康检查端点"""
     return {
-        "status": "ok",
+        "status": "ok" if gee_service.initialized else "degraded",
         "service": "flood-agent",
         "gee_initialized": gee_service.initialized,
+        "model_key_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "model_authentication": "not_checked",
         "gee_max_concurrency": _HEAVY_OPERATION_LIMIT,
     }
 
@@ -783,20 +786,7 @@ async def update_state(state: FloodState):
 # ============== 运行服务 ==============
 
 if __name__ == "__main__":
-    import uvicorn
-    
-    host = required_env("AGENT_HOST")
-    port = int(required_env("AGENT_PORT"))
-    debug = os.getenv("AGENT_DEBUG", "false").lower() == "true"
-    
-    print(f"[INFO] Basic API listening at http://{host}:{port}")
-    print(f"[INFO] API docs: http://{host}:{port}/docs")
-    print(f"[INFO] Basic routes: http://{host}:{port}/api")
-    print(f"[INFO] GEE max concurrency: {_HEAVY_OPERATION_LIMIT}")
-    
-    uvicorn.run(
-        "server:app",
-        host=host,
-        port=port,
-        reload=debug,
-    )
+    from satgpt_config import main
+    import sys
+    sys.argv = [sys.argv[0], 'basic']
+    main()

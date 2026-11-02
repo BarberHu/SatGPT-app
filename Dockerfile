@@ -15,6 +15,7 @@ RUN python -m pip install --upgrade pip \
     && python -m pip check
 
 COPY --chown=satgpt:satgpt agent /app/agent
+COPY --chown=satgpt:satgpt satgpt_config.py /app/satgpt_config.py
 COPY --chown=satgpt:satgpt frontend/src/config/layerCatalog.json /app/frontend/src/config/layerCatalog.json
 
 USER satgpt
@@ -23,6 +24,6 @@ WORKDIR /app/agent
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+    CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.getenv('AGENT_PORT','8000')+'/health', timeout=3)"
 
-CMD ["sh", "-c", "python -m uvicorn server:app --host ${AGENT_HOST} --port ${AGENT_PORT} --workers ${AGENT_WORKERS} --proxy-headers --forwarded-allow-ips '${FORWARDED_ALLOW_IPS}'"]
+CMD ["python", "/app/satgpt_config.py", "basic"]

@@ -55,3 +55,15 @@ prototype/
 agent/water_assets/cache/water_asset_inventory.csv
 agent/water_assets/cache/water_asset_inventory_summary.json
 agent/water_assets/cache/water_asset_legend_summary.json
+
+**/.env
+**/.env.*
+**/local-config*.json
+**/credentials*.json
+**/*service-account*.json
+.worktrees/
+
+**/*private-key*.json
+**/satgpt-*.json
+**/*.pem
+**/*.key

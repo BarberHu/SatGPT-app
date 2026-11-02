@@ -9,36 +9,23 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .controller import TaskController
 from .model_config import model_key_configured
+from .config import load_project_env, validate_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
-load_dotenv(PROJECT_ROOT / ".env")
-local_config = os.getenv("DSH_LOCAL_CONFIG_FILE", "").strip()
-if local_config:
-    config_path = Path(local_config)
-    if not config_path.is_absolute():
-        config_path = PROJECT_ROOT / config_path
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    for key in ("DSH_PROVIDER", "DSH_MODEL", "AIHUBMIX_BASE_URL", "AIHUBMIX_API_KEY", "DEEPSEEK_API_KEY"):
-        if not os.getenv(key) and isinstance(config.get(key), str):
-            os.environ[key] = config[key]
-if not os.getenv("GEE_PROJECT"):
-    os.environ["GEE_PROJECT"] = os.getenv("GEE_PROJECT_ID", "")
-credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-if credentials and not Path(credentials).is_absolute():
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str((PROJECT_ROOT / credentials).resolve())
+load_project_env()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_config("harness")
     app.state.controller = TaskController(ROOT)
     try:
         yield
@@ -58,8 +45,9 @@ class TaskRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "engine": "deepseek-harness",
-            "gee_project_configured": bool(os.getenv("GEE_PROJECT")),
-            "model_key_configured": model_key_configured()}
+            "gee_project_configured": bool(os.getenv("GEE_PROJECT_ID")),
+            "model_key_configured": model_key_configured(),
+            "gee_authentication": "not_checked", "model_authentication": "not_checked"}
 
 
 @app.get("/api/harness/conversation")

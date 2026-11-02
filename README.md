@@ -23,13 +23,15 @@ cd SatGPT-app
 
 下列 Windows 命令均在项目根目录的 PowerShell 中执行。
 
-## 2. 安装依赖
+## 2. 创建根目录配置
 
 ```powershell
-.\scripts\windows\satgpt.bat setup
+Copy-Item .env.example .env
 ```
 
-脚本会创建 `basic-venv/` 和 `harness/.venv/`、安装 Python 与前端依赖，并在 `.env` 不存在时从 `.env.example` 创建配置文件。
+先填写根目录 `.env` 并放置 GEE 凭据，再按第 4 节安装和启动。
+
+脚本会创建 `basic-venv/` 和 `harness/.venv/` 并安装依赖；如果尚未创建 `.env`，也会复制唯一模板。
 
 ## 3. 配置 `.env`
 
@@ -39,8 +41,6 @@ cd SatGPT-app
 # GEE：Basic 和 Agent 共用服务账号
 GOOGLE_APPLICATION_CREDENTIALS=.private-key.json
 GEE_PROJECT_ID=your-google-cloud-project-id
-# GEE_PROJECT 可留空；填写时应与 GEE_PROJECT_ID 一致
-GEE_PROJECT=
 
 # 地图：底图 URL 可以沿用 .env.example 中的配置
 REACT_APP_MAPBOX_ACCESS_TOKEN=your-mapbox-token
@@ -66,15 +66,19 @@ AIHUBMIX_API_KEY=your-aihubmix-key
 AIHUBMIX_BASE_URL=https://aihubmix.com/v1
 ```
 
-Basic 与 Agent 的模型配置相互独立。其余参数可以保留 `.env.example` 的默认值；日常只编辑根目录 `.env`，避免 `frontend/.env` 的同名配置覆盖它。`.env` 和服务账号密钥不应提交到 Git。
+Basic 与 Agent 的模型配置相互独立，`OPENAI_API_KEY` 仍用于 Basic 问答、位置解析和数据集推荐。Agent 仅要求所选服务商的密钥；未选择服务商的字段留空。Mapbox 使用浏览器公开 token，不使用 secret token。
 
-已有本地 Harness 配置时，可选设置 `DSH_LOCAL_CONFIG_FILE` 为 JSON 文件路径，它仅补齐未配置的模型字段。Windows 启动脚本也会自动发现同级 `GEE_harness/state/local-config.json`。
+唯一填写入口是根目录 `.env`，唯一模板是根目录 `.env.example`。优先级为 **进程环境变量 > 根目录 `.env` > 程序默认值**，显式空值也优先（必填项会报错）。前端目录环境文件、模式专用 `.env.*` 和其他项目 JSON 不再读取。配置值不展开 `${VAR}`；含 `#`、空格、`$` 的值使用单引号。相对凭据路径始终以项目根目录解析，与启动目录无关。
+
+模型密钥和服务账号 JSON 仅在后端使用，Git 与 Docker 构建均排除真实配置。Vite 关闭自动环境暴露，仅显式编译两个 `REACT_APP_MAPBOX_*` 公开字段。
 
 ## 4. 本地启动
 
-开发模式（支持前端热更新）：
+安装、校验并启动开发模式（支持前端热更新）：
 
 ```powershell
+.\scripts\windows\satgpt.bat setup
+.\harness\.venv\Scripts\python.exe satgpt_config.py check
 .\scripts\windows\satgpt.bat dev
 ```
 
@@ -86,7 +90,7 @@ Basic 与 Agent 的模型配置相互独立。其余参数可以保留 `.env.exa
 | Basic API | http://127.0.0.1:8000 |
 | Harness Agent API | http://127.0.0.1:8001 |
 
-Windows 启动脚本的 Basic API 固定使用 8000 端口；初次部署建议保留默认端口。开发与生产模式共用端口，请先停止旧服务再启动另一种模式。停止时在三个服务窗口分别按 `Ctrl+C`，然后关闭窗口。
+三个服务的端口均从根目录 `.env` 读取；`AGENT_PORT`、`HARNESS_PORT`、`FRONTEND_PORT` 必须互不相同。开发与生产模式共用端口，请先停止旧服务再启动另一种模式。停止时在三个服务窗口分别按 `Ctrl+C`，然后关闭窗口。
 
 本地生产模式（构建前端并启动三个服务）：
 
@@ -94,7 +98,7 @@ Windows 启动脚本的 Basic API 固定使用 8000 端口；初次部署建议�
 .\scripts\windows\satgpt.bat deploy
 ```
 
-也可分别执行 `satgpt.bat build` 和 `satgpt.bat prod`。修改模型或 GEE 配置后重启服务；修改 Mapbox 配置后，开发模式重启前端，生产模式重新执行 `deploy`。
+也可分别执行 `satgpt.bat build` 和 `satgpt.bat prod`。修改 Basic 模型后重启 Basic API；修改 Agent 模型后重启 Harness API（包括 SDK/worker 子进程）；修改 GEE 后重启两个 API。修改端口后重启对应 API 与前端/网关。修改 Mapbox 配置后，开发模式重启 Vite，生产模式重新构建前端并重启网关（或重新构建 Docker frontend 镜像）。构建后的浏览器文件不会读取运行期 `.env`。
 
 ## 5. 检查与排错
 
@@ -103,9 +107,9 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 Invoke-RestMethod http://127.0.0.1:8001/health
 ```
 
-- **地图空白**：检查 Mapbox token、底图访问权限，以及是否存在前端同名配置覆盖。
+- **地图空白**：检查 Mapbox token、底图访问权限，重启前端是否生效。
 - **GEE 认证失败**：检查凭据路径、项目 ID、API 启用状态、服务账号权限及 Google 服务的网络连接。
-- **模型返回 401**：检查所选服务商与密钥是否匹配。健康接口显示密钥已配置，不代表模型调用验证成功。
+- **模型返回 401**：检查所选服务商与密钥是否匹配。`model_key_configured` 只表示已填写，`model_authentication=not_checked` 表示健康检查没有调用模型。Harness 的 `gee_project_configured` 也只表示已配置；通过实际 `gee_status` 工具确认认证与远端往返。Basic 的 `gee_initialized` 表示初始化结果。
 - **端口占用**：先停止之前启动的服务，再重新运行启动命令。
 
 Agent 的聊天、会话和预览保存在本地 `harness/state/`；需要保留历史时请备份该目录。

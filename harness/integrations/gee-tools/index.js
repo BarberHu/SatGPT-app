@@ -9,7 +9,7 @@ export const inject = ['tools'];
 
 const root = process.env.WEBGIS_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const eventFile = path.join(root, 'state', 'gee-tool-events.jsonl');
-const project = process.env.GEE_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+const project = process.env.GEE_PROJECT_ID;
 const workerClient = new WorkerClient({
   python: process.env.SATGPT_HARNESS_PYTHON || 'python',
   worker: path.join(root, 'app', 'gee_worker.py'),
