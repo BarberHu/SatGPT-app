@@ -25,12 +25,12 @@ function useNarrowLayout() {
 }
 
 export default function HarnessApp({ active = true, onHistoryToolsChange }) {
-  const chat = useAgentChat();
-  const map = useAgentMap(chat.conversationId, chat.messages);
   const narrow = useNarrowLayout();
   const [historyOpen, setHistoryOpen] = useState(() => !window.matchMedia?.('(max-width: 960px)').matches);
   const [mobileView, setMobileView] = useState('chat');
   const [prompt, setPrompt] = useState('');
+  const chat = useAgentChat({ visible: active && (!narrow || (mobileView === 'chat' && !historyOpen)) });
+  const map = useAgentMap(chat.conversationId, chat.messages);
   const toggleHistory = useCallback(() => setHistoryOpen(open => !open), []);
   useEffect(() => {
     onHistoryToolsChange?.(!active || narrow ? null : { open: historyOpen, toggle: toggleHistory });

@@ -195,12 +195,20 @@ class TaskController:
                 except (OSError, ValueError, AttributeError):
                     continue
             records[self.conversation_id] = self.messages
+            active_tasks = {job['conversation_id']: job for job in self.jobs.values()
+                            if job['status'] in {'queued', 'running'}}
+            latest_tasks = {job['conversation_id']: job for job in self.jobs.values()}
             result = []
             for cid, messages in records.items():
+                active = active_tasks.get(cid)
+                latest = latest_tasks.get(cid)
                 title = next((m.get('content', '') for m in messages if m.get('role') == 'user'), 'New chat')
                 result.append({'id': cid, 'title': title[:80], 'current': cid == self.conversation_id,
                                'updated_at': messages[-1].get('created_at', '') if messages else '',
-                               'message_count': len(messages)})
+                               'message_count': len(messages),
+                               'active_task': active['id'] if active else None,
+                               'task_status': active['status'] if active else None,
+                               'latest_task': {'id': latest['id'], 'status': latest['status']} if latest else None})
             return sorted(result, key=lambda item: (item['updated_at'], item['current']), reverse=True)
 
     def activate_conversation(self, conversation_id):

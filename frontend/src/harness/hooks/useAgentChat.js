@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chatApi } from '../chatApi';
 import { emptyStream, receiveStream } from '../streamState';
 import { chatViewModel } from '../chatViewModel';
+import { useConversationActivity } from './useConversationActivity';
 
-export function useAgentChat() {
+export function useAgentChat({ visible = true } = {}) {
   const [conversation, setConversation] = useState({ conversation_id: null, messages: [] });
   const [conversations, setConversations] = useState([]);
   const [task, setTask] = useState(null);
@@ -20,10 +21,12 @@ export function useAgentChat() {
   const conversationId = useRef(null);
   const alive = useRef(false);
   const action = useRef(false);
+  const listRequest = useRef(0);
 
   const refreshList = useCallback(async (signal) => {
+    const version = ++listRequest.current;
     const data = await chatApi.list(signal);
-    if (alive.current && !signal?.aborted) setConversations(data.conversations || []);
+    if (alive.current && !signal?.aborted && version === listRequest.current) setConversations(data.conversations || []);
   }, []);
 
   const load = useCallback(async (epoch, signal, id) => {
@@ -194,7 +197,26 @@ export function useAgentChat() {
   }, [loading, stopping, task?.id, task?.status, load, refreshList]);
 
   const view = useMemo(() => chatViewModel(conversation.messages, task, answer), [conversation.messages, task, answer]);
+  // Current-chat SSE settles immediately; the list supplies background-chat status.
+  const sidebarConversations = useMemo(() => conversations.map(item =>
+    item.id === conversation.conversation_id && task ? { ...item,
+      active_task: view.busy ? task.id : null, task_status: view.busy ? task.status : null,
+      latest_task: { id: task.id, status: task.status },
+    } : item), [conversations, conversation.conversation_id, task, view.busy]);
+  const hasActiveTasks = sidebarConversations.some(item => ['queued', 'running'].includes(item.task_status));
+  useEffect(() => {
+    if (!hasActiveTasks) return undefined;
+    let disposed = false;
+    const update = async () => {
+      try { await refreshList(request.current?.signal); }
+      catch { /* Retain the last known background status during a connection interruption. */ }
+      if (!disposed) timer = setTimeout(update, 3000);
+    };
+    let timer = setTimeout(update, 3000);
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [hasActiveTasks, refreshList]);
+  const conversationsWithActivity = useConversationActivity(sidebarConversations, conversation, visible && !loading);
   return { ...view, conversationId: conversation.conversation_id, messages: conversation.messages,
-    conversations, loading, pending, stopping, reconnecting, error, clearError: () => setError(''),
+    conversations: conversationsWithActivity, loading, pending, stopping, reconnecting, error, clearError: () => setError(''),
     changeConversation, send, stop };
 }
