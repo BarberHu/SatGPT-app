@@ -34,8 +34,10 @@ class TaskStream:
 
     def update(self, **patch):
         with self.condition:
+            if self.task['status'] in {'completed', 'failed', 'cancelled'}:
+                return
             self.task.update(copy.deepcopy(patch))
-            if patch.get('status') in {'completed', 'failed'}:
+            if patch.get('status') in {'completed', 'failed', 'cancelled'}:
                 self.timeline.finish((patch.get('output') or {}).get('message', ''))
                 self.task['timeline'] = self.timeline.committed()
                 patch['timeline'] = self.task['timeline']
@@ -126,7 +128,7 @@ class TaskStream:
     def read(self, after=None, timeout=15):
         """Replay retained events, otherwise return an atomic current snapshot."""
         with self.condition:
-            if after is not None and after == self.sequence and self.task['status'] not in {'completed', 'failed'}:
+            if after is not None and after == self.sequence and self.task['status'] not in {'completed', 'failed', 'cancelled'}:
                 self.condition.wait_for(lambda: self.sequence > after, timeout)
             if after is None or after < 0 or after > self.sequence or (self.events and after < self.events[0]['id'] - 1):
                 return [{'id': self.sequence, 'type': 'snapshot', 'task_id': self.task['id'],
@@ -138,7 +140,7 @@ class TaskStream:
     @property
     def terminal(self):
         with self.condition:
-            return self.task['status'] in {'completed', 'failed'}
+            return self.task['status'] in {'completed', 'failed', 'cancelled'}
 
     def finish_timeline(self, final=''):
         with self.condition:

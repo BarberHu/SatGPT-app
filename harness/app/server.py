@@ -80,6 +80,16 @@ def activate_conversation(conversation_id: str):
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.get('/api/harness/conversations/{conversation_id}')
+def get_conversation(conversation_id: str):
+    try:
+        return app.state.controller.conversation(conversation_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.post("/api/harness/tasks", status_code=202)
 def create_task(request: TaskRequest):
     try:
@@ -96,6 +106,14 @@ def get_task(task_id: str):
     if task is None:
         raise HTTPException(404, "Task not found")
     return task
+
+
+@app.post('/api/harness/tasks/{task_id}/cancel')
+def cancel_task(task_id: str):
+    try:
+        return app.state.controller.cancel(task_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.get("/api/harness/tasks/{task_id}/events")

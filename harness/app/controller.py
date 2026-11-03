@@ -1,4 +1,4 @@
-"""One-task-at-a-time prototype controller with bounded repair attempts."""
+"""Serialized agent execution with independent, switchable conversation histories."""
 
 from __future__ import annotations
 
@@ -88,9 +88,11 @@ class TaskController:
         self.tool_events_file = root / "state" / "gee-tool-events.jsonl"
         self.trace_dir = root / "state" / "traces"
         self._agent = None
+        self._agent_conversation_id = None
+        self._job_agents = {}
         self.jobs: dict[str, dict] = {}
         self.streams: dict[str, TaskStream] = {}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.changed = threading.Condition(self.lock)
         self.conversation_lock = threading.RLock()
         self.conversation_id = "webgis-main"
@@ -139,17 +141,42 @@ class TaskController:
         temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(self.chat_file)
 
-    def conversation(self) -> dict:
-        with self.lock:
+    def conversation(self, conversation_id=None) -> dict:
+        with self.conversation_lock, self.lock:
+            cid = conversation_id or self.conversation_id
+            messages = self._conversation_messages(cid)
             active = next((job["id"] for job in reversed(list(self.jobs.values()))
                            if job["status"] in {"queued", "running"}
-                           and job['conversation_id'] == self.conversation_id), None)
-            return {"conversation_id": self.conversation_id,
-                    "messages": json.loads(json.dumps(self.messages, ensure_ascii=False)), "active_task": active}
+                           and job['conversation_id'] == cid), None)
+            return {"conversation_id": cid,
+                    "messages": json.loads(json.dumps(messages, ensure_ascii=False)), "active_task": active}
+
+    def _conversation_messages(self, cid):
+        if not re.fullmatch(r'webgis-[A-Za-z0-9_-]{1,80}', cid):
+            raise ValueError('Invalid conversation ID')
+        if cid == self.conversation_id:
+            return self.messages
+        target = self.archive_dir / f'{cid}.json'
+        if not target.is_file():
+            raise FileNotFoundError('Conversation not found')
+        record = json.loads(target.read_text(encoding='utf-8'))
+        if record.get('conversation_id') != cid or not isinstance(record.get('messages'), list):
+            raise ValueError('Invalid conversation history format')
+        return record['messages'][-100:]
+
+    def _save_conversation(self, cid, messages):
+        if cid == self.conversation_id:
+            self.messages = messages[-100:]
+            self._save_messages()
+        else:
+            self.archive_dir.mkdir(parents=True, exist_ok=True)
+            target = self.archive_dir / f'{cid}.json'
+            temporary = target.with_suffix('.tmp')
+            temporary.write_text(json.dumps({'conversation_id': cid, 'messages': messages[-100:]},
+                                            ensure_ascii=False), encoding='utf-8')
+            temporary.replace(target)
 
     def _archive_current(self):
-        if not self.messages:
-            return
         self.archive_dir.mkdir(parents=True, exist_ok=True)
         target = self.archive_dir / f'{self.conversation_id}.json'
         temporary = target.with_suffix('.tmp')
@@ -185,8 +212,6 @@ class TaskController:
                     return {'conversation_id': self.conversation_id, 'messages': json.loads(json.dumps(self.messages)),
                             'active_task': next((j['id'] for j in self.jobs.values() if j['conversation_id'] == self.conversation_id
                                                  and j['status'] in {'queued', 'running'}), None)}
-                if any(j['status'] in {'queued', 'running'} for j in self.jobs.values()):
-                    raise RuntimeError('Wait for the current task to finish before switching conversations')
                 target = self.archive_dir / f'{conversation_id}.json'
                 if not target.is_file():
                     raise FileNotFoundError('Conversation not found')
@@ -194,9 +219,6 @@ class TaskController:
                 if record.get('conversation_id') != conversation_id or not isinstance(record.get('messages'), list):
                     raise ValueError('Invalid conversation history format')
                 self._archive_current()
-            if self._agent is not None:
-                self._agent.__exit__(None, None, None)
-                self._agent = None
             with self.lock:
                 self.conversation_id = conversation_id
                 self.messages = record['messages'][-100:]
@@ -206,12 +228,7 @@ class TaskController:
     def new_conversation(self) -> dict:
         with self.conversation_lock:
             with self.lock:
-                if any(job["status"] in {"queued", "running"} for job in self.jobs.values()):
-                    raise RuntimeError("The agent is still processing a message. Wait for the current task to finish before starting a new conversation.")
                 self._archive_current()
-            if self._agent is not None:
-                self._agent.__exit__(None, None, None)
-                self._agent = None
             with self.lock:
                 self.conversation_id = f"webgis-{uuid.uuid4().hex[:16]}"
                 self.messages = []
@@ -224,10 +241,10 @@ class TaskController:
             "job_id": job_id, "created_at": datetime.now(timezone.utc).isoformat(),
             **extra,
         }
-        with self.lock:
-            self.messages.append(message)
-            self.messages = self.messages[-100:]
-            self._save_messages()
+        with self.conversation_lock, self.lock:
+            cid = self.jobs[job_id]['conversation_id']
+            messages = self._conversation_messages(cid)
+            self._save_conversation(cid, [*messages, message])
 
     def create(self, prompt: str, bounds, conversation_id=None) -> dict:
         if not isinstance(prompt, str) or not (3 <= len(prompt.strip()) <= 2000):
@@ -236,6 +253,10 @@ class TaskController:
         with self.conversation_lock:
             if conversation_id and conversation_id != self.conversation_id:
                 raise RuntimeError('The active conversation has changed. Refresh and try again.')
+            with self.lock:
+                if any(job['conversation_id'] == self.conversation_id and job['status'] in {'queued', 'running'}
+                       for job in self.jobs.values()):
+                    raise RuntimeError('This conversation already has an active task. Stop it before sending another message.')
             job_id = uuid.uuid4().hex[:12]
             job = {
                 "id": job_id, "conversation_id": self.conversation_id,
@@ -261,7 +282,7 @@ class TaskController:
             self.changed.wait_for(
                 lambda: job_id not in self.jobs
                 or self.jobs[job_id]["revision"] > after_revision
-                or self.jobs[job_id]["status"] in {"completed", "failed"},
+                or self.jobs[job_id]["status"] in {"completed", "failed", "cancelled"},
                 timeout=timeout,
             )
             job = self.jobs.get(job_id)
@@ -269,10 +290,39 @@ class TaskController:
 
     def _update(self, job_id: str, **values) -> None:
         with self.changed:
+            if self.jobs[job_id]['status'] in {'completed', 'failed', 'cancelled'}:
+                return
             self.jobs[job_id].update(values)
             self.jobs[job_id]["revision"] += 1
             self.changed.notify_all()
             self.streams[job_id].update(**values)
+
+    def _finish(self, job_id, status, message, **extra):
+        # Persist history and publish the terminal event under one lock so that
+        # Stop racing completion cannot produce two assistant messages.
+        with self.conversation_lock, self.changed:
+            job = self.jobs[job_id]
+            if job['status'] in {'completed', 'failed', 'cancelled'}:
+                return False
+            finished_at = datetime.now(timezone.utc).isoformat()
+            timeline = self.streams[job_id].finish_timeline(message if status == 'completed' else '')
+            self._append_message('assistant', message, job_id, status=status,
+                                 trace=job.get('trace', []), timeline=timeline,
+                                 started_at=job.get('started_at'), finished_at=finished_at, **extra)
+            output = {'message': message, 'layers': extra.get('layers', []), 'previews': extra.get('previews', [])}
+            self._update(job_id, status=status, output=output if status != 'failed' else None,
+                         error=message if status == 'failed' else None, finished_at=finished_at)
+            return True
+
+    def cancel(self, job_id):
+        with self.conversation_lock, self.lock:
+            if job_id not in self.jobs:
+                raise FileNotFoundError('Task not found')
+            agent = self._job_agents.get(job_id)
+            cancelled = self._finish(job_id, 'cancelled', 'Stopped by user.')
+        if cancelled and agent is not None:
+            agent.cancel()
+        return self.get(job_id)
 
     def _event(self, job_id: str, notice) -> None:
         if getattr(notice, "method", None) == "session.event":
@@ -280,6 +330,8 @@ class TaskController:
                 return
             event = getattr(notice, "payload", {}).get("event") or {}
             with self.changed:
+                if self.jobs[job_id]['status'] in {'completed', 'failed', 'cancelled'}:
+                    return
                 trace = self.jobs[job_id]["trace"]
                 changed = add_harness_event(trace, event, self.trace_secrets)
                 snapshot = json.loads(json.dumps(trace, ensure_ascii=False)) if changed else None
@@ -316,6 +368,8 @@ class TaskController:
     def _run(self, job_id: str) -> None:
         job = self.get(job_id)
         assert job is not None
+        if job['status'] == 'cancelled':
+            return
         workspace = self.root / "state" / "agent-workspace"
         try:
             workspace.mkdir(parents=True, exist_ok=True)
@@ -324,11 +378,23 @@ class TaskController:
             if not model_key_configured():
                 key_name = "AIHUBMIX_API_KEY" if selected_provider() == "aihubmix" else "DEEPSEEK_API_KEY"
                 raise RuntimeError(f"Missing {key_name}. Set the model API key in the project root .env.")
+            if self._agent is not None and self._agent_conversation_id != job['conversation_id']:
+                self._agent.__exit__(None, None, None)
+                self._agent = None
             if self._agent is None:
                 candidate = self.agent_factory(workspace, self.home, job["conversation_id"])
-                candidate.require_resume = any(m.get('role') == 'assistant' and m.get('status') != 'failed'
-                                               for m in self.messages)
+                with self.conversation_lock, self.lock:
+                    if self.jobs[job_id]['status'] == 'cancelled':
+                        return
+                    candidate.require_resume = any(m.get('role') == 'assistant' and m.get('status') not in {'failed', 'cancelled'}
+                                                   for m in self._conversation_messages(job['conversation_id']))
+                    self._job_agents[job_id] = candidate
                 self._agent = candidate.__enter__()
+                self._agent_conversation_id = job['conversation_id']
+            with self.lock:
+                if self.jobs[job_id]['status'] == 'cancelled':
+                    return
+                self._job_agents[job_id] = self._agent
             prompt = conversation_prompt(job["prompt"], job["bounds"], CATALOG)
             offset = self.tool_events_file.stat().st_size if self.tool_events_file.is_file() else 0
             answer = self._agent.run(prompt, session_id=job["conversation_id"],
@@ -345,19 +411,16 @@ class TaskController:
             previews = [event["preview"] for event in events if "preview" in event]
             codes = [event["code"] for event in events if isinstance(event.get("code"), str) and event["code"]]
             message = str(answer or "").strip()
-            timeline = self.streams[job_id].finish_timeline(message)
-            finished_at = datetime.now(timezone.utc).isoformat()
-            output = {"message": message, "layers": layers, "previews": previews}
-            self._append_message("assistant", message, job_id, status="completed",
-                                 layers=layers,
-                                 previews=previews, code="\n\n".join(codes),
-                                 trace=trace_snapshot, timeline=timeline, started_at=started_at, finished_at=finished_at)
-            self._update(job_id, status="completed", output=output, error=None, finished_at=finished_at)
+            self._finish(job_id, 'completed', message, layers=layers, previews=previews, code="\n\n".join(codes))
         except Exception as exc:
             error = str(exc)[:2500]
-            timeline = self.streams[job_id].finish_timeline()
-            finished_at = datetime.now(timezone.utc).isoformat()
-            self._append_message("assistant", error, job_id, status="failed",
-                                 trace=self.get(job_id).get("trace", []), timeline=timeline,
-                                 started_at=self.get(job_id).get('started_at'), finished_at=finished_at)
-            self._update(job_id, status="failed", error=error, finished_at=finished_at)
+            self._finish(job_id, 'failed', error)
+        finally:
+            with self.lock:
+                agent = self._job_agents.pop(job_id, None)
+                cancelled = self.jobs[job_id]['status'] == 'cancelled'
+            if cancelled and agent is not None:
+                agent.__exit__(None, None, None)
+                if self._agent is agent:
+                    self._agent = None
+                    self._agent_conversation_id = None

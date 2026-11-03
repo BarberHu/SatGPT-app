@@ -46,7 +46,7 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
     }
   };
   const sidebar = <ConversationSidebar conversations={chat.conversations} currentId={chat.conversationId}
-    disabled={chat.busy || chat.pending || chat.loading} onNew={() => changeConversation()}
+    disabled={chat.loading} onNew={() => changeConversation()}
     onSelect={id => changeConversation(id)} onCollapse={narrow ? () => setHistoryOpen(false) : undefined} />;
   const send = async () => {
     const text = prompt.trim();
@@ -80,8 +80,9 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
             <MessageList key={chat.conversationId || 'loading'} items={chat.items} loading={chat.loading}
               reconnecting={chat.reconnecting} onSuggest={setPrompt} onFocusLayer={focusLayer} />
             {chat.error ? <div className="agent-chat-error" role="alert"><span>{chat.error}</span><Button type="button" variant="ghost" size="icon" aria-label="Dismiss error" onClick={chat.clearError}><X /></Button></div> : null}
-            <Composer value={prompt} onChange={setPrompt} onSend={send} busy={chat.busy} pending={chat.pending}
-              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || !map.ready} />
+            <Composer value={prompt} onChange={setPrompt} onSend={send} onStop={chat.stop}
+              busy={chat.busy} pending={chat.pending} stopping={chat.stopping} stopDisabled={chat.loading}
+              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || chat.stopping || !map.ready} />
           </section>
         </ResizablePanel>
         <ResizableHandle className="agent-resize-handle" aria-label="Resize chat and map" />

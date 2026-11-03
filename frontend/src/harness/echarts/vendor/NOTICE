@@ -1,0 +1,11 @@
+dsh-echarts
+Copyright (c) 2026 dsh-echarts contributors
+
+The DSH Host/Client plugin structure and parts of the DOM lifecycle design are
+adapted from dsh-mermaid:
+https://github.com/AKS1st/dsh-mermaid
+Copyright (c) 2026 dsh-mermaid contributors
+Licensed under the MIT License.
+
+Apache ECharts is distributed under the Apache License 2.0:
+https://github.com/apache/echarts

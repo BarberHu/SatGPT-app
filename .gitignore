@@ -60,6 +60,7 @@ test_output.txt
 .cache/
 /.data/
 /harness/state/
+/harness/tmp*/
 /outputs/
 .codex-model-inspection/
 .codex-skill-validation/

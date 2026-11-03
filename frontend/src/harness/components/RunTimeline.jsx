@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Brain, Check, ChevronRight, CircleAlert, Loader2, Wrench } from 'lucide-react';
+import { Brain, Check, ChevronRight, CircleAlert, Loader2, Square, Wrench } from 'lucide-react';
 import Markdown from './Markdown';
 import CodeBlock from './CodeBlock';
 
@@ -66,10 +66,10 @@ export default function RunTimeline({ rows = [], run = {}, pending = false, reco
   const ended = pending ? now : Date.parse(run.finishedAt);
   const seconds = Number.isFinite(started) && Number.isFinite(ended) ? Math.max(0, Math.floor((ended - started) / 1000)) : null;
   const title = reconnecting ? 'Reconnecting…' : pending ? (run.status === 'queued' ? 'Queued' : 'Running')
-    : run.status === 'failed' ? 'Interrupted' : 'Completed';
+    : run.status === 'cancelled' ? 'Stopped' : run.status === 'failed' ? 'Interrupted' : 'Completed';
   const phases = timelinePhases(rows);
   return <Fold pending={pending} className="agent-run-timeline" ariaLabel="Run timeline"
-    label={<>{pending ? <Loader2 className="agent-spin" size={14} /> : run.status === 'failed' ? <CircleAlert size={14} /> : <Check size={14} />}
+    label={<>{pending ? <Loader2 className="agent-spin" size={14} /> : run.status === 'cancelled' ? <Square size={14} /> : run.status === 'failed' ? <CircleAlert size={14} /> : <Check size={14} />}
       <span>{title}{seconds !== null ? ` · ${seconds}s` : ''}</span></>}>
     <div className="agent-run-phases">{phases.map((phase, index) => {
       const live = pending && index === phases.length - 1;

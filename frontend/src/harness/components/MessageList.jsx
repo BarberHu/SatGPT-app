@@ -48,6 +48,7 @@ export default function MessageList({ items, loading, reconnecting, onSuggest, o
           <div className="agent-suggestions">{suggestions.map(item => <button key={item.title} type="button" onClick={() => onSuggest(item.prompt)}>
             <item.icon size={18} strokeWidth={1.5} /><span>{item.title}</span><ArrowUpRight size={14} />
           </button>)}</div>
+          {import.meta.env.DEV ? <p style={{ marginTop: 16 }}><a href="/?review=echarts">Preview interactive charts</a></p> : null}
         </div> : null}
         {items.map(message => <ChatMessage key={message.id} message={message} reconnecting={reconnecting} onFocusLayer={onFocusLayer} />)}
       </div>

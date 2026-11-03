@@ -8,7 +8,7 @@ export function receiveStream(state, event) {
   if (event.type === 'snapshot') return { ...next, task: event.task, answer: event.answer };
   if (event.type === 'task') {
     next.task = { ...state.task, ...event.patch };
-    if (['completed', 'failed'].includes(next.task.status)) next.answer = null;
+    if (['completed', 'failed', 'cancelled'].includes(next.task.status)) next.answer = null;
   } else if (event.type === 'answer.start') next.answer = event.answer;
   else if (event.type === 'answer.delta' && state.answer?.attempt_id === event.attempt_id) {
     next.answer = { ...state.answer, text: state.answer.text + event.text };

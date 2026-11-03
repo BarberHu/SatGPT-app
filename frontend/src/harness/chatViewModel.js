@@ -32,9 +32,9 @@ export function chatViewModel(messages, task, answer) {
   }));
   const busy = Boolean(task && ['queued', 'running'].includes(task.status));
   const settled = messages.some(item => item.role === 'assistant' && item.job_id === task?.id);
-  if (task && !settled && (busy || task.status === 'completed' || task.status === 'failed')) {
+  if (task && !settled && (busy || ['completed', 'failed', 'cancelled'].includes(task.status))) {
     items.push({ id: `task-${task.id}`, role: 'assistant',
-      ...presentRun(task, answer, busy, task.status === 'completed' ? task.output?.message : task.status === 'failed' ? task.error : ''),
+      ...presentRun(task, answer, busy, task.status === 'failed' ? task.error : task.output?.message || ''),
       streaming: busy && answer?.status === 'streaming', pending: busy,
       failed: task.status === 'failed', attachments: [], layers: [], code: '' });
   }

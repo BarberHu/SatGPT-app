@@ -9,6 +9,7 @@ import {
   getDrawFeaturesFromAoi,
 } from '../../utils/aoi';
 import { buildAoiFromBusinessLayerRecord } from '../../utils/businessLayerStore';
+import { getOriginalFishnetRing, loadFishnetData } from '../../utils/fishnetSelection';
 import {
   buildCatalogMapLayerDefinition,
   getCatalogMapLayerId,
@@ -930,12 +931,24 @@ function BasicMapController({ map, active }) {
   ]);
 
   const loadGridLayer = useCallback((map) => {
-    map.addSource('grid_cell', {
+    let disposed = false;
+    let featuresByFid = null;
+    if (!map.getSource('grid_cell')) map.addSource('grid_cell', {
       type: 'geojson',
-      data: '/assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson',
+      data: { type: 'FeatureCollection', features: [] },
     });
 
-    map.addLayer({
+    loadFishnetData().then((data) => {
+      if (disposed) return;
+      featuresByFid = data.featuresByFid;
+      map.getSource('grid_cell')?.setData(data.geojson);
+    }).catch((error) => {
+      if (disposed) return;
+      console.error('Failed to load original fishnet:', error);
+      setWarning('Unable to load map grids. Please reload and try again.');
+    });
+
+    if (!map.getLayer('grid_cell-layer')) map.addLayer({
       id: 'grid_cell-layer',
       type: 'fill',
       source: 'grid_cell',
@@ -951,9 +964,15 @@ function BasicMapController({ map, active }) {
 
     const handleGridClick = (e) => {
       if (appModeRef.current === 'agent' || !gridClickEnabledRef.current || isAoiEditingRef.current) return;
+      if (!featuresByFid) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['grid_cell-layer'] });
-      if (features.length > 0 && features[0].geometry) {
-        const cords = features[0].geometry.coordinates[0];
+      if (features.length > 0) {
+        const cords = getOriginalFishnetRing(features[0], featuresByFid);
+        const aoi = cords && buildAoiFromGridSelection(cords);
+        if (!aoi) {
+          setWarning('Unable to find the complete grid boundary. Please reload and try again.');
+          return;
+        }
         
         // Remove previous EE layers before setting new grid
         removeAskLayers(map);
@@ -961,9 +980,10 @@ function BasicMapController({ map, active }) {
         
         // Set new grid coordinates (this triggers useMapData to fetch new data)
         resetAskSession({ preserveResult: true });
-        setSelectedGridCords(cords);
+        setSelectedGridCords(aoi.geojson.geometry.coordinates[0]);
         setDraftAOI(null);
-        setSelectedAOI(buildAoiFromGridSelection(cords));
+        setSelectedAOI(aoi);
+        setWarning('');
         reconcileLayerOrder(map);
       }
     };
@@ -977,12 +997,19 @@ function BasicMapController({ map, active }) {
       map.getCanvas().style.cursor = '';
     };
 
-    return bindMapEvents(map, [
+    const unbindEvents = bindMapEvents(map, [
       { event: 'click', layerId: 'grid_cell-layer', handler: handleGridClick },
       { event: 'mouseenter', layerId: 'grid_cell-layer', handler: handleGridMouseEnter },
       { event: 'mouseleave', layerId: 'grid_cell-layer', handler: handleGridMouseLeave },
     ]);
-  }, [reconcileLayerOrder, removeAgentLayers, removeAskLayers, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords]);
+    return () => {
+      disposed = true;
+      unbindEvents();
+      // The shared map outlives this controller, including StrictMode's effect
+      // replay. Release the grid layer before its source so setup can run again.
+      removeMapLayerAndSource(map, 'grid_cell-layer', 'grid_cell');
+    };
+  }, [reconcileLayerOrder, removeAgentLayers, removeAskLayers, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords, setWarning]);
 
   const initializeLoadedMap = useCallback((map) => {
     setMapInstance(map);
@@ -997,9 +1024,11 @@ function BasicMapController({ map, active }) {
       });
     map.addControl(drawRef.current, 'top-right');
 
+    let utilityContainer = null;
     const utilityControl = {
       onAdd() {
         const container = document.createElement('div');
+        utilityContainer = container;
         container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group satgpt-map-utility-group';
 
         const gridButton = document.createElement('button');
@@ -1036,10 +1065,11 @@ function BasicMapController({ map, active }) {
         return container;
       },
       onRemove() {
-        if (gridClickButtonRef.current) {
-          gridClickButtonRef.current.onclick = null;
-        }
-        gridClickButtonRef.current = null;
+        const button = utilityContainer?.querySelector('button');
+        if (button) button.onclick = null;
+        if (gridClickButtonRef.current === button) gridClickButtonRef.current = null;
+        utilityContainer?.remove();
+        utilityContainer = null;
       },
     };
 

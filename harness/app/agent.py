@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 from .bootstrap import ensure_plugin
@@ -35,13 +36,21 @@ class HarnessAgent:
         self.provider = None
         self.bridge = None
         self.require_resume = False
+        self._lifecycle_lock = threading.RLock()
+        self._cancelled = threading.Event()
 
     def __enter__(self):
-        try:
-            return self._enter()
-        except Exception:
-            self.__exit__(None, None, None)
-            raise
+        with self._lifecycle_lock:
+            try:
+                if self._cancelled.is_set():
+                    raise RuntimeError('Run stopped by user')
+                agent = self._enter()
+                if self._cancelled.is_set():
+                    raise RuntimeError('Run stopped by user')
+                return agent
+            except Exception:
+                self.__exit__(None, None, None)
+                raise
 
     def _enter(self):
         from deepseek_harness import DeepSeekHarness
@@ -76,24 +85,36 @@ class HarnessAgent:
         return self
 
     def __exit__(self, *_exc):
-        try:
-            if self.harness is not None:
-                self.harness.close()
-        finally:
-            if self.bridge is not None:
-                self.bridge.close()
+        with self._lifecycle_lock:
+            try:
+                if self.harness is not None:
+                    self.harness.close()
+            finally:
+                self.harness = self.session = None
+                if self.bridge is not None:
+                    self.bridge.close()
+                    self.bridge = None
+
+    def cancel(self):
+        # SDK close shuts down the runtime and unblocks an in-flight session.run;
+        # disconnecting the browser's event stream alone cannot stop execution.
+        self._cancelled.set()
+        self.__exit__(None, None, None)
 
     def run(self, prompt: str, session_id: str, on_event=None, on_stream=None) -> str:
-        if self.session is None or session_id != self.session_id:
-            raise RuntimeError("Harness session is not ready or the session ID does not match")
-        self.bridge.bind(session_id, on_stream)
+        with self._lifecycle_lock:
+            if self._cancelled.is_set() or self.session is None or session_id != self.session_id:
+                raise RuntimeError("Harness session is not ready or the session ID does not match")
+            session, bridge = self.session, self.bridge
+            bridge.bind(session_id, on_stream)
         try:
-            result = self.session.run(prompt, on_notification=on_event)
+            result = session.run(prompt, on_notification=on_event)
             # A turn/end barrier shares the plugin's ordered HTTP queue. The SDK
             # transport may return first, so allow its presentation channel to drain.
-            self.bridge.drained.wait(timeout=3)
+            if not self._cancelled.is_set():
+                bridge.drained.wait(timeout=3)
         finally:
-            self.bridge.unbind()
+            bridge.unbind()
         if result.finish_reason != "completed":
             raise RuntimeError(describe_run_failure(result, self.provider or ""))
         return result.final_response
@@ -102,6 +123,7 @@ class HarnessAgent:
 def conversation_prompt(request: str, bounds: list[float], catalog: list[dict]) -> str:
     return f"""You are SatGPT's geospatial analysis assistant. Answer general questions normally; use the registered GEE tools whenever data is needed.
 Use English by default for answers, progress summaries, layer and preview names, metadata descriptions, and legend labels. Follow an explicit user request for another language.
+When the user requests a chart, or a chart helps explain verified numerical results, include a lowercase echarts fenced code block containing only a strict JSON ECharts option object. The frontend renders it automatically after streaming finishes. Use double-quoted keys and strings; no comments, JavaScript functions, expressions, external images, title links, custom series, or toolbox dataView. Use string-template formatters and tooltip.trigger="axis" or "item"; tooltips use Canvas rich text, so avoid HTML markup. Keep charts readable in a narrow chat panel: short titles and labels, a contained grid, legends clear of titles, and labeled axes with units. Explain the data source, date range, units, and missing values outside the fence. Never invent observations; when the user supplies data, chart those values, and label synthetic demonstration data explicitly. No GEE call is needed just to visualize values already supplied by the user.
 Tool Python runs in a separate worker with ee already available. Assign the output to result. Verify uncertain dataset IDs with gee_catalog; use gee_eval to check coverage and statistics, gee_preview to inspect imagery, and gee_layer to create interactive layers. For gee_layer, supply bounds=[west,south,east,north] for the actual study area; do not use the current map extent to locate results for a different area. Use metadata for verified source, dataset_id, observed_at date or range, unit, and a short description; omit unknown information. Layers automatically receive static thumbnails; legends use palette/min/max. For consecutive integer classes, provide legend.labels in palette order. Correct tool errors and retry when appropriate; diagnose connection failures with gee_status.
 Use public datasets only; do not export or modify assets. A visible disaster layer does not establish a reliable event conclusion: explain observation dates, coverage, and methodological limitations. Only claim a layer is displayed after a successful tool result. Filter early by date, region, and bands; specify scale, geometry, and maxPixels for large-area statistics.
 Current map bounds [west,south,east,north]: {json.dumps(bounds)}. Reference catalog: {json.dumps(catalog, ensure_ascii=False)}.
