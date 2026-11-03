@@ -1,63 +1,83 @@
 # SatGPT
 
-基于 Google Earth Engine（GEE）的遥感分析应用，提供两种模式：
+**English** | [简体中文](README.zh-CN.md)
 
-- **Basic**：地图、洪水图层和基础问答。
-- **Agent**：通过 DeepSeek Harness SDK 调用 GEE，支持流式回答、运行时间线、历史会话和分析结果图层。
+SatGPT is a remote sensing analysis application powered by Google Earth Engine (GEE). It combines an interactive map, static data layers, and an agent that can query datasets, run analyses, and present results as map layers and charts.
 
-前端使用 React + Mapbox；两个后端均为 Python FastAPI。当前开发基线未挂载实验 Skill。
+The application has two modes: **Static layers (Basic)** and **Intelligent analysis (Agent)**. Both share one persistent Mapbox map and the current view, while keeping their analysis state separate.
 
-## 1. 环境准备
+## Features
 
-- **Python 3.12**，确保 `python --version` 显示 3.12。
-- **Node.js 22.12 或以上**及 npm（Vite 也支持 Node.js 20.19 系列）。
-- 可用的 Mapbox token、模型 API 密钥。
-- 已启用 Earth Engine API、完成 Earth Engine 注册的 Google Cloud 项目，以及有权访问该项目与所需 GEE 数据的 **service account JSON 凭据**。
+| Area | Capabilities |
+| --- | --- |
+| Basic analysis | Map exploration, flood-related layers, grid and drawn-area selection, and basic question answering. |
+| Agent analysis | GEE dataset search, coverage and statistics queries, image previews, and interactive result layers through the DeepSeek Harness SDK. |
+| Conversations | Streamed answers, an ordered run timeline, saved conversation history, switching during a run, and stopping running or queued tasks. |
+| Result layers | Per-conversation layer isolation, thumbnails, observation dates, sources, legends, visibility controls, location, and removal. |
+| Charts | Interactive ECharts charts rendered after a response finishes, with configuration copying and PNG export. |
+| Shared workspace | A persistent map across mode switches, resizable chat and map panels, narrow-screen views, a scale bar, and map screenshots. |
 
-先从 GitHub 获取发布分支：
+Grid selection resolves the clicked feature's `FID` against the original GeoJSON. The displayed selection and analysis request use the same complete geometry, independently of map zoom and tile clipping.
+
+## Architecture
+
+| Component | Technology and role |
+| --- | --- |
+| `frontend/` | React, Vite, Mapbox GL JS, Streamdown, and ECharts; shared map and Basic/Agent interfaces. |
+| `agent/` | Python FastAPI backend for Basic analysis and question answering. |
+| `harness/` | Python FastAPI backend, DeepSeek Harness SDK, GEE tool plugin, Python worker, and server-sent events (SSE). |
+| `scripts/` | Windows setup and startup scripts, plus Docker Compose deployment. |
+
+The current baseline does not register experimental Skills. Agent tasks execute in one queue; switching conversations leaves the original task running in the background and saves its results to the original conversation.
+
+## Prerequisites
+
+- **Python 3.12**. Check that `python --version` reports 3.12.
+- **Node.js 22.12 or later** and npm. The setup script also accepts the supported Node.js 20.19+ release line.
+- A Mapbox browser public token with access to the configured map style.
+- Model API keys for Basic and the selected Agent provider.
+- A Google Cloud project registered for Earth Engine with the Earth Engine API enabled, and **service account JSON credentials** authorized to access the project and required GEE data.
+
+Run the Windows commands below from PowerShell in the repository root.
+
+## Quick start
+
+### 1. Clone the release branch
 
 ```powershell
 git clone --branch pro2.0 --single-branch https://github.com/BarberHu/SatGPT-app.git
 cd SatGPT-app
 ```
 
-下列 Windows 命令均在项目根目录的 PowerShell 中执行。
-
-## 2. 创建根目录配置
+### 2. Create the configuration file
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-先填写根目录 `.env` 并放置 GEE 凭据，再按第 4 节安装和启动。
+Place the service account JSON at `.private-key.json` in the repository root, or set `GOOGLE_APPLICATION_CREDENTIALS` to its absolute path. Complete the root `.env` before starting the application.
 
-脚本会创建 `basic-venv/` 和 `harness/.venv/` 并安装依赖；如果尚未创建 `.env`，也会复制唯一模板。
+### 3. Configure credentials and models
 
-## 3. 配置 `.env`
-
-将服务账号 JSON 放在项目根目录，命名为 `.private-key.json`，或在配置中填写其绝对路径。编辑根目录 `.env`：
+Set the shared GEE and map configuration, followed by the separate Basic and Agent model settings:
 
 ```dotenv
-# GEE：Basic 和 Agent 共用服务账号
 GOOGLE_APPLICATION_CREDENTIALS=.private-key.json
 GEE_PROJECT_ID=your-google-cloud-project-id
 
-# 地图：底图 URL 可以沿用 .env.example 中的配置
-REACT_APP_MAPBOX_ACCESS_TOKEN=your-mapbox-token
+REACT_APP_MAPBOX_ACCESS_TOKEN=your-mapbox-public-token
 REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp
 
-# Basic 问答模型
 OPENAI_API_KEY=your-basic-model-key
 OPENAI_API_BASE=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 
-# Agent 模型：使用 DeepSeek 官方服务
 DSH_PROVIDER=deepseek-official
 DSH_MODEL=deepseek-v4-flash
 DEEPSEEK_API_KEY=your-deepseek-key
 ```
 
-如果 Agent 使用 AIHubMix，替换上面的 Agent 配置，模型 ID 填该平台实际可用的值：
+The model names above match the repository defaults. Confirm that the selected provider supports your chosen model. To use AIHubMix for the Agent, replace the Agent settings with:
 
 ```dotenv
 DSH_PROVIDER=aihubmix
@@ -66,15 +86,11 @@ AIHUBMIX_API_KEY=your-aihubmix-key
 AIHUBMIX_BASE_URL=https://aihubmix.com/v1
 ```
 
-Basic 与 Agent 的模型配置相互独立，`OPENAI_API_KEY` 仍用于 Basic 问答、位置解析和数据集推荐。Agent 仅要求所选服务商的密钥；未选择服务商的字段留空。Mapbox 使用浏览器公开 token，不使用 secret token。
+Basic and Agent model settings are independent. `OPENAI_API_KEY` is used for Basic question answering, location resolution, and dataset recommendations. The Agent requires only the selected provider's key; leave the unused provider's key empty. Use a browser public Mapbox token, not a secret token.
 
-唯一填写入口是根目录 `.env`，唯一模板是根目录 `.env.example`。优先级为 **进程环境变量 > 根目录 `.env` > 程序默认值**，显式空值也优先（必填项会报错）。前端目录环境文件、模式专用 `.env.*` 和其他项目 JSON 不再读取。配置值不展开 `${VAR}`；含 `#`、空格、`$` 的值使用单引号。相对凭据路径始终以项目根目录解析，与启动目录无关。
+For optional reasoning, output-length, port, and network settings, see [`.env.example`](.env.example).
 
-模型密钥和服务账号 JSON 仅在后端使用，Git 与 Docker 构建均排除真实配置。Vite 关闭自动环境暴露，仅显式编译两个 `REACT_APP_MAPBOX_*` 公开字段。
-
-## 4. 本地启动
-
-安装、校验并启动开发模式（支持前端热更新）：
+### 4. Install, validate, and start
 
 ```powershell
 .\scripts\windows\satgpt.bat setup
@@ -82,49 +98,109 @@ Basic 与 Agent 的模型配置相互独立，`OPENAI_API_KEY` 仍用于 Basic �
 .\scripts\windows\satgpt.bat dev
 ```
 
-打开 **http://127.0.0.1:3000/**，默认进入 **Static layers**（Basic），在顶部横幅切换到 **Intelligent analysis**（Agent）。前端界面统一使用英文，日期和数字采用 `en-US`，比例尺使用 `m` / `km`；底图优先使用数据源提供的英文地名，缺失时保留原地名。Basic 摘要和 Agent 回答、图层名称及图例默认使用英文，用户明确要求其他语言时遵循其要求；已有消息、图层元数据与用户输入不会被自动翻译。Basic 与 Agent 共用持续挂载的一个 Mapbox 实例和当前视野，切换模式不会重载底图或自动定位；两种模式分别保留业务状态，Agent 图层按会话隔离。右侧截图按钮保存共享地图当前画面，地图未准备好时不可用；窄屏智能分析需先打开地图视图。**Settings** 入口目前仅为预留说明，不接收或保存个人 API Key。
+Setup creates `basic-venv/` and `harness/.venv/`, installs Python and frontend dependencies, and copies the configuration template if `.env` does not exist. Development mode supports frontend hot updates. Configuration validation checks local settings; it does not prove successful model or GEE authentication.
 
-| 服务 | 默认地址 |
+Open **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)**.
+
+| Service | Default address |
 | --- | --- |
-| 前端 | http://127.0.0.1:3000 |
-| Basic API | http://127.0.0.1:8000 |
-| Harness Agent API | http://127.0.0.1:8001 |
+| Frontend | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
+| Basic API | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
+| Harness Agent API | [http://127.0.0.1:8001](http://127.0.0.1:8001) |
 
-三个服务的端口均从根目录 `.env` 读取；`AGENT_PORT`、`HARNESS_PORT`、`FRONTEND_PORT` 必须互不相同。开发与生产模式共用端口，请先停止旧服务再启动另一种模式。停止时在三个服务窗口分别按 `Ctrl+C`，然后关闭窗口。
+`FRONTEND_PORT`, `AGENT_PORT`, and `HARNESS_PORT` come from the root `.env` and must be different. Development and production use the same configured ports. Stop the existing services before switching startup modes. To stop the Windows services, press `Ctrl+C` in each of the three service windows, then close the windows.
 
-本地生产模式（构建前端并启动三个服务）：
+## Using SatGPT
+
+1. Start in **Static layers** to explore the map, select a grid or draw an area, and use Basic analysis. Grid selection loads data for the complete original grid cell.
+2. Switch to **Intelligent analysis** to ask the Agent about the current map area or another explicitly named location. Follow the streamed answer and run timeline.
+3. Use conversation history to open another chat or start a new one during a run. Returning to a running chat restores its task subscription. New tasks remain subject to the shared execution queue.
+4. Use the square **Stop response** button to cancel a running or queued task. The task is recorded as **Stopped**, its runtime is closed when applicable, and you can send a follow-up. Stopping does not require text in the input or an available map.
+5. Inspect result layer cards for thumbnails, observation dates, sources, and legends. Toggle visibility, inspect details, locate a layer, or remove it. Unknown dates are marked explicitly; a failed thumbnail does not prevent use of the interactive layer.
+6. Request a chart when useful. Valid lowercase `echarts` JSON blocks render after the answer finishes; chart options remain available for copying, and charts can be exported as PNG. Invalid options show their source and an error. The development-only preview is available at [http://127.0.0.1:3000/?review=echarts](http://127.0.0.1:3000/?review=echarts).
+7. Use the screenshot button to save the current shared map view once the map is ready. On narrow screens, open the Agent map view first.
+
+Mode switches preserve the map and camera without reloading the basemap or automatically locating a result. Agent layers are isolated by conversation. The scale bar follows map movement, zoom, and panel resizing, switching between meters and kilometers.
+
+The interface uses English, `en-US` dates and numbers, and `m` / `km` distances. Basemap labels prefer English where available and retain the original name otherwise. Basic summaries, Agent answers, layer names, and legends default to English, while explicit requests for another language are respected. Existing messages, layer metadata, and user input are not automatically translated. **Settings** is currently a placeholder and does not accept or store personal API keys.
+
+## Configuration and local data
+
+- The root `.env` is the single configuration entry point, and [`.env.example`](.env.example) is its template. Precedence is **process environment > root `.env` > application defaults**. Explicit empty values also take precedence and fail validation when required.
+- Frontend environment files, mode-specific `.env.*` files, and configuration JSON from other projects are not read. Values do not expand `${VAR}`; use single quotes for values containing `#`, spaces, or `$`.
+- Relative credential paths resolve from the repository root regardless of the startup directory.
+- Model keys and service account JSON remain on the backend. Git and Docker builds exclude real configuration. Vite exposes only the two explicitly selected `REACT_APP_MAPBOX_*` public settings.
+- Agent conversations, session data, and previews are stored in `harness/state/`. Back up this directory to preserve history.
+
+## Production deployment
+
+For a local Windows production build and startup:
 
 ```powershell
 .\scripts\windows\satgpt.bat deploy
 ```
 
-也可分别执行 `satgpt.bat build` 和 `satgpt.bat prod`。修改 Basic 模型后重启 Basic API；修改 Agent 模型后重启 Harness API（包括 SDK/worker 子进程）；修改 GEE 后重启两个 API。修改端口后重启对应 API 与前端/网关。修改 Mapbox 配置后，开发模式重启 Vite，生产模式重新构建前端并重启网关（或重新构建 Docker frontend 镜像）。构建后的浏览器文件不会读取运行期 `.env`。
+Alternatively, run `satgpt.bat build` and `satgpt.bat prod` separately through the same script path.
 
-## 5. 检查与排错
+For Docker Engine with Compose v2, configure the root `.env` and credentials first, then run from the repository root:
+
+```powershell
+docker compose --project-name satgpt --project-directory . --env-file .env -f scripts/docker/compose.harness.yml config --quiet
+docker compose --project-name satgpt --project-directory . --env-file .env -f scripts/docker/compose.harness.yml up -d --build
+```
+
+Keep `--project-directory .` so build and credential paths resolve correctly. Only the frontend port is published on the host loopback address; backends remain on the container network. The `harness_state` volume stores conversation data.
+
+| Changed setting | Required action |
+| --- | --- |
+| Basic model | Restart the Basic API. |
+| Agent model | Restart the Harness API, including its SDK and worker processes. |
+| GEE configuration or credentials | Restart both APIs. |
+| Service ports | Restart the affected APIs and frontend/gateway. |
+| Mapbox configuration | Restart Vite in development; rebuild the frontend and restart the gateway in production, or rebuild the Docker frontend image. |
+
+Built browser assets do not read runtime `.env` values. Use `config --quiet` rather than printing expanded Compose configuration, which can contain secrets. See [PRODUCTION.md](PRODUCTION.md) for deployment details in Chinese.
+
+The application currently targets trusted users. Public hosting requires authentication, user isolation, TLS, GEE/model limits, execution isolation for generated code, and auditing. Keep backend ports private. Multiple replicas require replacing local-file conversation storage.
+
+## Health checks and troubleshooting
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
 Invoke-RestMethod http://127.0.0.1:8001/health
 ```
 
-- **地图空白**：检查 Mapbox token、底图访问权限，重启前端是否生效。
-- **GEE 认证失败**：检查凭据路径、项目 ID、API 启用状态、服务账号权限及 Google 服务的网络连接。
-- **模型返回 401**：检查所选服务商与密钥是否匹配。`model_key_configured` 只表示已填写，`model_authentication=not_checked` 表示健康检查没有调用模型。Harness 的 `gee_project_configured` 也只表示已配置；通过实际 `gee_status` 工具确认认证与远端往返。Basic 的 `gee_initialized` 表示初始化结果。
-- **端口占用**：先停止之前启动的服务，再重新运行启动命令。
+The production gateway's `/readyz` checks connectivity to both APIs, and `/health` proxies the Basic health endpoint.
 
-Agent 的聊天、会话和预览保存在本地 `harness/state/`；需要保留历史时请备份该目录。
+| Symptom | Check |
+| --- | --- |
+| Blank map | Mapbox public token, style access, and whether frontend configuration changes have been applied. |
+| GEE authentication fails | Credential path, project ID, API registration/enabling, service account permissions, and network access to Google services. |
+| Model returns 401 | The selected provider and its matching API key. |
+| Port already in use | Stop previously started services before restarting. |
+| Result tiles fail after a long idle period | GEE map links are temporary; rerun the query to obtain a usable link. |
+| Stop button or conversation switching still behaves as before | Restart the Harness backend and refresh the page after updating the code. |
 
-Agent 地图底部的“当前图层”卡片包含静态预览、名称、观测日期、来源与图例。眼睛开关控制显隐，详情中可查看数据集/波段/范围并定位或移除；不提供“分析当前区域”按钮。新 `gee_layer` 结果按同一渲染参数保存 PNG 缩略图，连续图例来自实际 palette/min/max，分类标签必须与连续整数类别及色板顺序对应，RGB 合成显示波段说明。观测日期未知时明确标注；旧图层只有同名预览时才关联，不推测或伪造缩略图/日期。预览失败仍可使用交互图层。地图比例尺采用横向多刻度样式，由公共工作区管理，位于图层面板下方并右对齐，随面板展开/收起及地图移动缩放更新，并自动切换公里/米。
+`model_key_configured` and `gee_project_configured` report configuration presence only. `model_authentication=not_checked` and Harness `gee_authentication=not_checked` mean no remote authentication check has run. Basic `gee_initialized` reports initialization status. Use an actual query and the Agent's `gee_status` tool to verify remote access.
 
-## 目录与其他部署方式
+## Project layout
 
 ```text
-frontend/   React 前端与 Basic / Agent 页面
-agent/      Basic API
-harness/    Harness SDK、GEE 插件、Python worker 与 SSE
-scripts/    Windows 启动脚本和 Docker Compose
+frontend/             React frontend, shared map, Basic/Agent views, and charts
+agent/                Basic FastAPI service
+harness/app/          Agent API, controller, SDK adapter, and Python worker
+harness/integrations/ GEE tools and streaming integration
+scripts/windows/      Windows setup, development, and production commands
+scripts/docker/       Docker Compose configuration
+satgpt_config.py      Shared configuration validation and API launcher
+.env.example          Root configuration template
 ```
 
-Docker 和 Linux 部署见 [PRODUCTION.md](PRODUCTION.md)。当前主要面向可信用户使用，公开部署要求见该文档。
+## Further documentation
 
-共享地图的组件边界、图层命名空间和旧存储兼容策略见 [frontend/src/map/README.md](frontend/src/map/README.md)。
+- [Production deployment and public-hosting requirements](PRODUCTION.md) (Chinese).
+- [Deployment scripts](scripts/README.md) (Chinese).
+- [Shared map architecture](frontend/src/map/README.md) (English).
+- [Chart integration and third-party attribution](frontend/src/harness/echarts/README.md) (English).
+
+The chart integration includes third-party validator code with its [license](frontend/src/harness/echarts/vendor/LICENSE) and [notice](frontend/src/harness/echarts/vendor/NOTICE). Keep these attribution files when redistributing that code.
