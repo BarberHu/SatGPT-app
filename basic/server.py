@@ -1,4 +1,4 @@
-"""FastAPI service for the Basic map and chat experience."""
+"""Basic API router and lifecycle hooks; the application lives in satgpt_backend."""
 import asyncio
 import os
 import logging
@@ -7,23 +7,23 @@ from io import BytesIO
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
-import uvicorn
+from starlette.applications import Starlette
 
 # 本地模块
-from project_env import load_project_env, required_env, validate_config
+from satgpt_config import load_project_env, required_env, validate_config
 
 load_project_env()
-validate_config("basic")
-from gee_service import gee_service, get_flood_images
-from gee_code_generator import generate_flood_gee_code
-from flood_dataset_service import build_confirmation_context, get_default_flood_layer_catalog, renderer
-from flood_aoi import search_location_candidates
-from business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
-from flood_api_services import (
+from .gee_service import gee_service, get_flood_images
+from .gee_code_generator import generate_flood_gee_code
+from .flood_dataset_service import build_confirmation_context, get_default_flood_layer_catalog, renderer
+from .flood_aoi import search_location_candidates
+from .business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
+from .water_assets.tile_service import TileProxyServer
+from .flood_api_services import (
     build_script_pdf,
     get_agent_raster_download_file,
     get_agent_raster_download_payload,
@@ -122,22 +122,24 @@ def _summarize_flood_image_request(request: "FloodImageRequest") -> dict:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
-    print("[INFO] Basic API service starting...")
+async def lifespan(app: Starlette):
+    """Initialize GEE off the HTTP event loop; configuration is not authentication."""
+    validate_config("basic")
+    app.state.basic_initialized = False
+    global _HEAVY_OPERATION_SEMAPHORE
+    _HEAVY_OPERATION_SEMAPHORE = asyncio.Semaphore(_HEAVY_OPERATION_LIMIT)
+    await asyncio.to_thread(gee_service._initialize_ee)
+    app.state.basic_initialized = True
     try:
         yield
     finally:
-        print("[INFO] Basic API service stopped.")
+        app.state.basic_initialized = False
+        gee_service.initialized = False
+        renderer.tile_service.initialized = False
+        TileProxyServer.get_instance().tile_registry.clear()
 
 
-# 创建 FastAPI 应用
-app = FastAPI(
-    title="Flood Agent API",
-    description="洪水智能体后端服务 - 提供洪水事件分析和遥感影像获取",
-    version="1.0.0",
-    lifespan=lifespan
-)
+router = APIRouter()
 
 # ============== 数据模型 ==============
 
@@ -248,7 +250,20 @@ def _ensure_openai_ready() -> None:
 
 # ============== API 端点 ==============
 
-@app.get("/")
+@router.get("/api/ee-tiles/{layer_id}/{z}/{x}/{y}")
+async def proxy_tile(layer_id: str, z: int, x: int, y: int):
+    fetcher = TileProxyServer.get_instance().tile_registry.get(layer_id)
+    if fetcher is None:
+        raise HTTPException(404, "Unknown layer id")
+    try:
+        content = await _run_heavy_operation(fetcher.fetch_tile, x, y, z)
+        return Response(content, media_type="image/png", headers={"Cache-Control": "no-store"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Tile fetch failed: {exc}") from exc
+
+@router.get("/")
 async def root():
     """健康检查"""
     return {
@@ -258,7 +273,6 @@ async def root():
     }
 
 
-@app.get("/health")
 async def health():
     """健康检查端点"""
     return {
@@ -271,7 +285,7 @@ async def health():
     }
 
 
-@app.get("/api/maps/default")
+@router.get("/api/maps/default")
 async def get_default_map():
     _ensure_gee_ready()
     try:
@@ -282,7 +296,7 @@ async def get_default_map():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/maps/unsupervised")
+@router.post("/api/maps/unsupervised")
 async def get_unsupervised_map(request: Request):
     _ensure_gee_ready()
     try:
@@ -294,7 +308,7 @@ async def get_unsupervised_map(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/maps/historical")
+@router.post("/api/maps/historical")
 async def get_historical_map(request: Request):
     _ensure_gee_ready()
     try:
@@ -306,7 +320,7 @@ async def get_historical_map(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/maps/flood-hotspot")
+@router.post("/api/maps/flood-hotspot")
 async def get_flood_hotspot_map(request: Request):
     _ensure_gee_ready()
     try:
@@ -318,7 +332,7 @@ async def get_flood_hotspot_map(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/maps/water-regime-change")
+@router.post("/api/maps/water-regime-change")
 async def get_water_regime_change_map(request: Request):
     _ensure_gee_ready()
     try:
@@ -330,7 +344,7 @@ async def get_water_regime_change_map(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/agent-raster-layers")
+@router.post("/api/agent-raster-layers")
 async def get_agent_raster_layers(request: Request):
     _ensure_gee_ready()
     try:
@@ -344,7 +358,7 @@ async def get_agent_raster_layers(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/agent-raster-download")
+@router.post("/api/agent-raster-download")
 async def get_agent_raster_download(request: Request):
     _ensure_gee_ready()
     try:
@@ -358,7 +372,7 @@ async def get_agent_raster_download(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/agent-raster-download-file")
+@router.post("/api/agent-raster-download-file")
 async def download_agent_raster_file(request: Request):
     _ensure_gee_ready()
     try:
@@ -382,7 +396,7 @@ async def download_agent_raster_file(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/chat")
+@router.post("/api/chat")
 async def chat(request: ChatRequest):
     _ensure_openai_ready()
     chatgpt_response = await run_in_threadpool(get_chatgpt_response, request.message)
@@ -391,7 +405,7 @@ async def chat(request: ChatRequest):
     return {"message": chatgpt_response}
 
 
-@app.post("/api/scripts/gee")
+@router.post("/api/scripts/gee")
 async def get_script(request: ChatRequest):
     _ensure_openai_ready()
     code_snippet = await run_in_threadpool(get_code_response, request.message)
@@ -400,7 +414,7 @@ async def get_script(request: ChatRequest):
     return {"message": code_snippet}
 
 
-@app.post("/api/scripts/pdf")
+@router.post("/api/scripts/pdf")
 async def get_pdf(request: ScriptPdfRequest):
     if not request.script.strip():
         raise HTTPException(status_code=400, detail="Script content is required.")
@@ -412,7 +426,7 @@ async def get_pdf(request: ScriptPdfRequest):
     )
 
 
-@app.post("/api/flood-images")
+@router.post("/api/flood-images")
 async def get_flood_imagery(request: FloodImageRequest):
     request_started_at = time.perf_counter()
     request_summary = _summarize_flood_image_request(request)
@@ -530,7 +544,7 @@ async def get_flood_imagery(request: FloodImageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/gee-status")
+@router.get("/api/gee-status")
 async def gee_status():
     """
     检查 GEE 服务状态
@@ -553,7 +567,7 @@ class GEECodeRequest(BaseModel):
     days_range: Optional[int] = 15
 
 
-@app.post("/api/gee-code")
+@router.post("/api/gee-code")
 async def generate_gee_code(request: GEECodeRequest):
     """
     生成可在 GEE Code Editor 中运行的 JavaScript 代码
@@ -616,7 +630,7 @@ class LocationSearchRequest(BaseModel):
     limit: Optional[int] = 5
 
 
-@app.post("/api/flood-impact")
+@router.post("/api/flood-impact")
 async def get_flood_impact(request: FloodImpactRequest):
     """
     获取洪水损失评估
@@ -676,7 +690,7 @@ async def get_flood_impact(request: FloodImpactRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/flood-confirmation/refresh")
+@router.post("/api/flood-confirmation/refresh")
 async def refresh_flood_confirmation(request: FloodConfirmationRefreshRequest):
     try:
         context = await run_in_threadpool(
@@ -694,7 +708,7 @@ async def refresh_flood_confirmation(request: FloodConfirmationRefreshRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/flood-layer-catalog")
+@router.get("/api/flood-layer-catalog")
 async def get_flood_layer_catalog():
     try:
         catalog = await run_in_threadpool(get_default_flood_layer_catalog)
@@ -703,7 +717,7 @@ async def get_flood_layer_catalog():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/recommended-layer-render")
+@router.post("/api/recommended-layer-render")
 async def render_recommended_layer(request: RecommendedLayerRenderRequest):
     try:
         rendered = await _run_heavy_operation(
@@ -722,7 +736,7 @@ async def render_recommended_layer(request: RecommendedLayerRenderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/location-search")
+@router.post("/api/location-search")
 async def search_location(request: LocationSearchRequest):
     try:
         candidates = await run_in_threadpool(
@@ -735,7 +749,7 @@ async def search_location(request: LocationSearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/business-layers/upsert")
+@router.post("/api/business-layers/upsert")
 async def upsert_business_layer_records(request: BusinessLayerUpsertRequest):
     saved_layers = upsert_business_layers(
         store_namespace=request.store_namespace,
@@ -745,7 +759,7 @@ async def upsert_business_layer_records(request: BusinessLayerUpsertRequest):
     return {"success": True, "data": saved_layers}
 
 
-@app.get("/api/business-layers/{layer_id}")
+@router.get("/api/business-layers/{layer_id}")
 async def get_business_layer_record(
     layer_id: str,
     store_key: str,
@@ -761,7 +775,7 @@ async def get_business_layer_record(
     return {"success": True, "data": layer}
 
 
-@app.post("/api/business-layers/batch-resolve")
+@router.post("/api/business-layers/batch-resolve")
 async def batch_resolve_business_layers(request: BusinessLayerResolveRequest):
     layers = resolve_business_layers(
         layer_ids=request.layer_ids,
@@ -771,7 +785,7 @@ async def batch_resolve_business_layers(request: BusinessLayerResolveRequest):
     return {"success": True, "data": layers}
 
 
-@app.post("/api/state")
+@router.post("/api/state")
 async def update_state(state: FloodState):
     """
     更新/同步 Basic 地图状态。
@@ -781,12 +795,3 @@ async def update_state(state: FloodState):
         "success": True,
         "state": state.model_dump()
     }
-
-
-# ============== 运行服务 ==============
-
-if __name__ == "__main__":
-    from satgpt_config import main
-    import sys
-    sys.argv = [sys.argv[0], 'basic']
-    main()

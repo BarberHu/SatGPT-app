@@ -1,15 +1,7 @@
 from __future__ import annotations
 
-import os
+# Supports both old `cd harness; python -m app` and `python -m harness.app`.
+import runpy
 from pathlib import Path
 
-import uvicorn
-from .config import load_project_env, validate_config
-
-load_project_env()
-try:
-    validate_config("harness")
-except ValueError as exc:
-    raise SystemExit(f"Configuration error: {exc}") from None
-uvicorn.run("app.server:app", host=os.getenv("HARNESS_HOST", "127.0.0.1"),
-            port=int(os.getenv("HARNESS_PORT", "8001")), workers=1)
+runpy.run_path(str(Path(__file__).resolve().parents[2] / "satgpt_config.py"))["main"](["harness"])

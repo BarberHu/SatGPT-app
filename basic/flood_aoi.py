@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 import requests
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
-from project_env import load_project_env, required_env
+from satgpt_config import load_project_env, required_env
 
 
 load_project_env()

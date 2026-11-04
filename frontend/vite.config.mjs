@@ -14,14 +14,12 @@ function getPort(env, name, fallback) {
 
 export function createProxyConfig(env) {
   const serviceHost = env.SATGPT_SERVICE_HOST || '127.0.0.1';
-  const basicTarget = `http://${env.BASIC_SERVICE_HOST || serviceHost}:${getPort(env, 'AGENT_PORT', 8000)}`;
-  const harnessTarget = `http://${env.HARNESS_SERVICE_HOST || serviceHost}:${getPort(env, 'HARNESS_PORT', 8001)}`;
+  const target = `http://${serviceHost}:${getPort(env, 'AGENT_PORT', 8000)}`;
 
   return {
-    '/api/harness': { target: harnessTarget, changeOrigin: true },
-    '/api/previews': { target: harnessTarget, changeOrigin: true },
-    '/api': { target: basicTarget, changeOrigin: true },
-    '/health': { target: basicTarget, changeOrigin: true },
+    '/api': { target, changeOrigin: true },
+    '/health': { target, changeOrigin: true },
+    '/readyz': { target, changeOrigin: true },
   };
 }
 

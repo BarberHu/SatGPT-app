@@ -13,7 +13,7 @@ import time
 import ee
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
-from project_env import load_project_env, required_env
+from satgpt_config import load_project_env, required_env
 
 load_project_env()
 
@@ -41,12 +41,12 @@ class GEEService:
     
     def __init__(self):
         self.initialized = False
-        self.project_id = required_env("GEE_PROJECT_ID")
-        self._initialize_ee()
+        self.project_id = None
     
     def _initialize_ee(self):
         """初始化 Earth Engine - 与 test.ipynb 保持一致"""
         try:
+            self.project_id = required_env("GEE_PROJECT_ID")
             credentials_path = required_env("GOOGLE_APPLICATION_CREDENTIALS")
             if not os.path.exists(credentials_path):
                 raise FileNotFoundError(f"GEE credentials not found: {credentials_path}")

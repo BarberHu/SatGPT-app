@@ -4,8 +4,6 @@ import json
 import math
 import os
 import re
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -18,12 +16,7 @@ except ImportError:  # pragma: no cover - optional dependency for notebook/demo 
     folium = None
 
 from .catalog import AssetRecord
-
-try:
-    from dotenv import dotenv_values, load_dotenv
-except ImportError:  # pragma: no cover
-    dotenv_values = None
-    load_dotenv = None
+from satgpt_config import load_project_env
 
 
 def lon_lat_to_tile(lon: float, lat: float, zoom: int) -> Tuple[int, int]:
@@ -79,55 +72,13 @@ def resolve_calendar_month(start_date: Optional[str]) -> int:
     return month
 
 
-def _bootstrap_env(project_root: Path) -> None:
-    env_path = project_root / ".env"
-    if not env_path.exists():
-        return
-    if not dotenv_values:
-        return
-    values = dotenv_values(env_path)
-    desired_project = values.get("GEE_PROJECT_ID")
-    if desired_project and not os.getenv("GEE_PROJECT_ID"):
-        os.environ["GEE_PROJECT_ID"] = desired_project
-    for key in ["GOOGLE_APPLICATION_CREDENTIALS"]:
-        if values.get(key) and not os.getenv(key):
-            os.environ[key] = values[key]
-
-
-class _TileProxyHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # pragma: no cover - runtime path
-        parts = self.path.split("?")[0].strip("/").split("/")
-        if len(parts) != 5 or parts[0] != "ee-tiles":
-            self.send_error(404, "Unknown tile path")
-            return
-        _, layer_id, z_value, x_value, y_value = parts
-        fetcher = getattr(self.server, "tile_registry", {}).get(layer_id)
-        if fetcher is None:
-            self.send_error(404, "Unknown layer id")
-            return
-        try:
-            tile_bytes = fetcher.fetch_tile(int(x_value), int(y_value), int(z_value))
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(tile_bytes)
-        except Exception as exc:
-            self.send_error(500, f"Tile fetch failed: {exc}")
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-
 class TileProxyServer:
+    """In-process tile registry served by the Basic router; opens no sockets."""
     _instance: Optional["TileProxyServer"] = None
 
     def __init__(self) -> None:
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), _TileProxyHandler)
-        self._server.tile_registry = {}
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-        self.base_url = f"http://127.0.0.1:{self._server.server_address[1]}"
+        self.tile_registry = {}
+        self.base_url = "/api"
 
     @classmethod
     def get_instance(cls) -> "TileProxyServer":
@@ -136,14 +87,14 @@ class TileProxyServer:
         return cls._instance
 
     def register(self, layer_id: str, fetcher: Any) -> str:
-        self._server.tile_registry[layer_id] = fetcher
+        self.tile_registry[layer_id] = fetcher
         return f"{self.base_url}/ee-tiles/{layer_id}/{{z}}/{{x}}/{{y}}"
 
 
 class GEETileService:
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        _bootstrap_env(self.project_root)
+        load_project_env(self.project_root)
         self.project_id_source = "unset"
         if os.getenv("GEE_PROJECT_ID"):
             self.project_id = os.getenv("GEE_PROJECT_ID")

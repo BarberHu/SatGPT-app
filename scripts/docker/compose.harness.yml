@@ -4,7 +4,6 @@ x-common: &common
   GEE_PROJECT_ID: ${GEE_PROJECT_ID:?Set GEE_PROJECT_ID in root .env}
   GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gee-service-account.json
   AGENT_PORT: ${AGENT_PORT-8000}
-  HARNESS_PORT: ${HARNESS_PORT-8001}
   FRONTEND_PORT: ${FRONTEND_PORT-3000}
 
 services:
@@ -15,32 +14,6 @@ services:
     environment:
       <<: *common
       AGENT_HOST: 0.0.0.0
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in root .env}
-      OPENAI_API_BASE: ${OPENAI_API_BASE-https://api.openai.com/v1}
-      LLM_MODEL: ${LLM_MODEL-gpt-4o-mini}
-      AGENT_WORKERS: ${AGENT_WORKERS-1}
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS-127.0.0.1}
-      SATGPT_HEAVY_CONCURRENCY: ${SATGPT_HEAVY_CONCURRENCY-5}
-      SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS: ${SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS-30}
-      HTTP_PROXY: ${HTTP_PROXY-}
-      HTTPS_PROXY: ${HTTPS_PROXY-}
-    volumes:
-      - type: bind
-        source: ${GOOGLE_APPLICATION_CREDENTIALS-.private-key.json}
-        target: /run/secrets/gee-service-account.json
-        read_only: true
-        bind:
-          create_host_path: false
-    restart: unless-stopped
-    init: true
-
-  harness:
-    build:
-      context: .
-      dockerfile: harness/Dockerfile
-    environment:
-      <<: *common
-      HARNESS_HOST: 0.0.0.0
       DSH_PROVIDER: ${DSH_PROVIDER-deepseek-official}
       DSH_MODEL: ${DSH_MODEL-deepseek-v4-flash}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY-}
@@ -48,6 +21,13 @@ services:
       AIHUBMIX_BASE_URL: ${AIHUBMIX_BASE_URL-https://aihubmix.com/v1}
       DSH_REASONING_EFFORT: ${DSH_REASONING_EFFORT-high}
       DSH_MAX_TOKENS: ${DSH_MAX_TOKENS-32768}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in root .env}
+      OPENAI_API_BASE: ${OPENAI_API_BASE-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL-gpt-4o-mini}
+      AGENT_WORKERS: ${AGENT_WORKERS-1}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS-127.0.0.1}
+      SATGPT_HEAVY_CONCURRENCY: ${SATGPT_HEAVY_CONCURRENCY-5}
+      SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS: ${SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS-30}
       HTTP_PROXY: ${HTTP_PROXY-}
       HTTPS_PROXY: ${HTTPS_PROXY-}
     volumes:
@@ -73,16 +53,12 @@ services:
       FRONTEND_HOST: 0.0.0.0
       FRONTEND_PORT: ${FRONTEND_PORT-3000}
       SATGPT_ALLOW_REMOTE_HARNESS: 'true'
-      BASIC_SERVICE_HOST: agent
-      HARNESS_SERVICE_HOST: harness
+      SATGPT_SERVICE_HOST: agent
       AGENT_PORT: ${AGENT_PORT-8000}
-      HARNESS_PORT: ${HARNESS_PORT-8001}
       PROXY_TIMEOUT_MS: ${PROXY_TIMEOUT_MS-300000}
       PROXY_MAX_SOCKETS: ${PROXY_MAX_SOCKETS-256}
     depends_on:
       agent:
-        condition: service_healthy
-      harness:
         condition: service_healthy
     ports:
       - '127.0.0.1:${FRONTEND_PORT-3000}:${FRONTEND_PORT-3000}'

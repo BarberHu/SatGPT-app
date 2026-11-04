@@ -52,9 +52,9 @@ prototype/
 **/*.test.*
 **/*.spec.*
 **/*.ipynb
-agent/water_assets/cache/water_asset_inventory.csv
-agent/water_assets/cache/water_asset_inventory_summary.json
-agent/water_assets/cache/water_asset_legend_summary.json
+basic/water_assets/cache/water_asset_inventory.csv
+basic/water_assets/cache/water_asset_inventory_summary.json
+basic/water_assets/cache/water_asset_legend_summary.json
 
 **/.env
 **/.env.*

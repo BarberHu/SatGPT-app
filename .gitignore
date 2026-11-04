@@ -74,8 +74,8 @@ tests/
 *.ipynb
 coverage/
 .venv-deploy/
-/agent/water_assets/cache/*
-!/agent/water_assets/cache/water_asset_catalog.json
+/basic/water_assets/cache/*
+!/basic/water_assets/cache/water_asset_catalog.json
 
 # Nested private configurations and auxiliary worktrees.
 **/.env
@@ -85,3 +85,10 @@ coverage/
 **/credentials*.json
 /.worktrees/
 /design-qa.md
+
+# Keep backend consolidation regression tests reviewable.
+!/harness/tests/
+!/harness/tests/*.test.mjs
+!/scripts/tests/
+!/scripts/tests/*.test.cjs
+!/frontend/src/config/viteProxyConfig.test.js

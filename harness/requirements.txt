@@ -1,5 +1,0 @@
-deepseek-harness-sdk==0.2.1rc2
-earthengine-api>=1.7,<2
-fastapi>=0.115,<1
-uvicorn>=0.34,<1
-python-dotenv>=1,<2

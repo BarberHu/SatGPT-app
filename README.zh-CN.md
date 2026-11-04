@@ -24,7 +24,7 @@ SatGPT 是基于 Google Earth Engine（GEE）的遥感分析应用，将交互�
 | 组件 | 技术与职责 |
 | --- | --- |
 | `frontend/` | React、Vite、Mapbox GL JS、Streamdown 和 ECharts；提供共享地图及 Basic/Agent 界面。 |
-| `agent/` | Python FastAPI 后端，负责 Basic 分析与问答。 |
+| `basic/` | Basic Python 业务模块，负责分析与问答，由统一 API 集成。 |
 | `harness/` | Python FastAPI 后端、DeepSeek Harness SDK、GEE 工具插件、Python worker 和服务器发送事件（SSE）。 |
 | `scripts/` | Windows 安装与启动脚本，以及 Docker Compose 部署配置。 |
 
@@ -98,17 +98,16 @@ Basic 与 Agent 的模型配置相互独立。`OPENAI_API_KEY` 用于 Basic 问�
 .\scripts\windows\satgpt.bat dev
 ```
 
-安装脚本创建 `basic-venv/` 和 `harness/.venv/`，安装 Python 与前端依赖，并在 `.env` 不存在时复制配置模板。开发模式支持前端热更新。配置校验只检查本地设置，不代表模型或 GEE 已认证成功。
+安装脚本仅创建或复用 `harness/.venv/`，仅按根目录 `requirements.txt` 安装两边的 Python 依赖及前端依赖，并在 `.env` 不存在时复制配置模板。开发模式支持前端热更新。配置校验只检查本地设置，不代表模型或 GEE 已认证成功。
 
 打开 **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)**。
 
 | 服务 | 默认地址 |
 | --- | --- |
 | 前端 | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
-| Basic API | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
-| Harness Agent API | [http://127.0.0.1:8001](http://127.0.0.1:8001) |
+| 统一 Basic + Harness API | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
 
-`FRONTEND_PORT`、`AGENT_PORT` 和 `HARNESS_PORT` 从根目录 `.env` 读取，且必须互不相同。开发与生产使用相同的配置端口，切换启动模式前先停止旧服务。停止 Windows 服务时，在三个服务窗口分别按 `Ctrl+C`，然后关闭窗口。
+`FRONTEND_PORT` 和 `AGENT_PORT` 从根目录 `.env` 读取，且必须不同。旧 `HARNESS_PORT`、`HARNESS_HOST` 已忽略，请删除；`AGENT_WORKERS` 必须为 `1`。开发与生产使用相同的配置端口，切换启动模式前先停止旧服务。停止 Windows 服务时，在两个服务窗口分别按 `Ctrl+C`，然后关闭窗口。
 
 ## 使用 SatGPT
 
@@ -153,10 +152,10 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 
 | 修改的设置 | 所需操作 |
 | --- | --- |
-| Basic 模型 | 重启 Basic API。 |
-| Agent 模型 | 重启 Harness API，包括其 SDK 与 worker 进程。 |
-| GEE 配置或凭据 | 重启两个 API。 |
-| 服务端口 | 重启受影响的 API 与前端/网关。 |
+| Basic 模型 | 重启统一后端。 |
+| Agent 模型 | 重启统一后端，包括其 SDK 与 worker 进程。 |
+| GEE 配置或凭据 | 重启统一后端。 |
+| 服务端口 | 重启后端与前端/网关。 |
 | Mapbox 配置 | 开发模式重启 Vite；生产模式重新构建前端并重启网关，或重新构建 Docker frontend 镜像。 |
 
 构建后的浏览器文件不读取运行期 `.env`。使用 `config --quiet`，避免输出可能包含密钥的 Compose 展开配置。详细部署说明见中文版 [PRODUCTION.md](PRODUCTION.md)。
@@ -167,10 +166,11 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
-Invoke-RestMethod http://127.0.0.1:8001/health
+Invoke-RestMethod http://127.0.0.1:8000/api/harness/health
+Invoke-RestMethod http://127.0.0.1:3000/readyz
 ```
 
-生产网关的 `/readyz` 检查与两个 API 的连通性，`/health` 代理 Basic 健康接口。
+Vite 和生产网关均只代理到统一后端。`/readyz` 检查两模块本地生命周期是否完成，任一未完成返回 503；`/health` 保留 Basic 兼容字段并增加 Harness 字段及 `basic`、`harness` 独立明细。即使 GEE 不可用，本地组件仍可就绪；模型认证保持 `not_checked`，Basic 的 `gee_initialized` 单独报告 GEE 初始化结果。Harness 的 SDK 和工具进程在任务中按需启动，健康检查不声称它们已完成外部认证。
 
 | 现象 | 检查内容 |
 | --- | --- |
@@ -179,7 +179,7 @@ Invoke-RestMethod http://127.0.0.1:8001/health
 | 模型返回 401 | 所选服务商及其对应的 API 密钥。 |
 | 端口被占用 | 重启前先停止之前启动的服务。 |
 | 长时间闲置后结果瓦片加载失败 | GEE 地图链接为临时链接，重新查询以获取可用链接。 |
-| 停止按钮或对话切换仍表现为旧版本 | 更新代码后重启 Harness 后端并刷新页面。 |
+| 停止按钮或对话切换仍表现为旧版本 | 更新代码后重启统一后端并刷新页面。 |
 
 `model_key_configured` 和 `gee_project_configured` 仅表示配置已填写。`model_authentication=not_checked` 和 Harness 的 `gee_authentication=not_checked` 表示尚未进行远端认证检查。Basic 的 `gee_initialized` 表示初始化状态。通过实际查询和 Agent 的 `gee_status` 工具验证远端访问。
 
@@ -187,14 +187,32 @@ Invoke-RestMethod http://127.0.0.1:8001/health
 
 ```text
 frontend/             React 前端、共享地图、Basic/Agent 页面与图表
-agent/                Basic FastAPI 服务
+basic/                Basic 路由、单轮问答、地图业务与 GEE 组件
 harness/app/          Agent API、控制器、SDK 适配器与 Python worker
 harness/integrations/ GEE 工具和流式输出集成
 scripts/windows/      Windows 安装、开发与生产命令
 scripts/docker/       Docker Compose 配置
+satgpt_backend.py     统一 FastAPI 应用及组合生命周期
 satgpt_config.py      共用配置校验与 API 启动入口
+requirements.txt      统一直接及间接依赖，固定到已验证版本
 .env.example          根目录配置模板
 ```
+
+## 后端迁移与限制
+
+Basic 包目录已改名为 `basic/`，Python 导入统一使用 `basic`。现有 API 路径（包括 `/api/agent-raster-*`）及 `AGENT_PORT` 保持不变；Compose 中的 `agent` 服务名继续表示统一后端。
+
+根目录 `Dockerfile` 是唯一后端镜像定义，直接构建使用 `docker build -f Dockerfile .`；前端继续使用自己的 `frontend/Dockerfile`。Python 组件直接从 `satgpt_config.py` 读取共享配置，不再保留仅转发导入的配置文件。
+
+更新后先运行一次 `scripts\windows\satgpt.bat setup`，将依赖合并到 `harness/.venv/`。仅安装 Python 时执行 `harness\.venv\Scripts\python.exe -m pip install -r requirements.txt`，然后执行 `-m pip check`。模块内的旧依赖清单已移除，统一从项目根目录安装。这一份文件同时固定直接与间接依赖版本，并保留平台条件；升级依赖时更新清单并执行回归检查。不要同时运行两条后端启动命令。
+
+标准后端命令为 `harness\.venv\Scripts\python.exe satgpt_config.py backend`。旧 `satgpt_config.py basic` / `harness` 和 `cd harness; python -m app` 均提示迁移并启动统一后端。原来直接使用 `python basic/server.py` 或 `uvicorn server:app` / `uvicorn app.server:app` 的命令请替换为标准入口，或在根目录执行 `python -m uvicorn satgpt_backend:app --workers 1`。两份 `server.py` 仅导出路由和生命周期钩子，不创建应用；唯一 FastAPI 应用由 `satgpt_backend.py` 创建，测试同样使用这个统一应用。模块文件不再是可直接执行的服务入口。删除 `BASIC_SERVICE_HOST` / `HARNESS_SERVICE_HOST`，网关只读取 `SATGPT_SERVICE_HOST` 和 `AGENT_PORT`。
+
+现有 `.env`、凭据、`harness/state/`、浏览器图层记录及 `basic-venv/` 均保留。停止旧服务并验证新启动流程后，可自行删除仅包含旧 Python 环境的 `basic-venv/`；保留 `harness/.venv/` 和 `harness/state/`。Compose 迁移先停止旧栈，不加 `-v`，继续使用原项目名及 `harness_state` 卷，详见 [PRODUCTION.md](PRODUCTION.md)。
+
+Basic 保持单轮语义及独立模型配置；Harness 保留多轮本地会话、后台任务线程池和使用同一解释器的独立 Python 工具进程。Basic 并发信号量继续限制同步 GEE 请求构建、瓦片获取等操作，并在线程中执行；主要遥感计算仍在 GEE 云端。原来随机端口的瓦片代理并入 `/api/ee-tiles/...`，不再额外监听 HTTP 端口。
+
+两个模式共享 HTTP 进程、线程资源、内存和故障范围，重启后端会同时中断两边。任务状态与业务图层缓存仍在内存；必须采用单 worker、单后端副本，本地会话文件不支持多进程一致性。本次合并不承诺模型/GEE 响应或内存占用一定改善。
 
 ## 更多文档
 

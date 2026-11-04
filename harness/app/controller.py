@@ -88,6 +88,7 @@ class TaskController:
         self.tool_events_file = root / "state" / "gee-tool-events.jsonl"
         self.trace_dir = root / "state" / "traces"
         self._agent = None
+        self._closed = False
         self._agent_conversation_id = None
         self._job_agents = {}
         self.jobs: dict[str, dict] = {}
@@ -259,6 +260,8 @@ class TaskController:
             raise ValueError("The prompt must contain 3–2000 characters")
         bounds = validate_bounds(bounds)
         with self.conversation_lock:
+            if self._closed:
+                raise RuntimeError('Task controller is shutting down.')
             if conversation_id and conversation_id != self.conversation_id:
                 raise RuntimeError('The active conversation has changed. Refresh and try again.')
             with self.lock:
@@ -368,7 +371,13 @@ class TaskController:
         return events
 
     def close(self) -> None:
-        self.pool.shutdown(wait=True)
+        with self.conversation_lock, self.lock:
+            self._closed = True
+            active = [job['id'] for job in self.jobs.values() if job['status'] in {'queued', 'running'}]
+        # Stop transports before joining the executor so in-flight SDK calls unblock.
+        for job_id in active:
+            self.cancel(job_id)
+        self.pool.shutdown(wait=True, cancel_futures=True)
         if self._agent is not None:
             self._agent.__exit__(None, None, None)
             self._agent = None

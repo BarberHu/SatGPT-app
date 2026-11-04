@@ -4,7 +4,6 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "ROOT_DIR=%%~fI"
 set "PYTHON=%ROOT_DIR%\harness\.venv\Scripts\python.exe"
-set "BASIC_PYTHON=%ROOT_DIR%\basic-venv\Scripts\python.exe"
 
 where python >nul 2>&1 || (echo Python 3.12 is required. & exit /b 1)
 where node >nul 2>&1 || (echo Node.js is required. & exit /b 1)
@@ -17,17 +16,13 @@ call npm --version || exit /b 1
 
 if not exist "%PYTHON%" python -m venv "%ROOT_DIR%\harness\.venv"
 if errorlevel 1 exit /b 1
+"%PYTHON%" -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" || (echo Existing harness/.venv must use Python 3.12. Back it up before recreating it. & exit /b 1)
 
-"%PYTHON%" -m pip install --upgrade pip "setuptools<81"
+"%PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 exit /b 1
-"%PYTHON%" -m pip install -r "%ROOT_DIR%\harness\requirements.txt"
+"%PYTHON%" -m pip install -r "%ROOT_DIR%\requirements.txt"
 if errorlevel 1 exit /b 1
-
-if not exist "%BASIC_PYTHON%" python -m venv "%ROOT_DIR%\basic-venv"
-if errorlevel 1 exit /b 1
-"%BASIC_PYTHON%" -m pip install --upgrade pip "setuptools<81"
-if errorlevel 1 exit /b 1
-"%BASIC_PYTHON%" -m pip install -r "%ROOT_DIR%\agent\requirements.txt"
+"%PYTHON%" -m pip check
 if errorlevel 1 exit /b 1
 
 pushd "%ROOT_DIR%\frontend"

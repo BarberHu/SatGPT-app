@@ -13,8 +13,7 @@ config.validateFrontend(env, { map: false }); // map settings are compiled publi
 const host = env.SATGPT_ALLOW_REMOTE_HARNESS === 'true' ? env.FRONTEND_HOST : '127.0.0.1';
 const port = config.port(env, 'FRONTEND_PORT');
 const serviceHost = env.SATGPT_SERVICE_HOST;
-const basicTarget = new URL(`http://${env.BASIC_SERVICE_HOST || serviceHost}:${config.port(env, 'AGENT_PORT')}`);
-const harnessTarget = new URL(`http://${env.HARNESS_SERVICE_HOST || serviceHost}:${config.port(env, 'HARNESS_PORT')}`);
+const backendTarget = new URL(`http://${serviceHost}:${config.port(env, 'AGENT_PORT')}`);
 const proxyTimeoutMs = config.positive(env, 'PROXY_TIMEOUT_MS');
 const proxyMaxSockets = config.positive(env, 'PROXY_MAX_SOCKETS');
 
@@ -93,21 +92,25 @@ function proxyRequest(req, res, target) {
 
 function requestJson(url) {
   return new Promise((resolve) => {
-    const request = http.get(url, { timeout: 3000 }, (response) => {
-      response.resume();
-      resolve(response.statusCode === 200);
+    const request = http.get(url, { timeout: 3000, agent: upstreamAgent }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; if (body.length > 65536) response.destroy(); });
+      response.on('error', () => resolve(null));
+      response.on('end', () => {
+        try { resolve({ ...JSON.parse(body), httpOk: response.statusCode === 200 }); } catch { resolve(null); }
+      });
     });
     request.on('timeout', () => request.destroy());
-    request.on('error', () => resolve(false));
+    request.on('error', () => resolve(null));
   });
 }
 
 async function serveReadiness(res) {
-  const [harness, basic] = await Promise.all([
-    requestJson(new URL('/health', harnessTarget)),
-    requestJson(new URL('/health', basicTarget)),
-  ]);
-  const ready = harness && basic;
+  const modules = await requestJson(new URL('/readyz', backendTarget));
+  const harness = modules?.harness === true;
+  const basic = modules?.basic === true;
+  const ready = modules?.httpOk === true && modules?.status === 'ready' && harness && basic;
   res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify({ status: ready ? 'ready' : 'degraded', harness, basic }));
 }
@@ -171,12 +174,8 @@ const server = http.createServer(async (req, res) => {
     await serveReadiness(res);
     return;
   }
-  if (pathname.startsWith('/api/harness/') || pathname.startsWith('/api/previews/')) {
-    proxyRequest(req, res, harnessTarget);
-    return;
-  }
   if (pathname.startsWith('/api/') || pathname === '/health') {
-    proxyRequest(req, res, basicTarget);
+    proxyRequest(req, res, backendTarget);
     return;
   }
   if (!['GET', 'HEAD'].includes(req.method)) {
@@ -191,6 +190,5 @@ server.headersTimeout = 65000;
 server.requestTimeout = proxyTimeoutMs + 5000;
 server.listen(port, host, () => {
   console.log(`[INFO] SatGPT production frontend listening at http://${host}:${port}`);
-  console.log(`[INFO] Basic API upstream: ${basicTarget.origin}`);
-  console.log(`[INFO] Harness upstream: ${harnessTarget.origin}`);
+  console.log(`[INFO] Unified API upstream: ${backendTarget.origin}`);
 });

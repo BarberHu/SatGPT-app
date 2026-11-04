@@ -5,7 +5,7 @@ const { parseEnv } = require('node:util');
 
 const defaults = {
   FRONTEND_HOST: '127.0.0.1', FRONTEND_PORT: '3000',
-  SATGPT_SERVICE_HOST: '127.0.0.1', AGENT_PORT: '8000', HARNESS_PORT: '8001',
+  SATGPT_SERVICE_HOST: '127.0.0.1', AGENT_PORT: '8000',
   SATGPT_ALLOW_REMOTE_HARNESS: 'false', PROXY_TIMEOUT_MS: '300000', PROXY_MAX_SOCKETS: '256',
   GENERATE_SOURCEMAP: 'false',
   REACT_APP_MAPBOX_STYLE_URL: 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp',
@@ -31,15 +31,15 @@ function positive(env, name, maximum = Number.MAX_SAFE_INTEGER) {
   return Number(raw);
 }
 function validateFrontend(env, { map = true } = {}) {
-  const ports = ['FRONTEND_PORT', 'AGENT_PORT', 'HARNESS_PORT'].map(name => port(env, name));
-  if (new Set(ports).size !== ports.length) invalid('FRONTEND_PORT/AGENT_PORT/HARNESS_PORT', 'must use distinct ports');
+  const ports = ['FRONTEND_PORT', 'AGENT_PORT'].map(name => port(env, name));
+  if (new Set(ports).size !== ports.length) invalid('FRONTEND_PORT/AGENT_PORT', 'must use distinct ports');
   if (map) for (const name of publicNames) if (!env[name]?.trim()) invalid(name, 'is required');
   if (map && env.REACT_APP_MAPBOX_ACCESS_TOKEN?.startsWith('sk.')) invalid('REACT_APP_MAPBOX_ACCESS_TOKEN', 'must be a browser public token, not a Mapbox secret token');
   positive(env, 'PROXY_TIMEOUT_MS', 86400000); positive(env, 'PROXY_MAX_SOCKETS', 65535);
   for (const name of ['SATGPT_ALLOW_REMOTE_HARNESS', 'GENERATE_SOURCEMAP']) {
     if (!['true', 'false'].includes(env[name])) invalid(name, 'must be true or false');
   }
-  for (const name of ['SATGPT_SERVICE_HOST', 'BASIC_SERVICE_HOST', 'HARNESS_SERVICE_HOST', 'FRONTEND_HOST']) {
+  for (const name of ['SATGPT_SERVICE_HOST', 'FRONTEND_HOST']) {
     if (env[name] !== undefined && !/^[a-zA-Z0-9.:[\]_-]+$/.test(env[name])) invalid(name, 'must be a host name or IP address');
   }
 }

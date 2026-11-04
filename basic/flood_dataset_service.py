@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import sys
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -11,24 +10,22 @@ import ee
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from flood_aoi import _center_from_bounds, resolve_location_aoi
-from gee_service import gee_service
+from .flood_aoi import _center_from_bounds, resolve_location_aoi
+from .gee_service import gee_service
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from water_assets.catalog import (  # noqa: E402
+from .water_assets.catalog import (
     OFFICIAL_WATER_TAG_URL,
     AssetRecord,
     WaterAssetCatalogBuilder,
 )
-from water_assets.tile_service import GEETileService  # noqa: E402
+from .water_assets.tile_service import GEETileService
 
 
-CATALOG_CACHE_PATH = PROJECT_ROOT / "agent" / "water_assets" / "cache" / "water_asset_catalog.json"
-FLOOD_DATASET_REGISTRY_PATH = PROJECT_ROOT / "agent" / "config" / "flood_dataset_registry.json"
+MODULE_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = MODULE_ROOT.parent
+CATALOG_CACHE_PATH = MODULE_ROOT / "water_assets" / "cache" / "water_asset_catalog.json"
+FLOOD_DATASET_REGISTRY_PATH = MODULE_ROOT / "config" / "flood_dataset_registry.json"
 FLOOD_RELEVANT_THEMES = {"flood", "surface_water", "watershed"}
 EXCLUDED_THEMES = {"ocean"}
 REGIONAL_ALLOWLIST = ("usgs/wbd", "wwf/hydroatlas", "wwf/hydrosheds")

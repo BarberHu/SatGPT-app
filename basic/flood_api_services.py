@@ -19,7 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from project_env import load_project_env, required_env
+from satgpt_config import load_project_env, required_env
 
 
 load_project_env()
