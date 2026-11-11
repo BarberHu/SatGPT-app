@@ -25,5 +25,10 @@ export function normalizeLayer(spec) {
     sourceLayer: spec.sourceLayer || null, visible: spec.visible !== false,
     renderAs, opacity: Math.max(0, Math.min(1, opacity)),
     bounds: Array.isArray(spec.bounds) ? spec.bounds : null,
+    code: typeof spec.code === 'string' ? spec.code : spec.generation?.code || '',
+    generation: spec.generation || null, reloadable: spec.reloadable === true,
+    reloadUnavailableReason: spec.reload_unavailable_reason || '',
+    reloadVersion: Number(spec.reload_version ?? spec.reloadVersion) || 0,
+    reloadedAt: spec.reloaded_at || spec.reloadedAt || null,
   };
 }

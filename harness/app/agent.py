@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import threading
+import uuid
 from pathlib import Path
 
 from .bootstrap import ensure_plugin
@@ -38,6 +39,15 @@ class HarnessAgent:
         self.require_resume = False
         self._lifecycle_lock = threading.RLock()
         self._cancelled = threading.Event()
+        self.context_file = self.home / f'analysis-context-{uuid.uuid4().hex}.json'
+
+    def set_analysis_context(self, job):
+        """Atomic runtime-local handoff; tools capture this snapshot before queuing."""
+        context = {'task_id': job['id'], 'conversation_id': job['conversation_id'],
+                   'bounds': job['bounds'], 'analysis_region': job.get('analysis_region')}
+        temporary = self.context_file.with_suffix('.tmp')
+        temporary.write_text(json.dumps(context), encoding='utf-8')
+        temporary.replace(self.context_file)
 
     def __enter__(self):
         with self._lifecycle_lock:
@@ -59,6 +69,7 @@ class HarnessAgent:
         self.home.mkdir(parents=True, exist_ok=True)
         self.bridge = StreamBridge(self.home)
         runtime_env = {"WEBGIS_ROOT": str(self.home.parent.parent),
+                       "SATGPT_ANALYSIS_CONTEXT": str(self.context_file),
                        "SATGPT_HARNESS_PYTHON": sys.executable, "PYTHONIOENCODING": "utf-8",
                        **self.bridge.environment()}
         ensure_plugin(self.home)
@@ -91,6 +102,7 @@ class HarnessAgent:
                     self.harness.close()
             finally:
                 self.harness = self.session = None
+                self.context_file.unlink(missing_ok=True)
                 if self.bridge is not None:
                     self.bridge.close()
                     self.bridge = None
@@ -120,11 +132,20 @@ class HarnessAgent:
         return result.final_response
 
 
-def conversation_prompt(request: str, bounds: list[float], catalog: list[dict]) -> str:
+def conversation_prompt(request: str, bounds: list[float], catalog: list[dict], analysis_region=None) -> str:
     return f"""You are SatGPT's geospatial analysis assistant. Answer general questions normally; use the registered GEE tools whenever data is needed.
 Use English by default for answers, progress summaries, layer and preview names, metadata descriptions, and legend labels. Follow an explicit user request for another language.
 When the user requests a chart, or a chart helps explain verified numerical results, include a lowercase echarts fenced code block containing only a strict JSON ECharts option object. The frontend renders it automatically after streaming finishes. Use double-quoted keys and strings; no comments, JavaScript functions, expressions, external images, title links, custom series, or toolbox dataView. Use string-template formatters and tooltip.trigger="axis" or "item"; tooltips use Canvas rich text, so avoid HTML markup. Keep charts readable in a narrow chat panel: short titles and labels, a contained grid, legends clear of titles, and labeled axes with units. Explain the data source, date range, units, and missing values outside the fence. Never invent observations; when the user supplies data, chart those values, and label synthetic demonstration data explicitly. No GEE call is needed just to visualize values already supplied by the user.
 Tool Python runs in a separate worker with ee already available. Assign the output to result. Verify uncertain dataset IDs with gee_catalog; use gee_eval to check coverage and statistics, gee_preview to inspect imagery, and gee_layer to create interactive layers. For gee_layer, supply bounds=[west,south,east,north] for the actual study area; do not use the current map extent to locate results for a different area. Use metadata for verified source, dataset_id, observed_at date or range, unit, and a short description; omit unknown information. Layers automatically receive static thumbnails; legends use palette/min/max. For consecutive integer classes, provide legend.labels in palette order. Correct tool errors and retry when appropriate; diagnose connection failures with gee_status.
 Use public datasets only; do not export or modify assets. A visible disaster layer does not establish a reliable event conclusion: explain observation dates, coverage, and methodological limitations. Only claim a layer is displayed after a successful tool result. Filter early by date, region, and bands; specify scale, geometry, and maxPixels for large-area statistics.
-Current map bounds [west,south,east,north]: {json.dumps(bounds)}. Reference catalog: {json.dumps(catalog, ensure_ascii=False)}.
+Analysis scope rules (basic model-based interpretation, not a guaranteed geographic conflict detector):
+- Answer ordinary knowledge questions directly without GEE, even when a region is selected.
+- The current request's immutable scope is {'the explicitly confirmed user-drawn polygon' if analysis_region else 'the map viewport captured when this message was sent'}. Bounds [west,south,east,north]: {json.dumps(bounds)}. Confirmed GeoJSON geometry: {json.dumps(analysis_region)}.
+- Here, this area, selected area, and similar references use this scope. When the named place and scope clearly agree, proceed directly.
+- If a request explicitly names a different place and obviously conflicts with this scope, ask in normal chat which scope to use BEFORE executing that spatial analysis. Do not silently change scope. Do not call spatial tools for the conflicting analysis until the user confirms.
+- If the place/scope relationship is uncertain, say so and clarify; never invent administrative membership or precise boundaries. Treat comparisons such as "compare here and Zhengzhou" as multi-region requests, not automatically as a conflict. Clarify any missing accurate second boundary.
+- Use conversation context for follow-up confirmation, corrected requests and newly selected regions. Do not repeatedly ask an already resolved question. A new request's scope snapshot supersedes earlier geometry. If the user chooses the named place but an accurate boundary is unavailable, ask them to redraw or specify a verified boundary; model-guessed coordinates are not authoritative.
+- Before/with results, clearly state the actual scope used (user-drawn polygon or captured viewport, plus any verified additional comparison scope). Never present a drawn polygon as an administrative boundary without evidence.
+- Every GEE code execution receives analysis_region (an ee.Geometry) and analysis_region_geojson (the exact GeoJSON), from the task snapshot. Use analysis_region for filterBounds, clip and reduceRegion geometry for this scope. Never replace a drawn polygon with its bounding rectangle. Bounds are only for compatibility, framing and layer location. For comparisons use this polygon for the selected side and explain any separately verified scope.
+Reference catalog: {json.dumps(catalog, ensure_ascii=False)}.
 User request: {request}"""

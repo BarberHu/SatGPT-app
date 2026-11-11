@@ -121,10 +121,10 @@
 .harness-app .agent-composer-wrap { padding: 12px 28px 16px; background: var(--satgpt-ui-canvas); flex: none; }
 .harness-app .agent-composer { max-width: 668px; margin: auto; padding: 13px 13px 10px; border: 1px solid var(--satgpt-ui-border); background: var(--satgpt-ui-soft); border-radius: 17px; box-shadow: var(--satgpt-ui-shadow); }
 .harness-app .agent-composer:focus-within { border-color: var(--satgpt-ui-accent); box-shadow: var(--satgpt-ui-focus); }
-.harness-app .agent-composer textarea { display: block; width: 100%; min-height: 52px; max-height: 160px; resize: none; border: 0; outline: 0; background: transparent; padding: 0 4px; font-size: 13px; line-height: 1.7; box-shadow: none; }
+.harness-app .agent-composer textarea { display: block; width: 100%; min-height: 40px; max-height: 160px; resize: none; border: 0; outline: 0; background: transparent; padding: 0 4px; font-size: 13px; line-height: 1.7; box-shadow: none; }
 .harness-app .agent-composer textarea::placeholder { color: var(--satgpt-ui-subtle); opacity: 1; }
-.harness-app .agent-composer-bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
-.harness-app .agent-composer-bottom > span { display: flex; gap: 5px; align-items: center; font-size: 10px; color: var(--satgpt-ui-subtle); }
+.harness-app .agent-composer-bottom { display: grid; grid-template-columns: minmax(0, 1fr) 32px; column-gap: 12px; align-items: end; margin-top: 8px; }
+.harness-app .agent-composer-area { min-width: 0; }
 .harness-app .agent-composer-bottom .agent-send { width: 30px; height: 30px; border-radius: 9px; background: var(--satgpt-ui-accent); color: var(--satgpt-ui-canvas); box-shadow: none; }
 .harness-app .agent-composer-bottom .agent-send:disabled { opacity: .35; }
 .harness-app .agent-composer-note { text-align: center; color: var(--satgpt-ui-subtle); font-size: 9px; margin: 10px 0 0; }
@@ -181,7 +181,15 @@
 .harness-app .agent-layer-details dt { font-weight: 400; color: #9ba4b1; }
 .harness-app .agent-layer-details dd { margin: 0; overflow-wrap: anywhere; line-height: 1.5; }
 .harness-app .agent-layer-details > p { margin: 10px 0 0; line-height: 1.7; overflow-wrap: anywhere; }
-.harness-app .agent-layer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.harness-app .agent-layer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.harness-app .agent-layer-reload-bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 5px; min-height: 28px; }
+.harness-app .agent-layer-reload-bar > span { color: var(--satgpt-ui-muted); font-size: 10px; }
+.harness-app .agent-layer-reload-bar button { height: 28px; font-size: 11px; padding: 0 7px; color: var(--satgpt-ui-accent); }
+.harness-app .agent-layer-reload-error { font-size: 11px; line-height: 1.5; color: #a35e49; overflow-wrap: anywhere; margin: 5px 0 0; }
+.harness-app .agent-layer-code { margin-top: 10px; min-width: 0; }
+.harness-app .agent-layer-code > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--satgpt-ui-accent); }
+.harness-app .agent-layer-code .agent-code { margin-top: 7px; max-width: 100%; }
+.harness-app .agent-layer-code pre { max-height: 260px; overflow: auto; font-size: 11px; }
 .harness-app .agent-layer-actions button { font-size: 11px; color: #5877b7; height: 30px; }
 .harness-app .agent-layer-actions .agent-layer-remove { color: #a46565; }
 /* Respond to the map panel width, including desktop split-pane resizing. */
@@ -228,3 +236,22 @@
 @media (prefers-reduced-motion: reduce) {
   .harness-app *, .harness-app *::before, .harness-app *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+/* Analysis-area controls remain reachable above the one shared map surface. */
+.harness-app .agent-region-entry { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; }
+.harness-app .agent-region-viewport { display: inline-flex; gap: 5px; align-items: center; color: var(--satgpt-ui-muted); font-size: 11px; white-space: nowrap; }
+.harness-app .agent-region-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 30px; padding: 0 4px 0 9px; border-radius: 8px; background: #e9efff; color: #284ca9; }
+.harness-app .agent-region-icon { flex: none; color: var(--satgpt-ui-accent); }
+.harness-app .agent-region-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 550; line-height: 1.4; }
+.harness-app .agent-region-action, .harness-app .agent-region-draw { appearance: none; display: inline-flex; align-items: center; justify-content: center; flex: none; height: 28px; border: 0; border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
+.harness-app .agent-region-action { width: 28px; padding: 0; }
+.harness-app .agent-region-edit { margin-left: 2px; border-left: 1px solid #cddafa; border-radius: 0 5px 5px 0; }
+.harness-app .agent-region-draw { gap: 5px; padding: 0 6px; font-size: 11px; color: var(--satgpt-ui-muted); }
+.harness-app .agent-region-action:hover { background: #d7e3ff; }
+.harness-app .agent-region-draw:hover { background: var(--satgpt-ui-hover); color: var(--satgpt-ui-accent); }
+.harness-app .agent-region-entry button:focus-visible { outline: 2px solid var(--satgpt-ui-accent); outline-offset: 2px; }
+.harness-app .agent-region-entry button:disabled { opacity: .4; cursor: default; }
+.harness-app .agent-region-hint { margin: 5px 0 0 2px; color: var(--satgpt-ui-muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.harness-app .agent-region-tools { position: absolute; top: 56px; left: 16px; right: 56px; max-width: 400px; border: 1px solid var(--satgpt-ui-border); border-radius: 10px; padding: 12px; background: #fffffff5; color: var(--satgpt-ui-muted); box-shadow: var(--satgpt-ui-shadow); pointer-events: auto; }
+.harness-app .agent-region-tools p { margin: 0 0 8px; font-size: 12px; line-height: 1.5; }
+.harness-app .agent-region-tools > div { display: flex; gap: 8px; }
+.harness-app .agent-message-scope { display: block; margin-top: 6px; font-size: 10px; opacity: .7; }

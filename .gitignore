@@ -92,3 +92,5 @@ coverage/
 !/scripts/tests/
 !/scripts/tests/*.test.cjs
 !/frontend/src/config/viteProxyConfig.test.js
+!/frontend/src/presets/*.test.js
+!/frontend/src/presets/*.test.jsx

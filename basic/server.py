@@ -38,6 +38,7 @@ from .flood_api_services import (
     thin_geojson_geometry,
 )
 logger = logging.getLogger(__name__)
+from .preset_layers import get_preset_layer_payload
 
 _HEAVY_OPERATION_LIMIT = max(1, int(required_env("SATGPT_HEAVY_CONCURRENCY")))
 _HEAVY_QUEUE_TIMEOUT_SECONDS = max(
@@ -356,6 +357,21 @@ async def get_agent_raster_layers(request: Request):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/preset-layers")
+async def get_preset_layer(request: Request):
+    _ensure_gee_ready()
+    try:
+        payload = await _get_request_payload(request)
+        return await _run_heavy_operation(get_preset_layer_payload, payload)
+    except HTTPException:
+        raise
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception:
+        logger.warning('Preset layer generation failed', exc_info=False)
+        raise HTTPException(status_code=502, detail='Unable to generate this layer. Check the study area and dates, then retry.')
 
 
 @router.post("/api/agent-raster-download")

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Map as MapIcon, MessageSquare, PanelLeft, X } from 'lucide-react';
 import { useAgentChat } from './hooks/useAgentChat';
 import { useAgentMap } from './hooks/useAgentMap';
+import { useAgentRegion } from './hooks/useAgentRegion';
+import { getBoundsFromGeometry } from '../utils/aoi';
 import ConversationSidebar from './components/ConversationSidebar';
 import MessageList from './components/MessageList';
 import Composer from './components/Composer';
@@ -31,6 +33,7 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
   const [prompt, setPrompt] = useState('');
   const chat = useAgentChat({ visible: active && (!narrow || (mobileView === 'chat' && !historyOpen)) });
   const map = useAgentMap(chat.conversationId, chat.messages);
+  const region = useAgentRegion(chat.conversationId, chat.messages, active);
   const toggleHistory = useCallback(() => setHistoryOpen(open => !open), []);
   useEffect(() => {
     onHistoryToolsChange?.(!active || narrow ? null : { open: historyOpen, toggle: toggleHistory });
@@ -49,9 +52,15 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
     disabled={chat.loading} onNew={() => changeConversation()}
     onSelect={id => changeConversation(id)} onCollapse={narrow ? () => setHistoryOpen(false) : undefined} />;
   const send = async () => {
+    if (region.editing || chat.loading) return;
     const text = prompt.trim();
-    const bounds = map.bounds();
-    if (text && bounds && await chat.send(text, bounds)) setPrompt('');
+    const geometry = region.snapshot();
+    const area = geometry ? getBoundsFromGeometry(geometry) : null;
+    const bounds = area ? [area.west, area.south, area.east, area.north] : map.bounds();
+    if (text && bounds && await chat.send(text, bounds, geometry)) setPrompt('');
+  };
+  const editRegion = () => {
+    if (region.begin() && narrow) setMobileView('map');
   };
   const focusLayer = layer => {
     if (narrow) {
@@ -81,12 +90,15 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
               reconnecting={chat.reconnecting} onSuggest={setPrompt} onFocusLayer={focusLayer} />
             {chat.error ? <div className="agent-chat-error" role="alert"><span>{chat.error}</span><Button type="button" variant="ghost" size="icon" aria-label="Dismiss error" onClick={chat.clearError}><X /></Button></div> : null}
             <Composer value={prompt} onChange={setPrompt} onSend={send} onStop={chat.stop}
+              region={region} onEditRegion={editRegion}
               busy={chat.busy} pending={chat.pending} stopping={chat.stopping} stopDisabled={chat.loading}
-              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || chat.stopping || !map.ready} />
+              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || chat.stopping || !map.ready || region.editing} />
           </section>
         </ResizablePanel>
         <ResizableHandle className="agent-resize-handle" aria-label="Resize chat and map" />
-        <ResizablePanel defaultSize={48} minSize={28} className="agent-map-panel"><MapWorkspace map={map} active={active && (!narrow || mobileView === 'map')} /></ResizablePanel>
+        <ResizablePanel defaultSize={48} minSize={28} className="agent-map-panel"><MapWorkspace map={map} region={region}
+          onConfirmRegion={() => { if (region.confirm() && narrow) setMobileView('chat'); }}
+          active={active && (!narrow || mobileView === 'map')} /></ResizablePanel>
       </ResizablePanelGroup>
     </div>
   </div>;

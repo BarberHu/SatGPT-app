@@ -20,7 +20,7 @@ const SUGGESTIONS_HOTSPOT = [
   'Inform me about the floods in Jakarta spanning from 2007 to 2020',
 ];
 
-function ChatBox() {
+function ChatBox({ answerOnly = false }) {
   const {
     chatInput,
     setChatInput,
@@ -136,6 +136,7 @@ function ChatBox() {
       }
 
       setChatInput('');
+      if (answerOnly) return;
       // A prior fishnet cell belongs to the previous question. The original
       // workflow asks for a fresh cell after resolving each new event.
       if (selectedAOI?.source === 'fishnet') {

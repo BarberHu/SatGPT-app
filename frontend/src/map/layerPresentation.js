@@ -19,12 +19,15 @@ export function layerLegend(visualization = {}, declared = {}) {
   if (raw.length && colors.every(Boolean)) {
     const min = visualization.min, max = visualization.max;
     const range = finite(min) && finite(max) && min <= max;
-    if (declared?.type === 'categorical' && Array.isArray(declared.labels)
-        && declared.labels.length === colors.length && range && Number.isInteger(min)
-        && max - min === colors.length - 1 && declared.labels.every(label => text(label))) {
-      return { type: 'categorical', items: colors.map((color, i) => ({ color, value: min + i, label: text(declared.labels[i], 100) })) };
+    const labels = declared?.labels || (declared?.items?.every((item, i) => item.color === colors[i] && item.value === min + i) ? declared.items.map(item => item.label) : null);
+    if (declared?.type === 'categorical' && Array.isArray(labels)
+        && labels.length === colors.length && range && Number.isInteger(min)
+        && max - min === colors.length - 1 && labels.every(label => text(label))) {
+      return { type: 'categorical', items: colors.map((color, i) => ({ color, value: min + i, label: text(labels[i], 100) })) };
     }
-    return { type: 'continuous', colors, min: range ? min : null, max: range ? max : null };
+    const swatches = declared?.type === 'composite' && Array.isArray(declared.swatches)
+      ? declared.swatches.slice(0, 12).filter(item => legendColor(item.color) && text(item.label)).map(item => ({ label: text(item.label), color: legendColor(item.color) })) : [];
+    return { type: swatches.length ? 'composite' : 'continuous', colors, min: range ? min : null, max: range ? max : null, ...(swatches.length ? { swatches } : {}) };
   }
   const bands = Array.isArray(visualization.bands) ? visualization.bands.map(band => text(band, 60)).filter(Boolean) : [];
   if (bands.length === 3 && !raw.length) return { type: 'rgb', bands };
@@ -35,9 +38,9 @@ export function layerPresentation(spec) {
   const metadata = spec.metadata || {};
   return {
     thumbnail: previewUrl(spec.thumbnail?.url) ? { url: previewUrl(spec.thumbnail.url) } : null,
-    metadata: { source: text(metadata.source) || 'Google Earth Engine', datasetId: text(metadata.dataset_id, 240),
-      observedAt: text(metadata.observed_at, 100), unit: text(metadata.unit, 40),
-      description: text(metadata.description, 1200), createdAt: text(metadata.created_at, 100) },
+    metadata: { source: text(metadata.source) || 'Google Earth Engine', datasetId: text(metadata.dataset_id || metadata.datasetId, 240),
+      observedAt: text(metadata.observed_at || metadata.observedAt, 100), unit: text(metadata.unit, 40),
+      description: text(metadata.description, 2400), createdAt: text(metadata.created_at || metadata.createdAt, 100) },
     visualization: spec.visualization || {},
     legend: layerLegend(spec.visualization || {}, spec.legend),
   };

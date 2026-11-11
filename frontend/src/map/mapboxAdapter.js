@@ -7,6 +7,7 @@ export class MapboxAdapter {
   constructor(container, { token, style, initialView }) {
     mapboxgl.accessToken = token;
     this.styleReady = false;
+    this.tileErrors = new Set();
     this.map = new mapboxgl.Map({
       container, style, center: initialView?.center || [102, 16.5], zoom: initialView?.zoom ?? 5,
       bearing: initialView?.bearing ?? 0, pitch: initialView?.pitch ?? 0,
@@ -16,6 +17,7 @@ export class MapboxAdapter {
     this.navigation = new mapboxgl.NavigationControl();
     this.map.addControl(this.navigation, 'top-right');
     this.basic = new BasicMapPort(this.map);
+    this.agentDraw = new BasicMapPort(this.map, 'satgpt-agent-aoi');
     this.basic.activate(true);
   }
 
@@ -24,6 +26,7 @@ export class MapboxAdapter {
       applyEnglishMapLabels(this.map);
       this.styleReady = true;
       this.basic.styleReady = true;
+      this.agentDraw.styleReady = true;
       callback();
     };
     this.map.on('style.load', handleReady);
@@ -100,14 +103,20 @@ export class MapboxAdapter {
       });
       return;
     }
-    this.map.addSource(sourceId, { type: 'raster', tiles: [layer.url], tileSize: 256 });
+    this.map.addSource(sourceId, { type: 'raster', tiles: [layer.url], tileSize: 256,
+      ...(layer.bounds ? { bounds: layer.bounds } : {}) });
     this.map.addLayer({ id: layerId, source: sourceId, type: 'raster',
       layout: { visibility: layer.visible ? 'visible' : 'none' },
       paint: { 'raster-opacity': layer.opacity },
-    });
+    }, this.overlayAnchor());
+  }
+
+  overlayAnchor() {
+    return this.map.getStyle()?.layers?.find(layer => /-aux:(analysis-aoi|gl-draw-)/.test(layer.id))?.id;
   }
 
   removeLayer(id) {
+    this.tileErrors.delete(id);
     if (!this.styleReady) return;
     const layerId = `satgpt-layer-${id}`;
     const sourceId = `satgpt-source-${id}`;
@@ -128,14 +137,44 @@ export class MapboxAdapter {
     }
   }
 
+  setOpacity(id, opacity) {
+    for (const suffix of ['', '-fill', '-line', '-point']) {
+      const key = `satgpt-layer-${id}${suffix}`, layer = this.map.getLayer(key);
+      if (layer) this.map.setPaintProperty(key, `${layer.type}-opacity`, opacity);
+    }
+  }
+  moveLayer(id) {
+    for (const suffix of ['', '-fill', '-line', '-point']) {
+      const key = `satgpt-layer-${id}${suffix}`;
+      if (this.map.getLayer(key)) this.map.moveLayer(key, this.overlayAnchor());
+    }
+  }
+  onTileStatus(listener) {
+    const handle = event => {
+      if (!event.sourceId?.startsWith('satgpt-source-scope--')) return;
+      const id = event.sourceId.slice('satgpt-source-'.length);
+      if (event.type === 'error') this.tileErrors.add(id);
+      listener({ id, statusCode: event.error?.status || event.error?.statusCode || null, state: this.tileErrors.has(id) ? 'error'
+        : event.isSourceLoaded ? 'ready' : 'loading' });
+    };
+    for (const name of ['sourcedataloading', 'sourcedata', 'error']) this.map.on(name, handle);
+    return () => { for (const name of ['sourcedataloading', 'sourcedata', 'error']) this.map.off(name, handle); };
+  }
+
   captureSnapshot() { return this.map.getCanvas().toDataURL('image/png'); }
   resize() { this.map.resize(); }
   getBasicPort() { return this.basic.port; }
-  setBasicActive(active) { this.basic.activate(active); }
+  getAgentDrawPort() { return this.agentDraw.port; }
+  setBasicActive(active) {
+    // Suspend the previous owner before enabling the next one's gestures.
+    if (active) { this.agentDraw.activate(false); this.basic.activate(true); }
+    else { this.basic.activate(false); this.agentDraw.activate(true); }
+  }
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
     this.basic.dispose();
+    this.agentDraw.dispose();
     this.map.removeControl(this.navigation);
     this.map.remove();
   }

@@ -44,6 +44,10 @@ JRC_YEARLY_HISTORY_MAX_YEAR = 2021
 DEFAULT_RISK_WINDOW_DAYS = 60
 WILDFIRE_RISK_PALETTE = ["#2E7D32", "#FDD835", "#FF8F00", "#E53935", "#B71C1C"]
 LANDSLIDE_RISK_PALETTE = ["#1565C0", "#42A5F5", "#FFC107", "#FF6F00", "#D84315"]
+JRC_WATER_VIS = {"min": 1, "max": 2, "palette": ["#00008B", "#FD0303"]}
+BURN_HISTORY_VIS = {"min": 0, "max": 1, "palette": ["#111827"]}
+SLOPE_STEEPNESS_VIS = {"min": 0, "max": 60, "palette": ["#f7fcf5", "#c7e9c0", "#74c476", "#fd8d3c", "#bd0026"]}
+WORLDCOVER_VIS = {"min": 0, "max": 10, "palette": ["#006400", "#ffbb22", "#ffff4c", "#f096ff", "#fa0000", "#b4b4b4", "#f0f0f0", "#0064c8", "#0096a0", "#00cf75", "#fae6a0"]}
 
 def _load_layer_catalog() -> Dict[str, Any]:
     with LAYER_CATALOG_PATH.open("r", encoding="utf-8") as handle:
@@ -433,16 +437,12 @@ def _blend_visual_layers(*images: ee.Image) -> ee.Image:
 
 def _visualize_single_inundation(water: ee.Image, flood: ee.Image) -> ee.Image:
     classified = (
-        water.unmask(0)
+        water.unmask(0).gt(0)
         .where(flood.unmask(0).gt(0), 2)
         .rename("inundation_class")
         .selfMask()
     )
-    return classified.visualize(
-        min=1,
-        max=2,
-        palette=["#00008B", "#FD0303"],
-    )
+    return classified.visualize(**JRC_WATER_VIS)
 
 
 def _visualize_hotspot(permanent_water_visual: ee.Image, flood_frequency_visual: ee.Image) -> ee.Image:
@@ -512,23 +512,7 @@ def _build_worldcover_fuel_land_cover_image(region: ee.Geometry) -> ee.Image:
 
 
 def _visualize_worldcover_fuel_land_cover(image: ee.Image) -> ee.Image:
-    return image.visualize(
-        min=0,
-        max=10,
-        palette=[
-            "#006400",
-            "#ffbb22",
-            "#ffff4c",
-            "#f096ff",
-            "#fa0000",
-            "#b4b4b4",
-            "#f0f0f0",
-            "#0064c8",
-            "#0096a0",
-            "#00cf75",
-            "#fae6a0",
-        ],
-    )
+    return image.visualize(**WORLDCOVER_VIS)
 
 
 def _get_recent_date_window(day_count: int = DEFAULT_RISK_WINDOW_DAYS) -> tuple[str, str]:
@@ -821,20 +805,21 @@ def _get_jrc_year_range_from_payload(
     return year_start, year_end, year_count
 
 
-def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def get_agent_raster_layers_payload(payload: Dict[str, Any], *, _images=None) -> Dict[str, Any]:
     requested_keys = _requested_agent_raster_layer_keys(payload)
     aoi = parse_aoi_from_payload(payload)
     region = aoi_to_ee_geometry(aoi)
     supplementary_catalog = get_basic_layer_catalog()["supplementary"]
     content: Dict[str, Any] = {}
 
+    def publish(name, image):
+        attach_map_id(content, name, image.getMapId())
+        if _images is not None:
+            _images[name] = image
+
     if "singleInundationEvent" in requested_keys:
         water, flood, _water_visual, _flood_visual = _build_single_inundation_images(payload, region)
-        attach_map_id(
-            content,
-            "SingleInundationEvent",
-            _visualize_single_inundation(water, flood).getMapId(),
-        )
+        publish("SingleInundationEvent", _visualize_single_inundation(water, flood))
         content["singleInundationEventMeta"] = {
             "time_start": str(payload.get("time_start") or "2010-01-01"),
             "time_end": str(payload.get("time_end") or "2024-12-31"),
@@ -844,11 +829,7 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         _hotspot_water, _hotspot_frequency, hotspot_water_visual, hotspot_visual = (
             _build_flood_hotspot_images(payload, region)
         )
-        attach_map_id(
-            content,
-            "InundationHotspot",
-            _visualize_hotspot(hotspot_water_visual, hotspot_visual).getMapId(),
-        )
+        publish("InundationHotspot", _visualize_hotspot(hotspot_water_visual, hotspot_visual))
         year_start, year_end, year_count = _get_jrc_year_range_from_payload(payload)
         content["inundationHotspotMeta"] = {
             "year_start": year_start,
@@ -866,7 +847,7 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             max=5,
             palette=WILDFIRE_RISK_PALETTE,
         )
-        attach_map_id(content, "WildfireRisk", wildfire_risk_visual.getMapId())
+        publish("WildfireRisk", wildfire_risk_visual)
         content["wildfireRiskMeta"] = {
             "dataset": "Sentinel-2 SR, MODIS LST, CHIRPS, SRTM, ESA WorldCover",
             "time_start": time_start,
@@ -882,7 +863,7 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             max=5,
             palette=LANDSLIDE_RISK_PALETTE,
         )
-        attach_map_id(content, "LandslideRisk", landslide_risk_visual.getMapId())
+        publish("LandslideRisk", landslide_risk_visual)
         content["landslideRiskMeta"] = {
             "dataset": "CHIRPS, SRTM, Sentinel-1 VH, Sentinel-2 NDVI",
             "time_start": time_start,
@@ -900,7 +881,7 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "palette": ["#ef4444", "#f97316", "#facc15"],
             },
         )
-        attach_map_id(content, "ActiveFireDetections", active_fire_visual.getMapId())
+        publish("ActiveFireDetections", active_fire_visual)
         content["activeFireDetectionsMeta"] = {
             "dataset": "FIRMS",
             "time_start": str(payload.get("time_start") or "2024-01-01"),
@@ -912,13 +893,9 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         burn_history = _build_burn_history_image(payload, region)
         burn_history_visual = visualize_image(
             burn_history,
-            {
-                "min": 0,
-                "max": 1,
-                "palette": ["#111827"],
-            },
+            BURN_HISTORY_VIS,
         )
-        attach_map_id(content, "BurnHistory", burn_history_visual.getMapId())
+        publish("BurnHistory", burn_history_visual)
         content["burnHistoryMeta"] = {
             "dataset": "MODIS/061/MCD64A1",
             "band": "BurnDate",
@@ -930,21 +907,18 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         slope_steepness = _build_slope_steepness_image(region)
         slope_steepness_visual = visualize_image(
             slope_steepness,
-            {
-                "min": 0,
-                "max": 60,
-                "palette": ["#f7fcf5", "#c7e9c0", "#74c476", "#fd8d3c", "#bd0026"],
-            },
+            SLOPE_STEEPNESS_VIS,
         )
-        attach_map_id(content, "SlopeSteepness", slope_steepness_visual.getMapId())
+        publish("SlopeSteepness", slope_steepness_visual)
         content["slopeSteepnessMeta"] = {
             "dataset": "USGS/SRTMGL1_003",
             "derived": "ee.Terrain.slope(elevation)",
         }
 
     if "lclu" in requested_keys:
-        lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-        attach_map_id(content, "LCLU", lclu.getMapId())
+        lclu = (_visualize_worldcover_fuel_land_cover(_build_worldcover_fuel_land_cover_image(region))
+                if _images is not None else ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region))
+        publish("LCLU", lclu)
 
     if "populationDensity" in requested_keys:
         population_density = ee.Image(
@@ -953,7 +927,7 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         population_density = visualize_image(
             population_density, supplementary_catalog["populationDensity"]["visualization"]
         )
-        attach_map_id(content, "PopulationDensity", population_density.getMapId())
+        publish("PopulationDensity", population_density)
 
     if "soilTexture" in requested_keys:
         soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
@@ -962,7 +936,7 @@ def get_agent_raster_layers_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         soil_texture = visualize_image(
             soil_texture, supplementary_catalog["soilTexture"]["visualization"]
         )
-        attach_map_id(content, "SoilTexture", soil_texture.getMapId())
+        publish("SoilTexture", soil_texture)
 
     return content
 

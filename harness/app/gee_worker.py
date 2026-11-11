@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import builtins
 import json
+import math
 import os
 import sys
 import uuid
@@ -94,8 +95,24 @@ def code_warnings(code: str) -> list[str]:
     return list(dict.fromkeys(warnings))
 
 
-def run_code(ee, code: str):
+def run_code(ee, code: str, analysis_context=None):
     scope = {"ee": ee, "__builtins__": SAFE_BUILTINS}
+    if analysis_context is not None:
+        # A fresh scope on every execution, including analysis_code. Never cache
+        # mutable task geometry in this persistent worker's module globals.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from analysis_region import validate_analysis_region
+        geometry = validate_analysis_region(analysis_context.get('analysis_region'))
+        if geometry is None:
+            bounds = analysis_context.get('bounds')
+            if (not isinstance(bounds, list) or len(bounds) != 4
+                    or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in bounds)
+                    or not (-180 <= bounds[0] < bounds[2] <= 180 and -90 <= bounds[1] < bounds[3] <= 90)):
+                raise ValueError('Invalid analysis context bounds')
+            w, s, e, n = bounds
+            geometry = {'type': 'Polygon', 'coordinates': [[[w,s], [e,s], [e,n], [w,n], [w,s]]]}
+        scope['analysis_region_geojson'] = geometry
+        scope['analysis_region'] = ee.Geometry(geometry)
     exec(checked_code(code), scope)
     if "result" not in scope:
         raise ValueError("Code must assign a value to result")
@@ -147,9 +164,9 @@ def execute(payload: dict) -> dict:
                 "project": project, "credential_type": "service_account",
                 "initialized": True, "server_round_trip": ee.Number(1).add(1).getInfo() == 2}
     if operation == "eval":
-        return {"result": jsonable(run_code(ee, payload["code"]))}
+        return {"result": jsonable(run_code(ee, payload["code"], payload.get('analysis_context')))}
     if operation == "preview":
-        image = run_code(ee, payload["code"])
+        image = run_code(ee, payload["code"], payload.get('analysis_context'))
         if not callable(getattr(image, "getThumbURL", None)):
             raise TypeError("Preview code must assign an ee.Image to result")
         dimensions = max(64, min(1024, int(payload.get("dimensions") or 768)))
@@ -177,7 +194,7 @@ def execute(payload: dict) -> dict:
                             "url": f"/api/previews/{filename}", "bytes": len(png),
                             "width": int.from_bytes(png[16:20], "big"),
                             "height": int.from_bytes(png[20:24], "big")}}
-    image = run_code(ee, payload["layer_code"])
+    image = run_code(ee, payload["layer_code"], payload.get('analysis_context'))
     if not callable(getattr(image, "getMapId", None)):
         raise TypeError("layer_code must assign an ee.Image to result")
     vis = payload.get("visualization") or {}
@@ -211,7 +228,7 @@ def execute(payload: dict) -> dict:
         output['layer']['thumbnail_status'] = 'missing_bounds'
     analysis_code = payload.get("analysis_code")
     if isinstance(analysis_code, str) and analysis_code.strip():
-        output["analysis"] = jsonable(run_code(ee, analysis_code))
+        output["analysis"] = jsonable(run_code(ee, analysis_code, payload.get('analysis_context')))
     return output
 
 

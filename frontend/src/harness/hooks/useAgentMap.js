@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSharedMap } from '../../map/SharedMapContext';
 import { latestLayerBounds, messageLayerBounds } from '../map/viewState';
 import { messageLayerPresentation } from '../../map/layerPresentation';
+import { chatApi } from '../chatApi';
 
 const choicesKey = id => `satgpt:harness:layers:${id}`;
 export function readLayerChoices(id) {
@@ -19,6 +20,10 @@ export function useAgentMap(conversationId, messages) {
   const focusIntent = useRef(null);
   const [layers, setLayers] = useState([]);
   const [error, setError] = useState('');
+  const [layerStatus, setLayerStatus] = useState({});
+  const reloading = useRef(new Set());
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     if (!shared.service || !shared.ready || !conversationId) return undefined;
     const scope = shared.service.scope(`agent:${conversationId}`);
@@ -27,7 +32,13 @@ export function useAgentMap(conversationId, messages) {
     choices.current = { id: conversationId, ...readLayerChoices(conversationId) };
     setLayers(scope.listLayers());
     const unsubscribe = scope.subscribe(setLayers);
-    return () => { unsubscribe(); if (current.current === scope) current.current = null; };
+    const stopTiles = scope.subscribeTileStatus(event => {
+      if (!alive.current) return;
+      const key = `${conversationId}:${event.id}`;
+      setLayerStatus(previous => ({ ...previous, [key]: { ...previous[key], tiles: event.state,
+        statusCode: event.statusCode || previous[key]?.statusCode || null } }));
+    });
+    return () => { unsubscribe(); stopTiles(); if (current.current === scope) current.current = null; };
   }, [shared.service, shared.ready, conversationId]);
   useEffect(() => {
     const map = current.current;
@@ -38,8 +49,11 @@ export function useAgentMap(conversationId, messages) {
         const id = `${message.job_id}-${index}`;
         if (choices.current.removed.has(id)) return;
         try {
-          if (!map.listLayers().some(item => item.id === id)) map.addLayer({ ...messageLayerPresentation(layer, message),
-            id, kind: 'gee', bounds: messageLayerBounds(message, layer), visible: choices.current.visibility[id] ?? layer.visible });
+          const existing = map.listLayers().find(item => item.id === id);
+          const spec = { ...messageLayerPresentation(layer, message),
+            id, kind: 'gee', bounds: messageLayerBounds(message, layer), visible: choices.current.visibility[id] ?? layer.visible };
+          if (!existing) map.addLayer(spec);
+          else if ((layer.reload_version || 0) > existing.reloadVersion || (!existing.code && spec.code)) map.replaceLayer(id, spec);
         } catch (cause) { setError(`Unable to load layer: ${cause.message}`); }
       });
     }
@@ -62,7 +76,22 @@ export function useAgentMap(conversationId, messages) {
   };
   const removeLayer = id => { current.current?.removeLayer(id); choices.current.removed.add(id); persist(); };
   const focusLayer = layer => { if (layer.bounds) shared.captureViewIntent('agent').setView({ bounds: layer.bounds }); };
+  const reloadLayer = async layer => {
+    const cid = conversationId, scope = current.current, key = `${cid}:${layer.id}`;
+    if (!scope || !layer.reloadable || reloading.current.has(key)) return;
+    reloading.current.add(key);
+    setLayerStatus(previous => ({ ...previous, [key]: { ...previous[key], reloading: true, error: '' } }));
+    try {
+      const result = await chatApi.reloadLayer(cid, layer.id);
+      // Scope is captured before awaiting. Switching chats/modes cannot redirect
+      // a result, and replaceLayer refuses to resurrect a removed layer.
+      scope.replaceLayer(layer.id, messageLayerPresentation(result.layer, {}));
+      if (alive.current) setLayerStatus(previous => ({ ...previous, [key]: { reloading: false, tiles: 'loading', error: '' } }));
+    } catch (cause) {
+      if (alive.current) setLayerStatus(previous => ({ ...previous, [key]: { ...previous[key], reloading: false, error: cause.message } }));
+    } finally { reloading.current.delete(key); }
+  };
   const bounds = useCallback(() => shared.service?.getCurrentView().bounds, [shared.service]);
-  return { ready: shared.ready, layers, error, configured: shared.configured,
-    toggleLayer, removeLayer, focusLayer, bounds, prepareConversationChange };
+  return { ready: shared.ready, layers: layers.map(layer => ({ ...layer, reload: layerStatus[`${conversationId}:${layer.id}`] || {} })), error, configured: shared.configured,
+    toggleLayer, removeLayer, focusLayer, reloadLayer, bounds, prepareConversationChange };
 }

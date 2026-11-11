@@ -102,7 +102,7 @@ export function SharedMapProvider({ mode, children }) {
   const measureGroundDistance = useCallback((...args) => instance.current?.measureGroundDistance(...args), []);
   const subscribeViewport = useCallback(listener => instance.current?.subscribeViewport(listener) || (() => {}), []);
   const value = useMemo(() => ({ container, surface, service, ready, visible, error, mode,
-    basicPort: service?.engine.getBasicPort(), configured: Boolean(mapOptions.token && mapOptions.style),
+    basicPort: service?.engine.getBasicPort(), agentDrawPort: service?.engine.getAgentDrawPort?.(), configured: Boolean(mapOptions.token && mapOptions.style),
     attachViewport, captureViewIntent, snapshot, measureGroundDistance, subscribeViewport }),
   [service, ready, visible, error, mode, attachViewport, captureViewIntent, snapshot, measureGroundDistance, subscribeViewport]);
   return <MapContext.Provider value={value}>{children}</MapContext.Provider>;

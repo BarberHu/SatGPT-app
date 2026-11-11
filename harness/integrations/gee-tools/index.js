@@ -30,7 +30,15 @@ function focusBounds(value) {
 }
 
 function runWorker(payload, signal) {
-  return workerClient.run({ ...payload, project }, {
+  return runWithContext(payload, signal);
+}
+
+export async function runWithContext(payload, signal) {
+  // Runtime-private file is atomically replaced before session.run. Capture now,
+  // not after the worker queue advances; no shared process environment mutation.
+  const context = process.env.SATGPT_ANALYSIS_CONTEXT
+    ? JSON.parse(await fs.readFile(process.env.SATGPT_ANALYSIS_CONTEXT, 'utf8')) : undefined;
+  return workerClient.run({ ...payload, project, analysis_context: context }, {
     signal, timeout: payload.operation === 'catalog' ? 240000 : 150000,
   });
 }
@@ -86,7 +94,7 @@ export function apply(ctx) {
 
   ctx.tools.register({
     name: 'gee_eval',
-    description: 'Evaluate read-only Google Earth Engine Python code for catalog queries or statistics. ee is already available. Assign the final value to result. This restricted runner does not allow import, print, def/class/try, or underscore-prefixed attributes; use result to return data. Do not use this tool for a map layer.',
+    description: 'Evaluate read-only Google Earth Engine Python code for catalog queries or statistics. ee and task-local analysis_region (ee.Geometry) / analysis_region_geojson are available. Use analysis_region for filterBounds, clip and reduceRegion geometry; never substitute its bounding rectangle. Assign the final value to result. Imports, print, definitions and private attributes are unavailable. Use gee_layer for map layers.',
     parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false },
     output: {
       schema: { type: 'object', properties: { result: {} }, required: ['result'], additionalProperties: false },

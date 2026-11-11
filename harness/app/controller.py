@@ -16,6 +16,8 @@ from .agent import HarnessAgent, conversation_prompt
 from .model_config import model_key_configured, selected_provider
 from .trace import add_harness_event, remove_final_answer
 from .task_stream import TaskStream
+from .analysis_region import validate_analysis_region, region_bounds
+from .layer_generation import LayerWorkerRunner, generation_recipe, replay_payload, restore_generation_recipes
 
 
 def validate_bounds(value) -> list[float]:
@@ -100,6 +102,8 @@ class TaskController:
         self.messages = self._load_messages()
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gee-agent")
         self.trace_secrets = self._trace_secrets()
+        self.layer_worker = LayerWorkerRunner(root)
+        self._layer_reloads = set()
 
     @staticmethod
     def _trace_secrets() -> tuple[str, ...]:
@@ -156,14 +160,63 @@ class TaskController:
         if not re.fullmatch(r'webgis-[A-Za-z0-9_-]{1,80}', cid):
             raise ValueError('Invalid conversation ID')
         if cid == self.conversation_id:
-            return self.messages
+            return restore_generation_recipes(self.messages, cid)
         target = self.archive_dir / f'{cid}.json'
         if not target.is_file():
             raise FileNotFoundError('Conversation not found')
         record = json.loads(target.read_text(encoding='utf-8'))
         if record.get('conversation_id') != cid or not isinstance(record.get('messages'), list):
             raise ValueError('Invalid conversation history format')
-        return record['messages'][-100:]
+        return restore_generation_recipes(record['messages'][-100:], cid)
+
+    @staticmethod
+    def _find_layer(messages, layer_id):
+        for message in messages:
+            if message.get('role') != 'assistant':
+                continue
+            for index, layer in enumerate(message.get('layers') or []):
+                if f"{message.get('job_id')}-{index}" == layer_id:
+                    return message, index, layer
+        raise FileNotFoundError('Layer not found in this conversation.')
+
+    def reload_layer(self, conversation_id, layer_id):
+        key = (conversation_id, layer_id)
+        with self.conversation_lock, self.lock:
+            if self._closed:
+                raise RuntimeError('Task controller is shutting down.')
+            messages = self._conversation_messages(conversation_id)
+            _, _, layer = self._find_layer(messages, layer_id)
+            if key in self._layer_reloads:
+                raise RuntimeError('This layer is already reloading.')
+            recipe = json.loads(json.dumps(layer.get('generation')))
+            payload = replay_payload(recipe)
+            self._layer_reloads.add(key)
+        try:
+            fresh = self.layer_worker.run(payload)
+            with self.conversation_lock, self.lock:
+                if self._closed:
+                    raise RuntimeError('Task controller is shutting down.')
+                messages = self._conversation_messages(conversation_id)
+                message, index, previous = self._find_layer(messages, layer_id)
+                # Keep layer identity and original provenance. Only replace the
+                # expiring service result, including its preview and timestamps.
+                metadata = {**(previous.get('metadata') or {}), **(fresh.get('metadata') or {})}
+                if previous.get('metadata', {}).get('created_at'):
+                    metadata['created_at'] = previous['metadata']['created_at']
+                layer = {**previous, **fresh, 'generation': recipe, 'code': recipe['code'], 'metadata': metadata,
+                         'bounds': recipe.get('bounds'), 'reloadable': True,
+                         'reload_version': int(previous.get('reload_version') or 0) + 1,
+                         'reloaded_at': datetime.now(timezone.utc).isoformat()}
+                # A failed optional thumbnail must not leave the old preview
+                # masquerading as the newly generated result.
+                if not fresh.get('thumbnail'):
+                    layer.pop('thumbnail', None)
+                message['layers'][index] = layer
+                self._save_conversation(conversation_id, messages)
+                return {'conversation_id': conversation_id, 'layer_id': layer_id, 'layer': layer}
+        finally:
+            with self.lock:
+                self._layer_reloads.discard(key)
 
     def _save_conversation(self, cid, messages):
         if cid == self.conversation_id:
@@ -255,10 +308,11 @@ class TaskController:
             messages = self._conversation_messages(cid)
             self._save_conversation(cid, [*messages, message])
 
-    def create(self, prompt: str, bounds, conversation_id=None) -> dict:
+    def create(self, prompt: str, bounds, conversation_id=None, analysis_region=None) -> dict:
         if not isinstance(prompt, str) or not (3 <= len(prompt.strip()) <= 2000):
             raise ValueError("The prompt must contain 3–2000 characters")
-        bounds = validate_bounds(bounds)
+        analysis_region = validate_analysis_region(analysis_region)
+        bounds = region_bounds(analysis_region) if analysis_region is not None else validate_bounds(bounds)
         with self.conversation_lock:
             if self._closed:
                 raise RuntimeError('Task controller is shutting down.')
@@ -272,14 +326,14 @@ class TaskController:
             job = {
                 "id": job_id, "conversation_id": self.conversation_id,
                 "status": "queued", "prompt": prompt.strip(),
-                "bounds": bounds, "revision": 0,
+                "bounds": bounds, "analysis_region": analysis_region, "revision": 0,
                 "output": None, "error": None, "trace": [],
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             with self.lock:
                 self.jobs[job_id] = job
                 self.streams[job_id] = TaskStream(job, secrets=self.trace_secrets)
-            self._append_message("user", prompt.strip(), job_id)
+            self._append_message("user", prompt.strip(), job_id, bounds=bounds, analysis_region=analysis_region)
             self.pool.submit(self._run, job_id)
             return self.get(job_id)
 
@@ -374,6 +428,7 @@ class TaskController:
         with self.conversation_lock, self.lock:
             self._closed = True
             active = [job['id'] for job in self.jobs.values() if job['status'] in {'queued', 'running'}]
+        self.layer_worker.close()
         # Stop transports before joining the executor so in-flight SDK calls unblock.
         for job_id in active:
             self.cancel(job_id)
@@ -412,7 +467,9 @@ class TaskController:
                 if self.jobs[job_id]['status'] == 'cancelled':
                     return
                 self._job_agents[job_id] = self._agent
-            prompt = conversation_prompt(job["prompt"], job["bounds"], CATALOG)
+            prompt = conversation_prompt(job["prompt"], job["bounds"], CATALOG, job.get('analysis_region'))
+            if hasattr(self._agent, 'set_analysis_context'):
+                self._agent.set_analysis_context(job)
             offset = self.tool_events_file.stat().st_size if self.tool_events_file.is_file() else 0
             answer = self._agent.run(prompt, session_id=job["conversation_id"],
                                      on_event=lambda notice: self._event(job_id, notice),
@@ -423,8 +480,17 @@ class TaskController:
                 trace_snapshot = json.loads(json.dumps(trace, ensure_ascii=False))
             self._save_trace(job_id, trace_snapshot)
             events = self._tool_events(offset)
-            layers = [{**event["layer"], "bounds": layer_focus_bounds(event)}
-                      for event in events if "layer" in event]
+            layers = []
+            for event in events:
+                if 'layer' not in event:
+                    continue
+                layer = {**event['layer'], 'bounds': layer_focus_bounds(event)}
+                context = {'task_id': job_id, 'conversation_id': job['conversation_id'],
+                           'bounds': job['bounds'], 'analysis_region': job.get('analysis_region')}
+                layer['generation'] = generation_recipe(event.get('code'), layer, context)
+                layer['code'] = event.get('code') or ''
+                layer['reloadable'] = layer['generation'] is not None
+                layers.append(layer)
             previews = [event["preview"] for event in events if "preview" in event]
             codes = [event["code"] for event in events if isinstance(event.get("code"), str) and event["code"]]
             message = str(answer or "").strip()

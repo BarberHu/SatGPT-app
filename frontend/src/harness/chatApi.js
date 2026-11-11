@@ -14,5 +14,6 @@ export const chatApi = {
   send: (body, signal) => request('/tasks', { method: 'POST', signal,
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   cancel: (id, signal) => request(`/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST', signal }),
+  reloadLayer: (conversationId, layerId) => request(`/conversations/${encodeURIComponent(conversationId)}/layers/${encodeURIComponent(layerId)}/reload`, { method: 'POST' }),
   subscribe: id => new EventSource(`/api/harness/tasks/${encodeURIComponent(id)}/events`),
 };

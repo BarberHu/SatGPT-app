@@ -7,7 +7,9 @@ import ResultCards from './ResultCards';
 export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
   const user = message.role === 'user';
   return <article className={`agent-message harness-message harness-message--${message.role}`} aria-label={user ? 'Your message' : 'Assistant response'}>
-    {user ? <div className="agent-user-bubble">{message.text}</div> : <>
+    {user ? <div className="agent-user-bubble">{message.text}
+      {message.hasScope ? <small className="agent-message-scope">{message.analysisRegion ? 'Drawn analysis area · snapshot' : 'Map view · snapshot'}</small> : null}
+    </div> : <>
       <div className="agent-assistant-label"><Sparkles size={16} /><span>SatGPT</span>
         {message.streaming ? <small>Generating</small> : null}
         {message.failed ? <small className="agent-failure">Incomplete</small> : null}

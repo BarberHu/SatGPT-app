@@ -8,7 +8,8 @@ const aux = id => /^(grid_cell|analysis-aoi|business-layer-scopes|gl-draw-|mapbo
 const handlers = ['boxZoom', 'doubleClickZoom', 'dragPan', 'dragRotate', 'scrollZoom', 'touchZoomRotate', 'keyboard'];
 
 export class BasicMapPort {
-  constructor(map) {
+  constructor(map, namespace = 'satgpt-basic') {
+    this.namespace = namespace;
     this.map = map; this.active = false; this.epoch = 0; this.disposed = false;
     this.styleReady = map.isStyleLoaded();
     this.layers = new Map(); this.sources = new Set(); this.events = []; this.controls = new Map();
@@ -26,9 +27,9 @@ export class BasicMapPort {
       return typeof value === 'function' ? value.bind(owner.map) : value;
     }});
   }
-  physical(id) { return `${aux(id) ? 'satgpt-basic-aux' : 'satgpt-basic'}:${id}`; }
-  logical(id) { return typeof id === 'string' ? id.replace(/^satgpt-basic(?:-aux)?:/, '') : id; }
-  own(id) { return typeof id === 'string' && /^satgpt-basic(?:-aux)?:/.test(id); }
+  physical(id) { return `${this.namespace}${aux(id) ? '-aux' : ''}:${id}`; }
+  logical(id) { return this.own(id) ? id.slice(id.indexOf(':') + 1) : id; }
+  own(id) { return typeof id === 'string' && (id.startsWith(`${this.namespace}:`) || id.startsWith(`${this.namespace}-aux:`)); }
   foreign(id) { return typeof id === 'string' && id.startsWith('satgpt-') && !this.own(id); }
   source(id) { return this.sources.has(id) ? this.physical(id) : id; }
   isStyleLoaded() { return this.styleReady && !this.disposed; }
@@ -83,7 +84,7 @@ export class BasicMapPort {
   bind(event, layer, callback, once = false) {
     if (typeof layer === 'function') { callback = layer; layer = undefined; }
     if (this.events.some(item => item.event === event && item.layer === layer && item.callback === callback)) return this.port;
-    const item = { event, layer, physicalLayer: layer ? this.layer(layer) : undefined, callback };
+    const item = { event, physicalEvent: this.eventName(event), layer, physicalLayer: layer ? this.layer(layer) : undefined, callback };
     item.wrapped = payload => {
       if (this.disposed || (!this.active && interactive.test(event)) || this.foreign(payload?.sourceId)) return;
       if (once) this.off(event, ...(layer ? [layer] : []), callback);
@@ -92,14 +93,16 @@ export class BasicMapPort {
         ...(payload?.features ? { features: payload.features.map(feature => this.translateFeature(feature)) } : {}) });
     };
     this.events.push(item);
-    this.map.on(event, ...(layer ? [item.physicalLayer] : []), item.wrapped); return this.port;
+    this.map.on(item.physicalEvent, ...(layer ? [item.physicalLayer] : []), item.wrapped); return this.port;
   }
+  eventName(event) { return event.startsWith('draw.') ? `${this.namespace}:${event}` : event; }
+  fire(event, ...args) { this.map.fire(this.eventName(event), ...args); return this.port; }
   on(event, layer, callback) { return this.bind(event, layer, callback); }
   once(event, layer, callback) { return this.bind(event, layer, callback, true); }
   off(event, layer, callback) {
     if (typeof layer === 'function') { callback = layer; layer = undefined; }
     for (const item of [...this.events]) if (item.event === event && item.layer === layer && item.callback === callback) {
-      this.map.off(event, ...(layer ? [item.physicalLayer] : []), item.wrapped);
+      this.map.off(item.physicalEvent, ...(layer ? [item.physicalLayer] : []), item.wrapped);
       this.events.splice(this.events.indexOf(item), 1);
     }
     return this.port;

@@ -136,7 +136,7 @@ export function useAgentChat({ visible = true } = {}) {
     }
   }, [load, loading, refreshList]);
 
-  const send = useCallback(async (prompt, bounds) => {
+  const send = useCallback(async (prompt, bounds, analysis_region = null) => {
     if (action.current || pending || loading || ['queued', 'running'].includes(task?.status)) return false;
     action.current = true;
     setPending(true);
@@ -145,7 +145,7 @@ export function useAgentChat({ visible = true } = {}) {
     const signal = request.current?.signal;
     const id = conversationId.current;
     try {
-      const next = await chatApi.send({ prompt, bounds, conversation_id: id }, signal);
+      const next = await chatApi.send({ prompt, bounds, analysis_region, conversation_id: id }, signal);
       if (!alive.current || epoch !== generation.current) return false;
       setTask(next);
       await load(epoch, signal, id);

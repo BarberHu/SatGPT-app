@@ -1,4 +1,4 @@
-import { getAoiValidationError } from './aoiValidation';
+import { getAoiValidationError } from './aoiValidation.js';
 
 const AOI_VERSION = 1;
 const createAoiId = () =>

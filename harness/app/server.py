@@ -16,6 +16,7 @@ from starlette.applications import Starlette
 
 from .controller import TaskController
 from .model_config import model_key_configured
+from .trace import clean_text
 from satgpt_config import load_project_env, validate_config
 
 
@@ -45,6 +46,7 @@ class TaskRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=2000)
     bounds: list[float] = Field(min_length=4, max_length=4)
     conversation_id: str | None = None
+    analysis_region: dict | None = None
 
 
 @router.get("/api/harness/health")
@@ -95,10 +97,29 @@ def get_conversation(conversation_id: str, request: Request):
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post('/api/harness/conversations/{conversation_id}/layers/{layer_id}/reload')
+def reload_layer(conversation_id: str, layer_id: str, request: Request):
+    controller = request.app.state.controller
+    try:
+        return controller.reload_layer(conversation_id, layer_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(504, str(exc)) from exc
+    except ValueError as exc:
+        detail = re.sub(r'https?://\S+', '[service URL]', clean_text(str(exc), controller.trace_secrets, 800))
+        raise HTTPException(422, detail) from exc
+    except OSError as exc:
+        raise HTTPException(503, 'Unable to start the GEE worker. Please try again.') from exc
+
+
 @router.post("/api/harness/tasks", status_code=202)
 def create_task(request: TaskRequest, http_request: Request):
     try:
-        return http_request.app.state.controller.create(request.prompt, request.bounds, request.conversation_id)
+        return http_request.app.state.controller.create(request.prompt, request.bounds, request.conversation_id,
+                                                        analysis_region=request.analysis_region)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
