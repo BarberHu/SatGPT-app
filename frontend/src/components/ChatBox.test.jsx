@@ -1,7 +1,6 @@
 import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import ChatBox from './ChatBox';
-import Modals from './Modals';
 import { sendChatMessage, getHistoricalMap } from '../services/api';
 import { buildAoiFromGeoJSON } from '../utils/aoi';
 
@@ -20,20 +19,18 @@ vi.mock('../services/api', () => ({
 
 function Harness() {
   const [chatInput, setChatInput] = useState('Tell me about the 2021 Zhengzhou floods');
-  const [activeModal, setActiveModal] = useState(null);
   const [resultText, setResultText] = useState('');
   const [gridClickEnabled, setGridClickEnabled] = useState(false);
   testState.context = {
-    chatInput, setChatInput, activeModal, setActiveModal,
+    chatInput, setChatInput,
     resultText, setResultText, gridClickEnabled, setGridClickEnabled,
-    setGptResponse: vi.fn(), setIsLoading, setIsResultVisible, setWarning: vi.fn(),
-    updateLayerData: vi.fn(), setGeeCodeUrl: vi.fn(),
-    selectedAOI: testState.selectedAOI, dataType: 'historical', countries: {}, mapInstance: null,
+    setIsLoading, setIsResultVisible, setWarning: vi.fn(),
+    selectedAOI: testState.selectedAOI, countries: {}, mapInstance: null,
   };
-  return <><ChatBox /><Modals /></>;
+  return <ChatBox />;
 }
 
-describe('Basic question before grid selection', () => {
+describe('Basic questions are independent of preset analysis', () => {
   let container;
   let root;
 
@@ -59,7 +56,7 @@ describe('Basic question before grid selection', () => {
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
   });
 
-  test('sends Enter to Ask and then prompts for a grid without requesting a map', async () => {
+  test('sends Enter and shows the answer without changing the study area or requesting a map', async () => {
     const input = container.querySelector('input');
     act(() => input.focus());
     const event = new KeyboardEvent('keydown', {
@@ -72,9 +69,8 @@ describe('Basic question before grid selection', () => {
     expect(getHistoricalMap).not.toHaveBeenCalled();
     expect(testState.context.resultText).toBe('Flood summary');
     expect(setIsResultVisible).toHaveBeenCalledWith(true);
-    expect(testState.context.gridClickEnabled).toBe(true);
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(document.activeElement.textContent).toBe('OK');
+    expect(testState.context.gridClickEnabled).toBe(false);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
   test.each([
@@ -89,14 +85,13 @@ describe('Basic question before grid selection', () => {
     expect(sendChatMessage).not.toHaveBeenCalled();
   });
 
-  test('mouse submission opens a dismissible grid prompt after the Ask response', async () => {
+  test('mouse submission returns the answer without opening the retired grid prompt', async () => {
     await act(async () => { container.querySelector('.send-btn-gemini').click(); });
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-    act(() => container.querySelector('.info-modal-btn').click());
+    expect(testState.context.resultText).toBe('Flood summary');
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  test('shows the answer while the selected AOI map request is still running', async () => {
+  test('answers with an existing AOI without starting a legacy map request', async () => {
     testState.selectedAOI = buildAoiFromGeoJSON({
       type: 'Polygon', coordinates: [[[113, 33], [115, 33], [115, 35], [113, 35], [113, 33]]],
     });
@@ -106,8 +101,31 @@ describe('Basic question before grid selection', () => {
     await act(async () => { container.querySelector('.send-btn-gemini').click(); });
 
     expect(testState.context.resultText).toBe('Flood summary');
-    expect(getHistoricalMap).toHaveBeenCalledTimes(1);
+    expect(getHistoricalMap).not.toHaveBeenCalled();
     expect(setIsLoading).toHaveBeenLastCalledWith(false);
-    expect(container.querySelector('[role="status"]').textContent).toContain('Loading map layers');
+    expect(container.querySelector('[role="status"]')).toBeNull();
   });
+});
+
+// A late answer from a disposed composer must never write back into the workspace.
+test('unmount aborts the pending question and prevents stale result updates', async () => {
+  let resolve;
+  sendChatMessage.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const write = vi.fn();
+  testState.context = { chatInput: 'Question', setChatInput: vi.fn(), setResultText: write,
+    setIsResultVisible: vi.fn(), setIsLoading: vi.fn(), countries: {}, mapInstance: null };
+  const node = document.createElement('div'); document.body.appendChild(node);
+  const root = createRoot(node);
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await act(async () => root.render(<ChatBox />));
+    await act(async () => node.querySelector('button').click());
+    const signal = sendChatMessage.mock.lastCall[1].signal;
+    await act(async () => root.unmount());
+    expect(signal.aborted).toBe(true);
+    await act(async () => resolve({ message: { response: [{ Content: 'Late answer' }] } }));
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    node.remove(); vi.clearAllMocks(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  }
 });

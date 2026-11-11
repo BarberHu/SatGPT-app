@@ -48,12 +48,11 @@
 .satgpt-map-viewport { position: absolute; inset: 0; pointer-events: none; }
 .satgpt-business-panel { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
 .satgpt-basic-panel .water { pointer-events: none; }
-.satgpt-basic-panel :is(.ui, .ask-dock, .settings-button, .satgpt-map-confirm-card, .modal, .modal-overlay, .spinner-overlay) { pointer-events: auto; }
+.satgpt-basic-panel :is(.ui, .ask-dock, .settings-button, .spinner-overlay) { pointer-events: auto; }
 .satgpt-business-panel .harness-app.harness-shell { height: 100%; min-height: 0; background: transparent; }
 .satgpt-agent-panel :is(.agent-history, .agent-chat, .agent-mobile-tabs, .agent-resize-handle, .agent-map-layers, .agent-map-error) { pointer-events: auto; }
 .satgpt-business-panel.satgpt-agent-panel .agent-map-workspace { background: transparent; }
 .satgpt-business-panel.satgpt-agent-panel .agent-map-footer { bottom: 71px; }
-.satgpt-basic-panel .satgpt-map-shell { position: absolute; inset: 0; pointer-events: none; }
 .satgpt-map-status { position: absolute; bottom: 140px; left: 20px; right: 20px; background: #fff8f3; color: #a4664b; border-radius: 8px; padding: 12px; font-size: 12px; pointer-events: none; }
 .satgpt-shared-scale { position: absolute; bottom: 30px; left: 16px; right: 16px; display: flex; justify-content: flex-end; pointer-events: none; }
 body:has(.satgpt-root[data-mode="basic"]) .harness-portal { display: none; }
@@ -62,7 +61,6 @@ body:has(.satgpt-root[data-mode="basic"]) .harness-portal { display: none; }
 .workspace-distance-tick { position: absolute; bottom: -3px; height: 11px; width: 1.5px; background: #3b485c; transform: translateX(-50%); }
 .workspace-distance-tick > span { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); white-space: nowrap; line-height: 1; }
 
-.satgpt-basic-panel :is(.overlay, [role="dialog"], .modal_3d, .modal_3d_help) { pointer-events: auto; }
 
 /* Basic chat is positioned against the workspace, not the narrow control panel. */
 .satgpt-basic-panel .water .ask-dock { bottom: 76px; }

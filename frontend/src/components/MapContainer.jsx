@@ -7,6 +7,6 @@ export default function MapContainer({ active = true }) {
   const map = useSharedMap();
   return <>
     <SharedMapViewport active={active} className="basic-map-viewport" />
-    {map.ready && map.basicPort ? <BasicMapController map={map.basicPort} active={active} /> : null}
+    {map.ready && map.basicPort ? <BasicMapController map={map.basicPort} /> : null}
   </>;
 }

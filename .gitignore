@@ -94,3 +94,10 @@ coverage/
 !/frontend/src/config/viteProxyConfig.test.js
 !/frontend/src/presets/*.test.js
 !/frontend/src/presets/*.test.jsx
+
+# Keep the current frontend regression suite and shared map test helper.
+!/frontend/src/**/*.test.js
+!/frontend/src/**/*.test.jsx
+!/frontend/src/**/*.test.cjs
+!/frontend/src/map/tests/
+!/frontend/src/map/tests/fakeMap.js

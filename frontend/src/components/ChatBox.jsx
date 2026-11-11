@@ -1,12 +1,6 @@
-/**
- * ChatBox Component
- * Handles the Ask workflow. Agent chat is rendered by AgentWorkspaceSidebar.
- */
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { sendChatMessage, getHistoricalMap, getFloodHotspotMap } from '../services/api';
-import { createCodeSnippet } from '../export/geeCodeGenerator';
-import { buildAskMapRequestParams, buildAoiSignature } from '../utils/aoi';
+import { sendChatMessage } from '../services/api';
 
 const SUGGESTIONS = [
   'Tell me about the 2010 Bangkok floods',
@@ -14,30 +8,13 @@ const SUGGESTIONS = [
   'How much area was impacted by the 2007 Jakarta floods?',
 ];
 
-const SUGGESTIONS_HOTSPOT = [
-  'Tell me about the 2010 to 2020 Bangkok floods',
-  'Provide information regarding floods occurring in North India between 2015 and 2021',
-  'Inform me about the floods in Jakarta spanning from 2007 to 2020',
-];
-
-function ChatBox({ answerOnly = false }) {
+function ChatBox() {
   const {
     chatInput,
     setChatInput,
-    setGptResponse,
     setResultText,
     setIsResultVisible,
     setIsLoading,
-    setWarning,
-    selectedAOI,
-    setSelectedAOI,
-    setSelectedGridCords,
-    dataType,
-    yearControl,
-    updateLayerData,
-    setGeeCodeUrl,
-    setActiveModal,
-    setGridClickEnabled,
     countries,
     mapInstance,
   } = useAppContext();
@@ -45,20 +22,11 @@ function ChatBox({ answerOnly = false }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submissionStage, setSubmissionStage] = useState(null);
   const requestControllerRef = useRef(null);
-  const mapRequestState = useRef(null);
-  mapRequestState.current = { aoi: buildAoiSignature(selectedAOI), dataType, yearControl };
-
   useEffect(() => () => {
     requestControllerRef.current?.abort();
     requestControllerRef.current = null;
   }, []);
-
-  const suggestions =
-    dataType === 'floodHotspot'
-      ? SUGGESTIONS_HOTSPOT
-      : SUGGESTIONS;
 
   const handleInputChange = (e) => {
     setChatInput(e.target.value);
@@ -82,8 +50,7 @@ function ChatBox({ answerOnly = false }) {
   const handleKeyDown = (e) => {
     if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
 
-    // The prompt auto-focuses OK; consume Enter so its default action cannot
-    // immediately activate that newly focused button and dismiss the prompt.
+    // Consume Enter so the keyboard event cannot trigger another default action.
     e.preventDefault();
     handleSubmit();
   };
@@ -96,14 +63,12 @@ function ChatBox({ answerOnly = false }) {
 
     setIsLoading(true);
     setIsSubmitting(true);
-    setSubmissionStage('answer');
     setError('');
     requestControllerRef.current?.abort();
     const requestController = new AbortController();
     requestControllerRef.current = requestController;
 
     const viewIntent = mapInstance?.createViewLease?.() || mapInstance;
-    const mapRequestOwner = mapRequestState.current;
     try {
       const gptResult = await sendChatMessage(chatInput, { signal: requestController.signal });
       if (requestControllerRef.current !== requestController || requestController.signal.aborted) return;
@@ -116,14 +81,8 @@ function ChatBox({ answerOnly = false }) {
       }
       const responseData = responses[0];
 
-      setGptResponse(responseData);
       setIsResultVisible(true);
-      setResultText(dataType === 'floodHotspot'
-        ? responses.map((item) => `${item.start_date} to ${item.end_date}: ${item.Content || ''}`).join('\n\n')
-        : responseData.Content || '');
-      // The answer is ready; any subsequent Earth Engine request only loads map data.
-      setIsLoading(false);
-      setSubmissionStage('map');
+      setResultText(responseData.Content || '');
 
       if (responseData.CountryCode && countries[responseData.CountryCode]) {
         const countryData = countries[responseData.CountryCode];
@@ -136,55 +95,6 @@ function ChatBox({ answerOnly = false }) {
       }
 
       setChatInput('');
-      if (answerOnly) return;
-      // A prior fishnet cell belongs to the previous question. The original
-      // workflow asks for a fresh cell after resolving each new event.
-      if (selectedAOI?.source === 'fishnet') {
-        setSelectedAOI(null);
-        setSelectedGridCords(null);
-      }
-      if (!selectedAOI || selectedAOI.source === 'fishnet') {
-        setGridClickEnabled(true);
-        setActiveModal('prompt');
-        return;
-      }
-
-      const params = buildAskMapRequestParams(selectedAOI, {
-        time_start: responseData.start_date,
-        time_end: responseData.end_date,
-      });
-
-      if (params.time_start > params.time_end) {
-        setWarning('Warning! Start date should be less than end date!');
-        return;
-      }
-
-      let mapData;
-      if (dataType === 'floodHotspot') {
-        params.year_from = 2000;
-        params.year_count = yearControl;
-        mapData = await getFloodHotspotMap(params, { signal: requestController.signal });
-      } else {
-        mapData = await getHistoricalMap(params, { signal: requestController.signal });
-      }
-
-      const owner = mapRequestState.current;
-      if (requestControllerRef.current !== requestController || requestController.signal.aborted
-        || owner.aoi !== mapRequestOwner.aoi || owner.dataType !== mapRequestOwner.dataType || owner.yearControl !== mapRequestOwner.yearControl) return;
-      updateLayerData(mapData);
-
-      const codeSnippet = createCodeSnippet(
-        params,
-        dataType === 'floodHotspot' ? 'flood_hotspot' : 'historical'
-      );
-      const blob = new Blob([codeSnippet], { type: 'text/javascript' });
-      const nextUrl = URL.createObjectURL(blob);
-      setGeeCodeUrl((previousUrl) => {
-        if (previousUrl) {
-          URL.revokeObjectURL(previousUrl);
-        }
-        return nextUrl;
-      });
     } catch (err) {
       if (err?.isCanceled) {
         return;
@@ -196,7 +106,6 @@ function ChatBox({ answerOnly = false }) {
         requestControllerRef.current = null;
         setIsLoading(false);
         setIsSubmitting(false);
-        setSubmissionStage(null);
       }
     }
   };
@@ -207,7 +116,7 @@ function ChatBox({ answerOnly = false }) {
         {showSuggestions && (
           <div id="suggestionsBox">
             <h5>Try any of these...</h5>
-            {suggestions.map((suggestion, index) => (
+            {SUGGESTIONS.map((suggestion, index) => (
               <div
                 key={index}
                 className="chat-message"
@@ -244,8 +153,8 @@ function ChatBox({ answerOnly = false }) {
         </div>
 
         {error && <p className="error">{error}</p>}
-        {submissionStage && <p className="ask-status" role="status">
-          {submissionStage === 'answer' ? 'Generating answer…' : 'Answer ready. Loading map layers…'}
+        {isSubmitting && <p className="ask-status" role="status">
+          Generating answer…
         </p>}
       </div>
 

@@ -72,10 +72,12 @@ test('real controller selection, displayed boundary, and outgoing analysis reque
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.vi = { fn: (impl = () => {}) => mock.fn(impl) };
   const requests = [];
-  const apiPath = require.resolve('../../services/api');
+  const apiPath = require.resolve('../../api/httpClient');
   require.cache[apiPath] = { id: apiPath, filename: apiPath, loaded: true, exports: {
-    getHistoricalMap: async params => { requests.push(params); return {}; },
-    getFloodHotspotMap: async params => { requests.push(params); return {}; },
+    __esModule: true, default: { post: async (endpoint, params) => {
+      assert.equal(endpoint, '/api/preset-layers');
+      requests.push(params); return { data: { status: 'empty', layer: null } };
+    } },
   } };
   const repositoryPath = require.resolve('../../repositories/businessLayerRepository');
   const repositoryExports = require(repositoryPath);
@@ -85,7 +87,8 @@ test('real controller selection, displayed boundary, and outgoing analysis reque
   const React = require('react');
   const { createRoot } = require('react-dom/client');
   const { AppProvider, useAppContext } = require('../../context/AppContext');
-  const useMapData = require('../../hooks/useMapData').default;
+  const { requestPresetLayer } = require('../../api/presetLayers');
+  const analyze = () => requestPresetLayer({ id: 'precision', presetId: 'slopeSteepness', aoi: context.selectedAOI, params: {} });
   const Controller = require('../basic/BasicMapController').default;
   const { FakeMap } = require('./fakeMap');
   const { BasicMapPort } = require('../BasicMapPort');
@@ -96,7 +99,6 @@ test('real controller selection, displayed boundary, and outgoing analysis reque
   let context;
   function Probe() {
     context = useAppContext();
-    useMapData();
     return React.createElement(Controller, { map, active: true });
   }
   const root = createRoot(document.getElementById('root'));
@@ -114,14 +116,16 @@ test('real controller selection, displayed boundary, and outgoing analysis reque
         raw.queryRenderedFeatures = () => [hit, hit];
         const before = requests.length;
         await React.act(async () => raw.fire('click', { point: { x, y } }));
+        assert.equal(requests.length, before, 'grid selection alone must not start analysis');
+        await analyze();
         assert.equal(requests.length, before + 1);
         assert.deepEqual(context.selectedAOI.bounds, bounds);
         assert.deepEqual(context.selectedGridCords, ring);
         const displayed = raw.getSource('satgpt-basic-aux:analysis-aoi').data;
         const request = requests.at(-1);
         assert.deepEqual(displayed.geometry.coordinates[0], ring);
-        assert.deepEqual(JSON.parse(request.aoi).geojson, displayed);
-        assert.deepEqual(JSON.parse(request.coordinates), ring);
+        assert.deepEqual(request.aoi.geojson, displayed);
+        assert.deepEqual(request.aoi.geojson.geometry.coordinates[0], ring);
       }
     }
     const selected = context.selectedAOI;
@@ -136,7 +140,8 @@ test('real controller selection, displayed boundary, and outgoing analysis reque
     await React.act(async () => raw.fire('click', { point: { x: 1, y: 1 } }));
     assert.deepEqual(context.selectedGridCords, featuresByFid.get('0').geometry.coordinates[0]);
     assert.equal(context.warning, '');
-    assert.deepEqual(JSON.parse(requests.at(-1).aoi).geojson, raw.getSource('satgpt-basic-aux:analysis-aoi').data);
+    await analyze();
+    assert.deepEqual(requests.at(-1).aoi.geojson, raw.getSource('satgpt-basic-aux:analysis-aoi').data);
     assert.equal(raw.events.filter(e => e.event === 'click' && e.layer === 'satgpt-basic-aux:grid_cell-layer').length, 1);
   } finally {
     await React.act(async () => root.unmount());

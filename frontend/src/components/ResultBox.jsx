@@ -8,7 +8,6 @@ function ResultBox() {
     setIsResultVisible,
     setChatInput,
     setResultText,
-    setGptResponse,
   } = useAppContext();
 
   const handleToggle = () => {
@@ -18,7 +17,6 @@ function ResultBox() {
   const handleRefresh = () => {
     setChatInput('');
     setResultText('');
-    setGptResponse(null);
   };
 
   if (!resultText) return null;

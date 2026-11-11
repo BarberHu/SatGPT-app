@@ -1,79 +1,15 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { useAppContext } from '../../context/AppContext';
-import {
-  buildAoiSignature,
-  buildAoiFromDrawFeature,
-  buildAoiFromDrawFeatures,
-  buildAoiFromGridSelection,
-  getDrawFeaturesFromAoi,
-} from '../../utils/aoi';
-import { buildAoiFromBusinessLayerRecord } from '../../utils/businessLayerStore';
+import { buildAoiFromDrawFeatures, buildAoiFromGridSelection, getDrawFeaturesFromAoi } from '../../utils/aoi';
 import { getOriginalFishnetRing, loadFishnetData } from '../../utils/fishnetSelection';
-import {
-  buildCatalogMapLayerDefinition,
-  getCatalogMapLayerId,
-  isCatalogMapLayerId,
-  shouldReuseCatalogMapLayer,
-} from '../../utils/catalogLayers';
-import {
-  ALL_AGENT_RASTER_LAYER_IDS,
-  ALL_AGENT_RASTER_LAYER_NAMES,
-} from '../../config/agentRasterLayerConfig';
-import {
-  buildTileEventKey,
-  calculateTileLoadPercent,
-  TILE_PROGRESS_START,
-} from '../../utils/layerLoadProgress';
-import {
-  bindMapEvents,
-  reconcileRasterLayer,
-  removeMapLayerAndSource,
-} from '../../utils/mapLifecycle';
+import { bindMapEvents, removeMapLayerAndSource } from '../../utils/mapLifecycle';
 
-const ASK_LAYER_NAMES = ['water', 'flood', 'lclu', 'populationDensity', 'soilTexture', 'healthCareAccess'];
-const AGENT_BASE_LAYER_IDS = [
-  'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
-  'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
-  'agent-s2-custom_range', 'agent-s1-custom_range',
-];
-const AGENT_ANALYSIS_LAYER_IDS = [
-  'agent-flood-detection', 'agent-population', 'agent-urban', 'agent-landcover',
-];
-const AGENT_OVERLAY_LAYER_IDS = [...AGENT_ANALYSIS_LAYER_IDS, ...ALL_AGENT_RASTER_LAYER_IDS];
-const AGENT_SOURCE_IDS = [
-  ...AGENT_BASE_LAYER_IDS,
-  ...AGENT_OVERLAY_LAYER_IDS,
-];
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
-const BUSINESS_LAYER_SOURCE_ID = 'business-layer-scopes';
-const BUSINESS_LAYER_LAYER_IDS = ['business-layer-scopes-fill', 'business-layer-scopes-outline'];
 const DRAW_BLUE = '#2563eb';
 const DRAW_ORANGE = '#f97316';
 const DRAW_WHITE = '#ffffff';
-const isTileRequestError = (event) => (
-  event?.error?.status >= 400
-  || event?.error?.statusCode >= 400
-  || event?.error?.message?.includes('HTTP')
-  || event?.error?.message?.includes('Bad Request')
-);
-const formatCoordinatePart = (value) => {
-  const numericValue = Number(value);
-  return Number.isFinite(numericValue) ? numericValue.toFixed(6) : '';
-};
-const buildBoundsSignature = (bounds) => {
-  if (!bounds) {
-    return 'no-bounds';
-  }
-
-  return [
-    formatCoordinatePart(bounds.west),
-    formatCoordinatePart(bounds.south),
-    formatCoordinatePart(bounds.east),
-    formatCoordinatePart(bounds.north),
-  ].join(':');
-};
 const DRAW_STYLES = [
   {
     id: 'gl-draw-polygon-fill',
@@ -199,297 +135,26 @@ const DRAW_STYLES = [
   },
 ];
 
-function BasicMapController({ map, active }) {
+function BasicMapController({ map }) {
   const mapRef = useRef(map);
   const drawRef = useRef(null);
   const utilityControlRef = useRef(null);
   const gridClickButtonRef = useRef(null);
   const lastFittedAoiRef = useRef(null);
-  const lastConfirmationFocusRef = useRef(null);
   const gridClickEnabledRef = useRef(false);
   const programmaticDrawMutationRef = useRef(false);
   const isAoiEditingRef = useRef(false);
   const editableGeojsonRef = useRef(null);
-  const transientWarningTimeoutRef = useRef(null);
   const [isPolygonDrawMode, setIsPolygonDrawMode] = useState(false);
-  const [pendingSpatialScopeSave, setPendingSpatialScopeSave] = useState(null);
-  
   const {
-    setMapInstance,
-    setSelectedGridCords,
-    setSelectedAOI,
-    setDraftAOI,
-    selectedAOI,
-    draftAOI,
-    aoiClearVersion,
-    gridClickEnabled,
-    setGridClickEnabled,
-    isAoiEditing,
-    aoiEditorMode,
-    setWarning,
-    resetAskSession,
-    resetAgentSession,
-    layerData,
-    layerVisibility,
-    layerOpacity,
-    is3DEnabled,
-    isBuildingsEnabled,
-    appMode,
-    agentImagery,
-    agentAnalysisContext,
-    // Agent control states
-    agentSelectedPeriod,
-    agentShowBaseImagery,
-    agentBaseImageryVisibility,
-    agentShowFloodDetection,
-    agentShowPopulationLayer,
-    agentShowUrbanLayer,
-    agentShowLandcoverLayer,
-    agentRasterLayerVisibility,
-    agentRasterExpectedRequestKeys,
-    agentImpactData,
-    agentRecommendedLayerData,
-    agentRecommendedLayerVisibility,
-    agentLayerOrder,
-    setAgentLayerLoading,
-    setAgentLayerProgress,
-    setAgentTileError,
-    businessLayers,
-    agentVisualResetVersion,
-    registerBusinessLayerFromAoi,
-    removeBusinessLayerRecord,
-    clearAgentVisualState,
+    setMapInstance, setSelectedGridCords, setSelectedAOI, setDraftAOI,
+    selectedAOI, draftAOI, aoiClearVersion, gridClickEnabled, setGridClickEnabled,
+    isAoiEditing, aoiEditorMode, setWarning, resetAskSession, is3DEnabled, isBuildingsEnabled,
   } = useAppContext();
 
-  const shouldPreserveAgentActiveScope = appMode === 'agent'
-    && Boolean(agentAnalysisContext?.confirmation_version)
-    && aoiEditorMode !== 'edit';
-
-  const agentLayerOrderRef = useRef(agentLayerOrder);
-  const agentRecommendedLayerDataRef = useRef(agentRecommendedLayerData);
-  const agentRecommendedTileSignatureRef = useRef({});
-  const agentRecommendedTileLifecycleRef = useRef({});
-  const agentRasterTileUrlRef = useRef({});
-  const agentRasterLayerVisibilityRef = useRef(agentRasterLayerVisibility);
-  const agentRasterExpectedRequestKeysRef = useRef(agentRasterExpectedRequestKeys);
-  const selectedAoiSignatureRef = useRef(buildAoiSignature(selectedAOI));
-  const appModeRef = useRef(appMode);
-  const layerDataRef = useRef(layerData);
-  const syncAgentRasterLayersRef = useRef(null);
-  const agentRasterTileLifecycleRef = useRef({});
-  const askRasterTileUrlRef = useRef({});
-  const agentAnalysisTileUrlRef = useRef({});
-  const agentAnalysisTileLifecycleRef = useRef({});
-
-  agentLayerOrderRef.current = agentLayerOrder;
-  agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
-  agentRasterLayerVisibilityRef.current = agentRasterLayerVisibility;
-  agentRasterExpectedRequestKeysRef.current = agentRasterExpectedRequestKeys;
-  selectedAoiSignatureRef.current = buildAoiSignature(selectedAOI);
-  appModeRef.current = appMode;
-  layerDataRef.current = layerData;
-
-  const clearTransientWarningTimer = useCallback(() => {
-    if (transientWarningTimeoutRef.current) {
-      window.clearTimeout(transientWarningTimeoutRef.current);
-      transientWarningTimeoutRef.current = null;
-    }
-  }, []);
-
-  const showTransientWarning = useCallback((message, timeoutMs = 1800) => {
-    clearTransientWarningTimer();
-    setWarning(message);
-
-    if (!message) {
-      return;
-    }
-
-    transientWarningTimeoutRef.current = window.setTimeout(() => {
-      setWarning((currentWarning) => (currentWarning === message ? '' : currentWarning));
-      transientWarningTimeoutRef.current = null;
-    }, timeoutMs);
-  }, [clearTransientWarningTimer, setWarning]);
-
-  const removeLayerAndSource = useCallback(removeMapLayerAndSource, []);
-
-  // Tracks the real client-side lifecycle of one Mapbox raster source. Earth Engine
-  // does not expose server computation percentages for map tiles, so this progress
-  // is intentionally scoped to requests needed by the current viewport.
-  const createLayerTileLifecycle = useCallback((map, layerKey, sourceId = layerKey) => {
-    const requestedTiles = new Set();
-    const settledTiles = new Set();
-    const failedTiles = new Set();
-    let lastPercent = TILE_PROGRESS_START;
-    let disposed = false;
-    let waveActive = false;
-    let timeoutId = null;
-    let clearProgressTimeoutId = null;
-
-    const clearProgress = () => {
-      setAgentLayerProgress((previous) => {
-        if (!previous?.[layerKey]) {
-          return previous;
-        }
-        const next = { ...previous };
-        delete next[layerKey];
-        return next;
-      });
-    };
-
-    const publish = (patch = {}) => {
-      if (disposed) {
-        return;
-      }
-
-      const requestedCount = requestedTiles.size;
-      const settledCount = settledTiles.size;
-      lastPercent = patch.percent ?? calculateTileLoadPercent({
-        requestedTiles: requestedCount,
-        settledTiles: settledCount,
-        previousPercent: lastPercent,
-      });
-
-      setAgentLayerProgress((previous) => ({
-        ...previous,
-        [layerKey]: {
-          sourceId,
-          status: 'loading',
-          label: requestedCount ? 'Loading map tiles' : 'Preparing map layer',
-          percent: lastPercent,
-          requestedTiles: requestedCount,
-          settledTiles: settledCount,
-          failedTiles: failedTiles.size,
-          updatedAt: Date.now(),
-          ...patch,
-        },
-      }));
-    };
-
-    const beginWave = () => {
-      if (disposed || waveActive) {
-        return;
-      }
-
-      waveActive = true;
-      requestedTiles.clear();
-      settledTiles.clear();
-      failedTiles.clear();
-      lastPercent = TILE_PROGRESS_START;
-      window.clearTimeout(timeoutId);
-      window.clearTimeout(clearProgressTimeoutId);
-      setAgentLayerLoading((previous) => ({ ...previous, [layerKey]: true }));
-      publish();
-      timeoutId = window.setTimeout(() => finish('slow'), 15000);
-    };
-
-    const detach = () => {
-      map.off('sourcedataloading', handleSourceLoading);
-      map.off('sourcedata', handleSourceData);
-      map.off('error', handleSourceError);
-      map.off('idle', handleIdle);
-    };
-
-    const finish = (status = 'complete') => {
-      if (disposed || !waveActive) {
-        return;
-      }
-
-      waveActive = false;
-      window.clearTimeout(timeoutId);
-      setAgentLayerLoading((previous) => ({ ...previous, [layerKey]: false }));
-
-      const timedOut = status === 'slow';
-      publish({
-        status,
-        label: timedOut ? 'Tiles are still loading' : 'Map tiles loaded',
-        percent: timedOut
-          ? lastPercent
-          : calculateTileLoadPercent({ complete: true }),
-      });
-
-      clearProgressTimeoutId = window.setTimeout(clearProgress, timedOut ? 4000 : 900);
-    };
-
-    function handleSourceLoading(event) {
-      if (event?.sourceId !== sourceId) {
-        return;
-      }
-
-      beginWave();
-      const tileKey = buildTileEventKey(event);
-      if (tileKey) {
-        requestedTiles.add(tileKey);
-      }
-      publish();
-    }
-
-    function handleSourceData(event) {
-      if (event?.sourceId !== sourceId || !waveActive) {
-        return;
-      }
-
-      const tileKey = buildTileEventKey(event);
-      if (tileKey) {
-        requestedTiles.add(tileKey);
-        settledTiles.add(tileKey);
-      }
-
-      publish();
-      if (event?.isSourceLoaded === true && requestedTiles.size > 0) {
-        finish('complete');
-      }
-    }
-
-    function handleSourceError(event) {
-      if (event?.sourceId !== sourceId || !waveActive) {
-        return;
-      }
-
-      const tileKey = buildTileEventKey(event);
-      if (tileKey) {
-        requestedTiles.add(tileKey);
-        settledTiles.add(tileKey);
-        failedTiles.add(tileKey);
-      }
-      publish({ label: 'Loading map tiles' });
-    }
-
-    function handleIdle() {
-      finish('complete');
-    }
-
-    map.on('sourcedataloading', handleSourceLoading);
-    map.on('sourcedata', handleSourceData);
-    map.on('error', handleSourceError);
-    map.on('idle', handleIdle);
-    beginWave();
-
-    return {
-      cleanup: () => {
-        disposed = true;
-        waveActive = false;
-        detach();
-        window.clearTimeout(timeoutId);
-        window.clearTimeout(clearProgressTimeoutId);
-        setAgentLayerLoading((previous) => ({ ...previous, [layerKey]: false }));
-        clearProgress();
-      },
-    };
-  }, [setAgentLayerLoading, setAgentLayerProgress]);
-
   useEffect(() => {
-    gridClickEnabledRef.current = gridClickEnabled && appMode !== 'agent';
-  }, [appMode, gridClickEnabled]);
-
-  useEffect(() => {
-    if (appMode === 'agent' && gridClickEnabled) {
-      setGridClickEnabled(false);
-    }
-  }, [appMode, gridClickEnabled, setGridClickEnabled]);
-
-  useEffect(() => () => {
-    clearTransientWarningTimer();
-  }, [clearTransientWarningTimer]);
+    gridClickEnabledRef.current = gridClickEnabled;
+  }, [gridClickEnabled]);
 
   useEffect(() => {
     const button = gridClickButtonRef.current;
@@ -497,18 +162,15 @@ function BasicMapController({ map, active }) {
       return;
     }
 
-    const disabled = appMode === 'agent' || isAoiEditing || isPolygonDrawMode;
+    const disabled = isAoiEditing || isPolygonDrawMode;
     button.disabled = disabled;
     button.classList.toggle('active', gridClickEnabled && !disabled);
     button.classList.toggle('disabled', disabled);
     button.setAttribute('aria-pressed', gridClickEnabled && !disabled ? 'true' : 'false');
-    button.title = appMode === 'agent'
-      ? 'Grid selection is available only in Ask mode.'
-      : disabled
-      ? 'Drawing is in progress, so map click loading is temporarily disabled.'
-      : (gridClickEnabled ? 'Click map grids to load data.' : 'Map grid click loading is off.');
-  }, [appMode, gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
-
+    button.title = disabled
+      ? 'Drawing is in progress, so grid selection is temporarily disabled.'
+      : (gridClickEnabled ? 'Click map grids to select a study area.' : 'Map grid selection is off.');
+  }, [gridClickEnabled, isAoiEditing, isPolygonDrawMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -519,13 +181,13 @@ function BasicMapController({ map, active }) {
     map.setLayoutProperty(
       'grid_cell-layer',
       'visibility',
-      gridClickEnabled && appMode !== 'agent' ? 'visible' : 'none'
+      gridClickEnabled ? 'visible' : 'none'
     );
 
-    if (!gridClickEnabled || appMode === 'agent') {
+    if (!gridClickEnabled) {
       map.getCanvas().style.cursor = '';
     }
-  }, [appMode, gridClickEnabled]);
+  }, [gridClickEnabled]);
 
   useEffect(() => {
     isAoiEditingRef.current = isAoiEditing;
@@ -534,38 +196,6 @@ function BasicMapController({ map, active }) {
   useEffect(() => {
     editableGeojsonRef.current = draftAOI?.geojson || selectedAOI?.geojson || null;
   }, [draftAOI, selectedAOI]);
-
-  useEffect(() => {
-    agentLayerOrderRef.current = agentLayerOrder;
-  }, [agentLayerOrder]);
-
-  useEffect(() => {
-    agentRecommendedLayerDataRef.current = agentRecommendedLayerData;
-  }, [agentRecommendedLayerData]);
-
-  const removeAskLayers = useCallback((map) => {
-    ASK_LAYER_NAMES.forEach((id) => {
-      removeLayerAndSource(map, `${id}-layer`, id);
-    });
-    askRasterTileUrlRef.current = {};
-  }, [removeLayerAndSource]);
-
-  const removeAskRasterSiblings = useCallback((map, layerNames = []) => {
-    (layerNames || []).forEach((layerName) => {
-      removeLayerAndSource(map, `${layerName}-layer`, layerName);
-    });
-  }, [removeLayerAndSource]);
-
-  const removeAgentLayers = useCallback((map) => {
-    AGENT_SOURCE_IDS.forEach((id) => {
-      removeLayerAndSource(map, id, id);
-    });
-
-    Object.values(agentAnalysisTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
-    agentAnalysisTileLifecycleRef.current = {};
-    agentAnalysisTileUrlRef.current = {};
-    agentRasterTileUrlRef.current = {};
-  }, [removeLayerAndSource]);
 
   const removeAoiLayers = useCallback((map) => {
     AOI_LAYER_IDS.forEach((id) => {
@@ -579,67 +209,12 @@ function BasicMapController({ map, active }) {
     }
   }, []);
 
-  const removeBusinessLayerMapLayers = useCallback((map) => {
-    BUSINESS_LAYER_LAYER_IDS.forEach((id) => {
-      if (map.getLayer(id)) {
-        map.removeLayer(id);
-      }
-    });
-
-    if (map.getSource(BUSINESS_LAYER_SOURCE_ID)) {
-      map.removeSource(BUSINESS_LAYER_SOURCE_ID);
-    }
-  }, []);
-
-  const removeCatalogMapLayers = useCallback((map) => {
-    (map.getStyle()?.layers || [])
-      .map((layer) => layer.id)
-      .filter((id) => isCatalogMapLayerId(id))
-      .forEach((id) => {
-        if (map.getLayer(id)) {
-          map.removeLayer(id);
-        }
-        if (map.getSource(id)) {
-          map.removeSource(id);
-        }
-      });
-  }, []);
-
   const getExistingLayerBands = useCallback((map) => {
-    const styleLayers = map.getStyle()?.layers || [];
-    const styleLayerIds = styleLayers.map((layer) => layer.id);
-    const existingLayerIds = new Set(styleLayerIds);
-    const catalogLayers = styleLayerIds.filter((id) => isCatalogMapLayerId(id));
-    const orderIndex = new Map((agentLayerOrderRef.current || []).map((id, index) => [id, index]));
-    const sortByLayerOrder = (ids) => [...ids].sort((left, right) => {
-      const leftIndex = orderIndex.has(left) ? orderIndex.get(left) : Number.MAX_SAFE_INTEGER;
-      const rightIndex = orderIndex.has(right) ? orderIndex.get(right) : Number.MAX_SAFE_INTEGER;
-
-      if (leftIndex !== rightIndex) {
-        return leftIndex - rightIndex;
-      }
-
-      return AGENT_BASE_LAYER_IDS.indexOf(left) - AGENT_BASE_LAYER_IDS.indexOf(right);
-    });
-    const agentOverlayCandidates = [
-      ...(agentLayerOrderRef.current || []),
-      ...AGENT_OVERLAY_LAYER_IDS,
-      ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
-      ...catalogLayers,
-    ].filter((id) => !AGENT_BASE_LAYER_IDS.includes(id));
-    const agentOverlayLayers = Array.from(new Set(agentOverlayCandidates))
-      .filter((id) => existingLayerIds.has(id));
-
+    const ids = (map.getStyle()?.layers || []).map(layer => layer.id);
     return {
-      gridLayers: ['grid_cell-layer'].filter((id) => existingLayerIds.has(id)),
-      baseImageryLayers: sortByLayerOrder(AGENT_BASE_LAYER_IDS.filter((id) => existingLayerIds.has(id))),
-      analysisLayers: [
-        ...ASK_LAYER_NAMES.map((layerName) => `${layerName}-layer`),
-      ].filter((id) => existingLayerIds.has(id)),
-      agentOverlayLayers,
-      businessLayers: BUSINESS_LAYER_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
-      aoiLayers: AOI_LAYER_IDS.filter((id) => existingLayerIds.has(id)),
-      drawLayers: styleLayerIds.filter((id) => id.startsWith('gl-draw-')),
+      gridLayers: ids.filter(id => id === 'grid_cell-layer'),
+      aoiLayers: AOI_LAYER_IDS.filter(id => ids.includes(id)),
+      drawLayers: ids.filter(id => id.startsWith('gl-draw-')),
     };
   }, []);
 
@@ -683,10 +258,6 @@ function BasicMapController({ map, active }) {
 
     const {
       gridLayers,
-      baseImageryLayers,
-      analysisLayers,
-      agentOverlayLayers,
-      businessLayers,
       aoiLayers,
       drawLayers,
     } = getExistingLayerBands(map);
@@ -694,11 +265,7 @@ function BasicMapController({ map, active }) {
     const orderedFromTopToBottom = [
       ...drawLayers.slice().reverse(),
       ...aoiLayers.slice().reverse(),
-      ...businessLayers.slice().reverse(),
-      ...agentOverlayLayers,
-      ...analysisLayers.slice().reverse(),
       ...gridLayers.slice().reverse(),
-      ...baseImageryLayers.slice().reverse(),
     ];
 
     let beforeId;
@@ -716,219 +283,6 @@ function BasicMapController({ map, active }) {
       }
     });
   }, [getExistingLayerBands]);
-
-  const getInsertBeforeId = useCallback((map, layerId) => {
-    if (!map || !map.isStyleLoaded() || !layerId) {
-      return undefined;
-    }
-
-    const bands = getExistingLayerBands(map);
-    const withExtra = (items = []) => (items.includes(layerId) ? items : [...items, layerId]);
-    const orderIndex = new Map((agentLayerOrderRef.current || []).map((id, index) => [id, index]));
-    const orderBaseLayers = (ids = []) => Array.from(new Set(ids)).sort((left, right) => {
-      const leftIndex = orderIndex.has(left) ? orderIndex.get(left) : Number.MAX_SAFE_INTEGER;
-      const rightIndex = orderIndex.has(right) ? orderIndex.get(right) : Number.MAX_SAFE_INTEGER;
-
-      if (leftIndex !== rightIndex) {
-        return leftIndex - rightIndex;
-      }
-
-      return AGENT_BASE_LAYER_IDS.indexOf(left) - AGENT_BASE_LAYER_IDS.indexOf(right);
-    });
-
-    const overlayCandidates = [
-      ...(agentLayerOrderRef.current || []),
-      ...AGENT_OVERLAY_LAYER_IDS,
-      ...Object.keys(agentRecommendedLayerDataRef.current || {}).map(getCatalogMapLayerId),
-    ].filter((id) => !AGENT_BASE_LAYER_IDS.includes(id));
-    const overlayOrdered = Array.from(new Set(
-      isCatalogMapLayerId(layerId) || AGENT_OVERLAY_LAYER_IDS.includes(layerId)
-        ? [...overlayCandidates, layerId]
-        : overlayCandidates
-    ))
-      .filter((id) => id === layerId || map.getLayer(id));
-
-    const desiredTopToBottom = [
-      ...bands.drawLayers.slice().reverse(),
-      ...bands.aoiLayers.slice().reverse(),
-      ...bands.businessLayers.slice().reverse(),
-      ...overlayOrdered,
-      ...bands.analysisLayers.slice().reverse(),
-      ...bands.gridLayers.slice().reverse(),
-      ...(
-        AGENT_BASE_LAYER_IDS.includes(layerId)
-          ? orderBaseLayers(withExtra(bands.baseImageryLayers)).slice().reverse()
-          : bands.baseImageryLayers.slice().reverse()
-      ),
-    ];
-
-    const targetIndex = desiredTopToBottom.indexOf(layerId);
-    if (targetIndex <= 0) {
-      return undefined;
-    }
-
-    for (let index = targetIndex - 1; index >= 0; index -= 1) {
-      const candidateId = desiredTopToBottom[index];
-      if (candidateId !== layerId && map.getLayer(candidateId)) {
-        return candidateId;
-      }
-    }
-
-    return undefined;
-  }, [getExistingLayerBands]);
-
-  const syncAgentRasterLayers = useCallback((map) => {
-    if (!map || !map.isStyleLoaded()) {
-      return false;
-    }
-
-    const currentAppMode = appModeRef.current;
-    const currentLayerData = layerDataRef.current || {};
-    const currentRasterVisibility = agentRasterLayerVisibilityRef.current || {};
-    const currentExpectedRequestKeys = agentRasterExpectedRequestKeysRef.current || {};
-    const currentLayerOrder = agentLayerOrderRef.current || [];
-    const currentAoiSignature = selectedAoiSignatureRef.current;
-
-    if (currentAppMode === 'agent') {
-      removeAskRasterSiblings(map, ALL_AGENT_RASTER_LAYER_NAMES);
-    }
-
-    const rasterOrderIndex = new Map(
-      currentLayerOrder.map((layerId, index) => [layerId, index])
-    );
-    const orderedRasterNames = [...ALL_AGENT_RASTER_LAYER_NAMES].sort((left, right) => {
-      const leftId = `agent-raster-${left}`;
-      const rightId = `agent-raster-${right}`;
-      const leftIndex = rasterOrderIndex.has(leftId) ? rasterOrderIndex.get(leftId) : Number.MAX_SAFE_INTEGER;
-      const rightIndex = rasterOrderIndex.has(rightId) ? rasterOrderIndex.get(rightId) : Number.MAX_SAFE_INTEGER;
-      if (leftIndex !== rightIndex) {
-        return leftIndex - rightIndex;
-      }
-      return ALL_AGENT_RASTER_LAYER_NAMES.indexOf(left) - ALL_AGENT_RASTER_LAYER_NAMES.indexOf(right);
-    });
-
-    orderedRasterNames.forEach((layerName) => {
-      const mapLayerId = `agent-raster-${layerName}`;
-      const stopTileLifecycle = () => {
-        const cleanup = agentRasterTileLifecycleRef.current?.[layerName];
-        if (cleanup) {
-          cleanup();
-          delete agentRasterTileLifecycleRef.current[layerName];
-        }
-      };
-      const descriptor = currentAppMode === 'agent' ? currentLayerData?.[layerName] : null;
-      const descriptorMatchesCurrentAoi = Boolean(
-        descriptor?.aoiSignature
-        && descriptor.aoiSignature === currentAoiSignature
-      );
-      const expectedRequestKey = currentExpectedRequestKeys?.[layerName] || null;
-      const descriptorMatchesExpectedRequest = Boolean(
-        !expectedRequestKey
-        || descriptor?.requestKey === expectedRequestKey
-      );
-      const nextTileUrl = currentRasterVisibility?.[layerName]
-        && descriptorMatchesCurrentAoi
-        && descriptorMatchesExpectedRequest
-        && descriptor?.tileUrl
-        ? descriptor.tileUrl
-        : null;
-      const previousTileUrl = agentRasterTileUrlRef.current?.[layerName] || null;
-
-      if (!nextTileUrl) {
-        stopTileLifecycle();
-        if (map.getLayer(mapLayerId)) {
-          map.removeLayer(mapLayerId);
-        }
-        if (map.getSource(mapLayerId)) {
-          map.removeSource(mapLayerId);
-        }
-        agentRasterTileUrlRef.current[layerName] = null;
-        return;
-      }
-
-      if (previousTileUrl === nextTileUrl && map.getLayer(mapLayerId) && map.getSource(mapLayerId)) {
-        return;
-      }
-
-      stopTileLifecycle();
-      if (map.getLayer(mapLayerId)) {
-        map.removeLayer(mapLayerId);
-      }
-      if (map.getSource(mapLayerId)) {
-        map.removeSource(mapLayerId);
-      }
-
-      map.addSource(mapLayerId, {
-        type: 'raster',
-        tiles: [nextTileUrl],
-        tileSize: 256,
-      });
-
-      const rasterLayerDefinition = {
-        id: mapLayerId,
-        type: 'raster',
-        source: mapLayerId,
-        paint: {
-          'raster-opacity': 1,
-        },
-      };
-      const rasterBeforeId = getInsertBeforeId(map, mapLayerId);
-      if (rasterBeforeId) {
-        map.addLayer(rasterLayerDefinition, rasterBeforeId);
-      } else {
-        map.addLayer(rasterLayerDefinition);
-      }
-      agentRasterTileLifecycleRef.current[layerName] = createLayerTileLifecycle(
-        map,
-        `raster-${layerName}`,
-        mapLayerId
-      ).cleanup;
-      agentRasterTileUrlRef.current[layerName] = nextTileUrl;
-    });
-
-    reconcileLayerOrder(map);
-    promoteDrawLayers(map);
-    return true;
-  }, [
-    createLayerTileLifecycle,
-    getInsertBeforeId,
-    promoteDrawLayers,
-    reconcileLayerOrder,
-    removeAskRasterSiblings,
-  ]);
-
-  useEffect(() => {
-    syncAgentRasterLayersRef.current = syncAgentRasterLayers;
-  }, [syncAgentRasterLayers]);
-
-  useEffect(() => () => {
-    Object.values(agentAnalysisTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
-    agentAnalysisTileLifecycleRef.current = {};
-    Object.values(agentRasterTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
-    agentRasterTileLifecycleRef.current = {};
-    Object.values(agentRecommendedTileLifecycleRef.current || {}).forEach((cleanup) => cleanup?.());
-    agentRecommendedTileLifecycleRef.current = {};
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) {
-      return;
-    }
-
-    window.requestAnimationFrame(() => reconcileLayerOrder(map));
-  }, [
-    agentLayerOrder,
-    agentRecommendedLayerVisibility,
-    agentBaseImageryVisibility,
-    agentShowBaseImagery,
-    agentShowFloodDetection,
-    agentShowPopulationLayer,
-    agentShowUrbanLayer,
-    agentShowLandcoverLayer,
-    agentRasterLayerVisibility,
-    reconcileLayerOrder,
-  ]);
 
   const loadGridLayer = useCallback((map) => {
     let disposed = false;
@@ -963,7 +317,7 @@ function BasicMapController({ map, active }) {
     });
 
     const handleGridClick = (e) => {
-      if (appModeRef.current === 'agent' || !gridClickEnabledRef.current || isAoiEditingRef.current) return;
+      if (!gridClickEnabledRef.current || isAoiEditingRef.current) return;
       if (!featuresByFid) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['grid_cell-layer'] });
       if (features.length > 0) {
@@ -973,12 +327,8 @@ function BasicMapController({ map, active }) {
           setWarning('Unable to find the complete grid boundary. Please reload and try again.');
           return;
         }
-        
-        // Remove previous EE layers before setting new grid
-        removeAskLayers(map);
-        removeAgentLayers(map);
-        
-        // Set new grid coordinates (this triggers useMapData to fetch new data)
+
+        // Keep the answer while selecting the study area for a preset.
         resetAskSession({ preserveResult: true });
         setSelectedGridCords(aoi.geojson.geometry.coordinates[0]);
         setDraftAOI(null);
@@ -989,7 +339,7 @@ function BasicMapController({ map, active }) {
     };
 
     const handleGridMouseEnter = () => {
-      if (appModeRef.current === 'agent' || !gridClickEnabledRef.current || isAoiEditingRef.current) return;
+      if (!gridClickEnabledRef.current || isAoiEditingRef.current) return;
       map.getCanvas().style.cursor = 'pointer';
     };
 
@@ -1009,7 +359,7 @@ function BasicMapController({ map, active }) {
       // replay. Release the grid layer before its source so setup can run again.
       removeMapLayerAndSource(map, 'grid_cell-layer', 'grid_cell');
     };
-  }, [reconcileLayerOrder, removeAgentLayers, removeAskLayers, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords, setWarning]);
+  }, [reconcileLayerOrder, resetAskSession, setDraftAOI, setSelectedAOI, setSelectedGridCords, setWarning]);
 
   const initializeLoadedMap = useCallback((map) => {
     setMapInstance(map);
@@ -1035,15 +385,14 @@ function BasicMapController({ map, active }) {
         gridButton.type = 'button';
         gridButton.className = 'satgpt-map-toggle-btn';
         gridButton.innerHTML = '<i class="fa fa-crosshairs" aria-hidden="true"></i>';
-        gridButton.setAttribute('aria-label', 'Toggle map click loading');
-        gridButton.setAttribute('title', 'Toggle map click loading');
+        gridButton.setAttribute('aria-label', 'Toggle grid selection');
+        gridButton.setAttribute('title', 'Toggle grid selection');
         gridButton.onclick = (event) => {
           event.preventDefault();
           event.stopPropagation();
 
           if (
-            appModeRef.current === 'agent'
-            || isAoiEditingRef.current
+            isAoiEditingRef.current
             || drawRef.current?.getMode?.() === 'draw_polygon'
           ) {
             return;
@@ -1052,8 +401,7 @@ function BasicMapController({ map, active }) {
           setGridClickEnabled((previous) => !previous);
         };
 
-        const disabled = appModeRef.current === 'agent'
-          || isAoiEditingRef.current
+        const disabled = isAoiEditingRef.current
           || drawRef.current?.getMode?.() === 'draw_polygon';
         gridButton.disabled = disabled;
         gridButton.classList.toggle('active', gridClickEnabledRef.current && !disabled);
@@ -1101,7 +449,6 @@ function BasicMapController({ map, active }) {
   }, [loadGridLayer, reconcileLayerOrder, setGridClickEnabled, setMapInstance]);
 
   const handleMapStyleData = useCallback((map) => {
-    syncAgentRasterLayersRef.current?.(map);
     window.requestAnimationFrame(() => {
       reconcileLayerOrder(map);
       promoteDrawLayers(map);
@@ -1146,127 +493,6 @@ function BasicMapController({ map, active }) {
     }
   }, []);
 
-  const getDrawScopeLabel = useCallback((featureId) => {
-    const existing = businessLayers.find((layer) => String(layer.id) === String(featureId));
-    if (existing?.label) {
-      return existing.label;
-    }
-
-    const drawCount = businessLayers.filter((layer) => (
-      String(layer.origin || layer.source || '').toLowerCase() === 'draw'
-      || String(layer.source || '').toLowerCase() === 'draw'
-      || String(layer.source || '').toLowerCase() === 'edited'
-    )).length;
-
-    return `draw_scope_${drawCount + 1}`;
-  }, [businessLayers]);
-
-  const syncAgentDrawFeature = useCallback((feature, { shouldFit = false } = {}) => {
-    const featureId = String(feature?.id || '').trim();
-    if (!featureId || feature?.geometry?.type !== 'Polygon') {
-      return null;
-    }
-
-    const nextAoi = buildAoiFromDrawFeature(feature, {
-      id: featureId,
-      source: 'draw',
-      origin: 'draw',
-      label: getDrawScopeLabel(featureId),
-    });
-
-    if (!nextAoi) {
-      return null;
-    }
-
-    const existingBusinessLayer = businessLayers.find((layer) => String(layer.id) === featureId);
-    const shouldActivateDrawnScope = !shouldPreserveAgentActiveScope || Boolean(existingBusinessLayer?.is_active);
-
-    if (shouldActivateDrawnScope) {
-      clearAgentVisualState();
-    }
-    setSelectedGridCords(null);
-    if (shouldActivateDrawnScope) {
-      setSelectedAOI(nextAoi);
-    }
-    registerBusinessLayerFromAoi(nextAoi, {
-      id: nextAoi.id,
-      label: nextAoi.label,
-      source: 'draw',
-      origin: 'draw',
-      markActive: shouldActivateDrawnScope,
-    });
-    setWarning('');
-
-    if (shouldFit && shouldActivateDrawnScope) {
-      fitAoiBounds(nextAoi, { force: true, padding: 56, duration: 500 });
-    }
-
-    return nextAoi;
-  }, [
-    fitAoiBounds,
-    businessLayers,
-    clearAgentVisualState,
-    getDrawScopeLabel,
-    registerBusinessLayerFromAoi,
-    setSelectedAOI,
-    setSelectedGridCords,
-    setWarning,
-    shouldPreserveAgentActiveScope,
-  ]);
-
-  const handleDiscardPendingSpatialScope = useCallback(() => {
-    const draw = drawRef.current;
-    if (!draw || !pendingSpatialScopeSave?.featureIds?.length) {
-      setPendingSpatialScopeSave(null);
-      return;
-    }
-
-    draw.delete(pendingSpatialScopeSave.featureIds);
-    setPendingSpatialScopeSave(null);
-    showTransientWarning('Spatial scope was discarded.');
-    window.requestAnimationFrame(() => {
-      try {
-        draw.changeMode('draw_polygon');
-      } catch (error) {
-        console.warn('Failed to resume polygon drawing after discard:', error);
-      }
-    });
-  }, [pendingSpatialScopeSave, showTransientWarning]);
-
-  const handleConfirmPendingSpatialScope = useCallback(() => {
-    const draw = drawRef.current;
-    const map = mapRef.current;
-    if (!draw || !pendingSpatialScopeSave?.featureIds?.length) {
-      setPendingSpatialScopeSave(null);
-      return;
-    }
-
-    pendingSpatialScopeSave.featureIds.forEach((featureId, index) => {
-      const feature = draw.get(featureId);
-      if (feature?.geometry?.type === 'Polygon') {
-        syncAgentDrawFeature(feature, { shouldFit: index === 0 });
-      }
-    });
-
-    setPendingSpatialScopeSave(null);
-    setWarning('');
-    if (draw) {
-      runProgrammaticDrawMutation(() => {
-        draw.deleteAll();
-        draw.changeMode('simple_select');
-      });
-    }
-    if (map) {
-      promoteDrawLayers(map);
-    }
-  }, [
-    pendingSpatialScopeSave,
-    promoteDrawLayers,
-    runProgrammaticDrawMutation,
-    setWarning,
-    syncAgentDrawFeature,
-  ]);
-
   const syncDraftFromFeatures = useCallback((features) => {
     const nextDraftAoi = buildAoiFromDrawFeatures(features, {
       source: aoiEditorMode === 'edit' ? 'edited' : 'draw',
@@ -1305,23 +531,6 @@ function BasicMapController({ map, active }) {
         return;
       }
 
-      if (appMode === 'agent' && !isAoiEditingRef.current) {
-        const createdFeatures = (event.features || [])
-          .filter((feature) => feature.geometry?.type === 'Polygon');
-
-        if (!createdFeatures.length) {
-          setWarning('Please draw a valid polygon spatial scope.');
-          return;
-        }
-        setPendingSpatialScopeSave({
-          featureIds: createdFeatures.map((feature) => feature.id).filter(Boolean),
-          featureCount: createdFeatures.length,
-        });
-        setWarning('');
-        promoteDrawLayers(map);
-        return;
-      }
-
       const createdFeature = event.features?.find((feature) => feature.geometry?.type === 'Polygon');
       if (!createdFeature) {
         setDraftAOI(null);
@@ -1351,18 +560,8 @@ function BasicMapController({ map, active }) {
       }
     };
 
-    const handleUpdate = (event) => {
+    const handleUpdate = () => {
       if (programmaticDrawMutationRef.current) {
-        return;
-      }
-
-      if (appMode === 'agent' && !isAoiEditingRef.current) {
-        (event.features || [])
-          .filter((feature) => feature.geometry?.type === 'Polygon')
-          .forEach((feature) => {
-            syncAgentDrawFeature(feature);
-          });
-        promoteDrawLayers(map);
         return;
       }
 
@@ -1370,34 +569,8 @@ function BasicMapController({ map, active }) {
       promoteDrawLayers(map);
     };
 
-    const handleDelete = (event) => {
+    const handleDelete = () => {
       if (programmaticDrawMutationRef.current) {
-        return;
-      }
-
-      if (appMode === 'agent' && !isAoiEditingRef.current) {
-        const deletedIds = (event.features || [])
-          .map((feature) => String(feature?.id || '').trim())
-          .filter(Boolean);
-
-        if (deletedIds.length) {
-          if (pendingSpatialScopeSave?.featureIds?.some((featureId) => deletedIds.includes(String(featureId)))) {
-            setPendingSpatialScopeSave(null);
-          }
-          const deletedActive = deletedIds.includes(String(selectedAOI?.id || ''));
-          deletedIds.forEach((layerId) => {
-            removeBusinessLayerRecord(layerId);
-          });
-
-          if (deletedActive) {
-            const fallbackRecord = businessLayers.find((layer) => !deletedIds.includes(String(layer.id || '')));
-            setSelectedAOI(fallbackRecord ? buildAoiFromBusinessLayerRecord(fallbackRecord) : null);
-          }
-        }
-
-        setDraftAOI(null);
-        setWarning('');
-        promoteDrawLayers(map);
         return;
       }
 
@@ -1430,20 +603,12 @@ function BasicMapController({ map, active }) {
       map.off('draw.render', handleDrawRender);
     };
   }, [
-    appMode,
-    businessLayers,
     gridClickEnabled,
-    pendingSpatialScopeSave?.featureIds,
     promoteDrawLayers,
-    removeBusinessLayerRecord,
-    selectedAOI?.id,
     setGridClickEnabled,
     setDraftAOI,
-    setPendingSpatialScopeSave,
-    setSelectedAOI,
     setWarning,
     schedulePromoteDrawLayers,
-    syncAgentDrawFeature,
     syncDraftFromFeatures,
   ]);
 
@@ -1508,91 +673,11 @@ function BasicMapController({ map, active }) {
       }
     }
   }, [aoiEditorMode, reconcileLayerOrder, runProgrammaticDrawMutation, schedulePromoteDrawLayers, setDraftAOI, setWarning]);
-
-  // Reconcile Ask raster layers without rebuilding sources for paint/layout changes.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-
-    if (appMode !== 'ask') {
-      removeAskLayers(map);
-      reconcileLayerOrder(map);
-      return;
-    }
-
-    ASK_LAYER_NAMES.forEach((layerName) => {
-      const data = layerData[layerName];
-      const nextTileUrl = data?.tileUrl || null;
-      reconcileRasterLayer(map, {
-        layerId: `${layerName}-layer`,
-        sourceId: layerName,
-        tileUrl: nextTileUrl,
-        previousTileUrl: askRasterTileUrlRef.current[layerName] || null,
-        visible: Boolean(layerVisibility[layerName]),
-        opacity: layerOpacity[layerName] ?? 1,
-      });
-      askRasterTileUrlRef.current[layerName] = nextTileUrl;
-    });
-
-    reconcileLayerOrder(map);
-  }, [appMode, layerData, layerOpacity, layerVisibility, reconcileLayerOrder, removeAskLayers]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || appMode !== 'ask') return undefined;
-
-    let handled = false;
-    const onAskTileError = (event) => {
-      const sourceId = event?.sourceId;
-      if (handled || !ASK_LAYER_NAMES.includes(sourceId) || !isTileRequestError(event)) {
-        return;
-      }
-
-      handled = true;
-      removeLayerAndSource(map, `${sourceId}-layer`, sourceId);
-      resetAskSession();
-    };
-
-    map.on('error', onAskTileError);
-    return () => {
-      map.off('error', onAskTileError);
-    };
-  }, [appMode, layerData, removeLayerAndSource, resetAskSession]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (appMode === 'ask') {
-      removeAgentLayers(map);
-    } else {
-      removeAskLayers(map);
-    }
-
-    reconcileLayerOrder(map);
-  }, [appMode, reconcileLayerOrder, removeAgentLayers, removeAskLayers]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (appMode === 'ask') {
-      removeAskLayers(map);
-    } else {
-      removeAgentLayers(map);
-      setAgentTileError(null);
-    }
-
-    reconcileLayerOrder(map);
-  }, [appMode, selectedAOI, reconcileLayerOrder, removeAgentLayers, removeAskLayers, setAgentTileError]);
-
   useEffect(() => {
     const map = mapRef.current;
     const draw = drawRef.current;
     if (!map) return;
 
-    removeAskLayers(map);
-    removeAgentLayers(map);
     removeAoiLayers(map);
     lastFittedAoiRef.current = null;
     map.getCanvas().style.cursor = '';
@@ -1607,19 +692,7 @@ function BasicMapController({ map, active }) {
     }
 
     reconcileLayerOrder(map);
-  }, [aoiClearVersion, reconcileLayerOrder, removeAgentLayers, removeAskLayers, removeAoiLayers]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    removeAgentLayers(map);
-    removeCatalogMapLayers(map);
-    setAgentTileError(null);
-    reconcileLayerOrder(map);
-  }, [agentVisualResetVersion, reconcileLayerOrder, removeAgentLayers, removeCatalogMapLayers, setAgentTileError]);
+  }, [aoiClearVersion, reconcileLayerOrder, removeAoiLayers]);
 
   // Handle 3D terrain
   useEffect(() => {
@@ -1672,428 +745,7 @@ function BasicMapController({ map, active }) {
     reconcileLayerOrder(map);
   }, [isBuildingsEnabled, reconcileLayerOrder]);
 
-  // ========== Effect A: Base Sentinel Imagery ==========
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || appMode !== 'agent') return;
-
-    const sentinelIds = [
-      'agent-s2-pre', 'agent-s2-peek', 'agent-s2-after',
-      'agent-s1-pre', 'agent-s1-peek', 'agent-s1-after',
-      'agent-s2-custom_range', 'agent-s1-custom_range',
-    ];
-    sentinelIds.forEach(id => {
-      if (map.getLayer(id)) map.removeLayer(id);
-      if (map.getSource(id)) map.removeSource(id);
-    });
-
-    if (!agentImagery || !agentShowBaseImagery) return;
-
-    setAgentTileError(null);
-
-    const periodKey = agentSelectedPeriod;
-    const periodData = agentImagery[periodKey];
-    const visibleBaseTypes = ['sentinel2', 'sentinel1'].filter((type) => (
-      agentBaseImageryVisibility?.[type]
-      && periodData?.[type]?.tile_url
-    ));
-
-    if (!visibleBaseTypes.length) return;
-
-    const tileLifecycleCleanups = [];
-    const activeSourceIds = new Set();
-    visibleBaseTypes.forEach((typeKey) => {
-      const sourceId = `agent-${typeKey === 'sentinel2' ? 's2' : 's1'}-${periodKey.replace('_date', '')}`;
-      activeSourceIds.add(sourceId);
-      map.addSource(sourceId, {
-        type: 'raster',
-        tiles: [periodData[typeKey].tile_url],
-        tileSize: 256,
-      });
-      const imageryLayerDefinition = {
-        id: sourceId,
-        type: 'raster',
-        source: sourceId,
-        paint: { 'raster-opacity': 1 },
-      };
-      const imageryBeforeId = getInsertBeforeId(map, sourceId);
-      if (imageryBeforeId) {
-        map.addLayer(imageryLayerDefinition, imageryBeforeId);
-      } else {
-        map.addLayer(imageryLayerDefinition);
-      }
-      tileLifecycleCleanups.push(createLayerTileLifecycle(
-        map,
-        `base-imagery-${typeKey}`,
-        sourceId
-      ).cleanup);
-    });
-    reconcileLayerOrder(map);
-
-    // Track tile errors (only on base imagery since it's the primary GEE layer)
-    let tileErrorCount = 0;
-    const failedSourceIds = new Set();
-    const onTileError = (e) => {
-      if (activeSourceIds.has(e?.sourceId) && (isTileRequestError(e) || e?.type === 'error')) {
-        tileErrorCount++;
-        const sourceId = e?.sourceId;
-        console.warn('Tile load error:', sourceId || 'unknown', e?.error?.message || '');
-        if (sourceId && AGENT_BASE_LAYER_IDS.includes(sourceId) && !failedSourceIds.has(sourceId)) {
-          failedSourceIds.add(sourceId);
-          removeLayerAndSource(map, sourceId, sourceId);
-        }
-      }
-    };
-    map.on('error', onTileError);
-
-    let resolved = false;
-    const finish = (isTimeout) => {
-      if (resolved) return;
-      resolved = true;
-      window.clearTimeout(timeout);
-      if (tileErrorCount > 0) {
-        console.warn(`${tileErrorCount} tile(s) failed to load.`);
-        setAgentTileError({
-          count: tileErrorCount,
-          message: isTimeout
-            ? 'Map tiles timed out. The GEE imagery URL may have expired. Try re-running the analysis.'
-            : 'Some map tiles failed to load. The imagery URL may have expired. Try re-running the analysis.',
-          timestamp: Date.now(),
-        });
-      } else {
-        setAgentTileError(null);
-      }
-    };
-    const onIdle = () => finish(false);
-    map.once('idle', onIdle);
-    const timeout = window.setTimeout(() => finish(true), 15000);
-
-    return () => {
-      resolved = true;
-      tileLifecycleCleanups.forEach((cleanup) => cleanup());
-      map.off('error', onTileError);
-      map.off('idle', onIdle);
-      window.clearTimeout(timeout);
-    };
-  }, [agentBaseImageryVisibility, agentImagery, agentShowBaseImagery, appMode, agentSelectedPeriod, createLayerTileLifecycle, getInsertBeforeId, reconcileLayerOrder, removeLayerAndSource, setAgentTileError]);
-
-  // Reconcile the four analysis overlays through one raster lifecycle.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) {
-      return;
-    }
-
-    const analysisLayers = [
-      {
-        layerKey: 'flood-detection',
-        mapLayerId: 'agent-flood-detection',
-        tileUrl: agentImagery?.flood_detection?.tile_url || null,
-        visible: agentShowFloodDetection,
-      },
-      {
-        layerKey: 'population',
-        mapLayerId: 'agent-population',
-        tileUrl: agentImpactData?.layers?.population?.tile_url || null,
-        visible: agentShowPopulationLayer,
-      },
-      {
-        layerKey: 'urban',
-        mapLayerId: 'agent-urban',
-        tileUrl: agentImpactData?.layers?.urban?.tile_url || null,
-        visible: agentShowUrbanLayer,
-      },
-      {
-        layerKey: 'landcover',
-        mapLayerId: 'agent-landcover',
-        tileUrl: agentImpactData?.layers?.landcover?.tile_url || null,
-        visible: agentShowLandcoverLayer,
-      },
-    ];
-
-    analysisLayers.forEach(({ layerKey, mapLayerId, tileUrl, visible }) => {
-      const nextTileUrl = appMode === 'agent' ? tileUrl : null;
-      const previousTileUrl = agentAnalysisTileUrlRef.current[mapLayerId] || null;
-      const result = reconcileRasterLayer(map, {
-        layerId: mapLayerId,
-        tileUrl: nextTileUrl,
-        previousTileUrl,
-        visible: Boolean(visible),
-        opacity: 0.7,
-        beforeId: getInsertBeforeId(map, mapLayerId),
-      });
-
-      const stopTileLifecycle = () => {
-        const cleanup = agentAnalysisTileLifecycleRef.current[mapLayerId];
-        if (cleanup) {
-          cleanup();
-          delete agentAnalysisTileLifecycleRef.current[mapLayerId];
-        }
-      };
-
-      if (!nextTileUrl || !visible || result.sourceChanged) {
-        stopTileLifecycle();
-      }
-      if (nextTileUrl && visible && !agentAnalysisTileLifecycleRef.current[mapLayerId]) {
-        agentAnalysisTileLifecycleRef.current[mapLayerId] = createLayerTileLifecycle(
-          map,
-          layerKey,
-          mapLayerId
-        ).cleanup;
-      }
-
-      agentAnalysisTileUrlRef.current[mapLayerId] = nextTileUrl;
-    });
-
-    reconcileLayerOrder(map);
-  }, [
-    agentImagery,
-    agentImpactData,
-    agentShowFloodDetection,
-    agentShowLandcoverLayer,
-    agentShowPopulationLayer,
-    agentShowUrbanLayer,
-    appMode,
-    createLayerTileLifecycle,
-    getInsertBeforeId,
-    reconcileLayerOrder,
-  ]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return undefined;
-
-    const runSync = () => {
-      syncAgentRasterLayers(map);
-      window.requestAnimationFrame(() => {
-        if (mapRef.current === map && map.isStyleLoaded()) {
-          syncAgentRasterLayers(map);
-        }
-      });
-    };
-
-    if (syncAgentRasterLayers(map)) {
-      window.requestAnimationFrame(() => {
-        if (mapRef.current === map && map.isStyleLoaded()) {
-          syncAgentRasterLayers(map);
-        }
-      });
-      return undefined;
-    }
-
-    map.once('load', runSync);
-    map.once('styledata', runSync);
-    return () => {
-      map.off('load', runSync);
-      map.off('styledata', runSync);
-    };
-  }, [
-    agentLayerOrder,
-    agentRasterLayerVisibility,
-    appMode,
-    layerData,
-    syncAgentRasterLayers,
-  ]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-
-    const stopCatalogTileLifecycle = (mapLayerId) => {
-      const cleanup = agentRecommendedTileLifecycleRef.current?.[mapLayerId];
-      if (cleanup) {
-        cleanup();
-        delete agentRecommendedTileLifecycleRef.current[mapLayerId];
-      }
-    };
-
-    const removeCatalogLayer = (mapLayerId) => {
-      stopCatalogTileLifecycle(mapLayerId);
-      if (map.getLayer(mapLayerId)) {
-        map.removeLayer(mapLayerId);
-      }
-      if (map.getSource(mapLayerId)) {
-        map.removeSource(mapLayerId);
-      }
-      delete agentRecommendedTileSignatureRef.current[mapLayerId];
-    };
-
-    if (appMode !== 'agent') {
-      (map.getStyle()?.layers || [])
-        .map((layer) => layer.id)
-        .filter((id) => isCatalogMapLayerId(id))
-        .forEach(removeCatalogLayer);
-      Object.keys(agentRecommendedTileLifecycleRef.current || {}).forEach(stopCatalogTileLifecycle);
-      return;
-    }
-
-    const layerEntries = Object.entries(agentRecommendedLayerData || {});
-    const activeLayerIds = new Set();
-
-    layerEntries.forEach(([layerId, descriptor]) => {
-      const mapDefinition = buildCatalogMapLayerDefinition(layerId, descriptor);
-      const mapLayerId = mapDefinition?.mapLayerId;
-
-      if (!mapLayerId) {
-        return;
-      }
-
-      activeLayerIds.add(mapLayerId);
-
-      if (!descriptor?.tile_url || !agentRecommendedLayerVisibility?.[layerId]) {
-        removeCatalogLayer(mapLayerId);
-        return;
-      }
-
-      const nextTileSignature = `${descriptor.context_key || ''}|${descriptor.tile_url}`;
-      const previousTileSignature = agentRecommendedTileSignatureRef.current?.[mapLayerId] || null;
-      if (shouldReuseCatalogMapLayer({
-        previousSignature: previousTileSignature,
-        nextSignature: nextTileSignature,
-        hasLayer: Boolean(map.getLayer(mapLayerId)),
-        hasSource: Boolean(map.getSource(mapLayerId)),
-      })) {
-        return;
-      }
-
-      removeCatalogLayer(mapLayerId);
-
-      map.addSource(mapLayerId, mapDefinition.source);
-      const catalogLayerDefinition = {
-        ...mapDefinition.layer,
-        source: mapLayerId,
-      };
-      const catalogBeforeId = getInsertBeforeId(map, mapLayerId);
-      if (catalogBeforeId) {
-        map.addLayer(catalogLayerDefinition, catalogBeforeId);
-      } else {
-        map.addLayer(catalogLayerDefinition);
-      }
-      agentRecommendedTileSignatureRef.current[mapLayerId] = nextTileSignature;
-      agentRecommendedTileLifecycleRef.current[mapLayerId] = createLayerTileLifecycle(
-        map,
-        layerId,
-        mapLayerId
-      ).cleanup;
-    });
-
-    (map.getStyle()?.layers || [])
-      .map((layer) => layer.id)
-      .filter((id) => isCatalogMapLayerId(id) && !activeLayerIds.has(id))
-      .forEach(removeCatalogLayer);
-
-    Object.keys(agentRecommendedTileLifecycleRef.current || {})
-      .filter((mapLayerId) => !activeLayerIds.has(mapLayerId))
-      .forEach(stopCatalogTileLifecycle);
-
-    reconcileLayerOrder(map);
-  }, [
-    agentRecommendedLayerData,
-    agentRecommendedLayerVisibility,
-    appMode,
-    createLayerTileLifecycle,
-    getInsertBeforeId,
-    reconcileLayerOrder,
-  ]);
-
-  const displayedAoi = isAoiEditing
-    ? null
-    : appMode === 'ask' || selectedAOI?.source === 'location_search_preview'
-    ? selectedAOI
-    : null;
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) {
-      return;
-    }
-
-    if (appMode !== 'agent') {
-      removeBusinessLayerMapLayers(map);
-      reconcileLayerOrder(map);
-      return;
-    }
-
-    const drawFeatureIds = new Set(
-      (drawRef.current?.getAll?.().features || [])
-        .map((feature) => String(feature?.id || '').trim())
-        .filter(Boolean)
-    );
-
-    const visibleLayers = (businessLayers || []).filter((layer) => layer?.is_visible !== false);
-
-    const features = visibleLayers
-      .filter((layer) => layer?.geojson)
-      .filter((layer) => {
-        const layerSource = String(layer.source || '').toLowerCase();
-        if ((layerSource === 'draw' || layerSource === 'edited') && drawFeatureIds.has(String(layer.id))) {
-          return false;
-        }
-        return true;
-      })
-      .map((layer) => ({
-        ...(layer.geojson?.type === 'Feature'
-          ? layer.geojson
-          : { type: 'Feature', properties: {}, geometry: layer.geojson }),
-        properties: {
-          ...(layer.geojson?.properties || {}),
-          id: layer.id,
-          label: layer.label,
-          source: layer.source,
-          is_active: Boolean(layer.is_active),
-        },
-      }));
-
-    removeBusinessLayerMapLayers(map);
-
-    if (!features.length) {
-      reconcileLayerOrder(map);
-      return;
-    }
-
-    map.addSource(BUSINESS_LAYER_SOURCE_ID, {
-      type: 'geojson',
-      data: {
-        type: 'FeatureCollection',
-        features,
-      },
-    });
-
-    map.addLayer({
-      id: BUSINESS_LAYER_LAYER_IDS[0],
-      type: 'fill',
-      source: BUSINESS_LAYER_SOURCE_ID,
-      paint: {
-        'fill-color': 'rgba(0, 0, 0, 0)',
-        'fill-opacity': 0,
-      },
-    });
-
-    map.addLayer({
-      id: BUSINESS_LAYER_LAYER_IDS[1],
-      type: 'line',
-      source: BUSINESS_LAYER_SOURCE_ID,
-      paint: {
-        'line-color': [
-          'case',
-          ['boolean', ['get', 'is_active'], false], '#1d4ed8',
-          '#0f766e',
-        ],
-        'line-width': [
-          'case',
-          ['boolean', ['get', 'is_active'], false], 2.6,
-          1.6,
-        ],
-      },
-    });
-
-    reconcileLayerOrder(map);
-  }, [
-    appMode,
-    businessLayers,
-    reconcileLayerOrder,
-    removeBusinessLayerMapLayers,
-  ]);
+  const displayedAoi = isAoiEditing ? null : selectedAOI;
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2148,68 +800,7 @@ function BasicMapController({ map, active }) {
     }
   }, [displayedAoi, fitAoiBounds, reconcileLayerOrder, removeAoiLayers]);
 
-  useEffect(() => {
-    if (appMode !== 'agent' || isAoiEditing) {
-      return;
-    }
-
-    const confirmedAoi = selectedAOI
-      || agentAnalysisContext?.confirmed_aoi
-      || agentAnalysisContext?.resolved_aoi
-      || null;
-    const confirmationVersion = agentAnalysisContext?.confirmation_version || 0;
-
-    if (!confirmedAoi?.bounds || !confirmationVersion) {
-      return;
-    }
-
-    const focusKey = `${confirmationVersion}:${buildBoundsSignature(confirmedAoi.bounds)}`;
-    if (focusKey === lastConfirmationFocusRef.current) {
-      return;
-    }
-
-    lastConfirmationFocusRef.current = focusKey;
-    window.requestAnimationFrame(() => {
-      fitAoiBounds(confirmedAoi, { force: true, padding: 64, duration: 800 });
-    });
-  }, [
-    appMode,
-    fitAoiBounds,
-    agentAnalysisContext,
-    isAoiEditing,
-    selectedAOI,
-  ]);
-
-  return (
-    <div className="satgpt-map-shell">
-
-
-      {active && pendingSpatialScopeSave ? (
-        <div className="satgpt-map-confirm-card">
-          <div className="satgpt-map-confirm-title">Save spatial scope?</div>
-          <div className="satgpt-map-confirm-text">
-            Double-click finished the polygon. Save it to the spatial scope list or discard it.
-          </div>
-          <div className="satgpt-map-confirm-actions">
-            <button
-              type="button"
-              className="satgpt-map-confirm-btn secondary"
-              onClick={handleDiscardPendingSpatialScope}
-            >
-              Discard
-            </button>
-            <button
-              type="button"
-              className="satgpt-map-confirm-btn primary"
-              onClick={handleConfirmPendingSpatialScope}
-            >
-              Save
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
+  return null;
 }
 
 export default BasicMapController;

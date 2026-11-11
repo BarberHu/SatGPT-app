@@ -24,7 +24,7 @@ vi.mock('../map/mapboxAdapter', () => ({
 test('real Agent surface streams, reconnects, settles once and restores after remount', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
-  
+
   let history = [{ id: 'user', role: 'user', content: 'question', job_id: 'job' }];
   let active = 'job';
   const sources = [];
@@ -151,7 +151,7 @@ test('Agent process explains a turn without tool calls without exposing reasonin
 test('history switching restores independent layers and persists visibility and removal', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
-  
+
   const histories = Object.fromEntries(['one', 'two'].map(id => [`webgis-${id}`, [
     { id: `u-${id}`, role: 'user', content: `${id} history`, job_id: id },
     { id: `a-${id}`, role: 'assistant', content: `${id} answer`, job_id: id,
@@ -209,7 +209,7 @@ test('history switching restores independent layers and persists visibility and 
 test('narrow layout uses a working history dialog and result location opens the map', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   mapSetView.mockClear();
-  
+
   vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal('requestAnimationFrame', callback => { callback(); return 1; });
   vi.stubGlobal('fetch', vi.fn(async url => ({ ok: true, json: async () => url.endsWith('/conversations')

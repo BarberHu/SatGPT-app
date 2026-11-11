@@ -3,7 +3,6 @@ import MapContainer from './components/MapContainer';
 import BasicLayerWorkspace from './presets/BasicLayerWorkspace';
 import ChatBox from './components/ChatBox';
 import ResultBox from './components/ResultBox';
-import Modals from './components/Modals';
 import Spinner from './components/Spinner';
 import { useAppContext } from './context/AppContext';
 import {
@@ -12,21 +11,16 @@ import {
   updateAgentDiagnosticsContext,
 } from './utils/agentDiagnostics';
 function App({ active = true }) {
-  const { appMode, agentSidebarCollapsed, resultText } = useAppContext();
+  const { resultText } = useAppContext();
   const [chatOpen, setChatOpen] = useState(false);
   const mapProfiler = useMemo(
-    () => createReactProfilerHandler('MapContainer', () => ({ appMode })),
-    [appMode]
+    () => createReactProfilerHandler('MapContainer', () => ({ mode: 'basic' })),
+    []
   );
 
   useEffect(() => installLongTaskObserver(), []);
 
-  useEffect(() => {
-    updateAgentDiagnosticsContext({
-      appMode,
-      agentSidebarCollapsed,
-    });
-  }, [agentSidebarCollapsed, appMode]);
+  useEffect(() => { updateAgentDiagnosticsContext({ mode: 'basic' }); }, []);
   
   return (
     <div className="water">
@@ -39,9 +33,8 @@ function App({ active = true }) {
       </div>
       <div className={`ask-dock preset-ask-dock${chatOpen ? ' is-open' : ''}`}>
         <button className="preset-chat-toggle" type="button" aria-expanded={chatOpen} onClick={() => setChatOpen(!chatOpen)}>Basic questions {chatOpen ? '−' : '+'}</button>
-        <div hidden={!chatOpen}><ResultBox /><div className="ask-dock-composer" hidden={Boolean(resultText)}><ChatBox answerOnly /></div></div>
+        <div hidden={!chatOpen}><ResultBox /><div className="ask-dock-composer" hidden={Boolean(resultText)}><ChatBox /></div></div>
       </div>
-      <Modals active={active} />
       <Spinner />
     </div>
   );

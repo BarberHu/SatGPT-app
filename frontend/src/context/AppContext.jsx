@@ -1,23 +1,12 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useReducer, useRef } from 'react';
-import { buildAoiFromAgentState, isFishnetAoi } from '../utils/aoi';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import {
   buildBusinessLayerRecordFromAoi,
-  buildAoiFromBusinessLayerRecord,
-  createAgentSessionId,
   getStoredAgentSessionId,
   isBusinessLayerAoiSource,
-  persistAgentSessionId,
 } from '../utils/businessLayerStore';
 import businessLayerRepository from '../repositories/businessLayerRepository';
 import useBusinessLayerPersistence from '../hooks/useBusinessLayerPersistence';
 import useWarningState from '../hooks/useWarningState';
-import {
-  buildDefaultAgentLayerOrder,
-  buildDefaultAgentRasterLayerVisibility,
-} from '../config/agentRasterLayerConfig';
-import { createDefaultAgentAnalysisContext } from '../config/floodAgentState';
-import { createEmptyLayerData, normalizeLayerData } from '../api/adapters/layerDataAdapter';
-import { appModeReducer, planAppModeTransition } from '../app/appModeReducer';
 
 const AppContext = createContext();
 
@@ -29,45 +18,6 @@ export const useAppContext = () => {
   return context;
 };
 
-const defaultAgentLayerVisibility = {
-  agentSelectedPeriod: 'peek_date',
-  agentSelectedType: 'sentinel2',
-  agentShowBaseImagery: false,
-  agentShowFloodDetection: false,
-  agentShowPopulationLayer: false,
-  agentShowUrbanLayer: false,
-  agentShowLandcoverLayer: false,
-};
-
-const defaultAgentBaseImageryVisibility = {
-  sentinel2: false,
-  sentinel1: false,
-};
-
-const defaultAgentImageryDateWindow = {
-  start_date: null,
-  end_date: null,
-};
-
-const defaultAgentRasterLayerVisibility = buildDefaultAgentRasterLayerVisibility();
-const defaultAgentLayerOrder = buildDefaultAgentLayerOrder();
-
-const resolveCurrentBusinessScopeAoi = (records = [], selectedAoi = null) => {
-  const activeRecord = (records || []).find((record) => record?.is_active) || null;
-  if (activeRecord) {
-    return buildAoiFromBusinessLayerRecord({
-      ...activeRecord,
-      is_active: true,
-    });
-  }
-
-  if (selectedAoi?.id && isBusinessLayerAoiSource(selectedAoi?.source)) {
-    return selectedAoi;
-  }
-
-  return null;
-};
-
 const activateBusinessLayer = (records = [], activeId = null) =>
   records.map((record) => ({
     ...record,
@@ -77,18 +27,10 @@ const activateBusinessLayer = (records = [], activeId = null) =>
 
 export const AppProvider = ({ children }) => {
   // UI State
-  const [isPanelVisible, setIsPanelVisible] = useState(true);
+
   const [isLoading, setIsLoading] = useState(false);
   const { warning, setWarning, setOwnedWarning, clearOwnedWarning } = useWarningState();
-  
-  // 应用主模式：`ask` 表示传统问答流，`agent` 表示 Flood Agent 工作流。
-  const [appMode, dispatchAppMode] = useReducer(appModeReducer, 'ask');
-  const [agentSidebarCollapsed, setAgentSidebarCollapsed] = useState(false);
-  const [agentModule, setAgentModule] = useState('flood');
-  
-  // Modal State
-  const [activeModal, setActiveModal] = useState(null); // 'prompt', '3d', 'error', 'contact', 'help', null
-  
+
   // Map State
   const [mapInstance, setMapInstance] = useState(null);
   const [selectedGridCords, setSelectedGridCords] = useState(null);
@@ -98,107 +40,24 @@ export const AppProvider = ({ children }) => {
   const [aoiClearVersion, setAoiClearVersion] = useState(0);
   const [countries, setCountries] = useState({});
   const [gridClickEnabled, setGridClickEnabled] = useState(true);
-  
+
   // Layer State
-  const [dataType, setDataType] = useState('historical'); // 'historical', 'floodHotspot'
-  const [yearControl, setYearControl] = useState(5);
+
   const [is3DEnabled, setIs3DEnabled] = useState(false);
   const [isBuildingsEnabled, setIsBuildingsEnabled] = useState(false);
-  
-  // Layer Visibility
-  const [layerVisibility, setLayerVisibility] = useState({
-    flood: true,
-    water: true,
-    lclu: false,
-    populationDensity: false,
-    soilTexture: false,
-    healthCareAccess: false,
-  });
-  
-  // Layer Opacity
-  const [layerOpacity, setLayerOpacity] = useState({
-    flood: 1,
-    water: 1,
-    lclu: 1,
-    populationDensity: 1,
-    soilTexture: 1,
-    healthCareAccess: 1,
-  });
-  
+
   // Chat/GPT State
   const [chatInput, setChatInput] = useState('');
-  const [gptResponse, setGptResponse] = useState(null);
+
   const [resultText, setResultText] = useState('');
   const [isResultVisible, setIsResultVisible] = useState(true);
-  
-  // Map Layer Data (EE responses)
-  const [layerData, setLayerData] = useState(createEmptyLayerData);
-  
-  // GEE Code Download
-  const [geeCodeUrl, setGeeCodeUrl] = useState(null);
 
-  // Agent session + business layer inventory
-  const [agentSessionId, setAgentSessionId] = useState(() => getStoredAgentSessionId());
+  // Retain the existing namespace so saved AOI records remain readable.
+  const [agentSessionId] = useState(() => getStoredAgentSessionId());
   const [businessLayers, setBusinessLayers] = useState([]);
   const [businessLayersReady, setBusinessLayersReady] = useState(false);
-  const [agentVisualResetVersion, setAgentVisualResetVersion] = useState(0);
+
   const selectedAOIRef = useRef(null);
-  
-  // Basic-map analysis context retained for map and view components.
-  const [agentAnalysisContext, setAgentAnalysisContext] = useState(createDefaultAgentAnalysisContext);
-  
-  // Flood Agent imagery currently displayed on the map and in the layer panel.
-  const [agentImagery, setAgentImagery] = useState(null);
-  const [agentImageryLoading, setAgentImageryLoading] = useState(false);
-  const [agentImageryDateWindow, setAgentImageryDateWindow] = useState(defaultAgentImageryDateWindow);
-  
-  // ========== Agent Mode Control States ==========
-  const [agentSelectedPeriod, setAgentSelectedPeriod] = useState('peek_date'); // 'pre_date' | 'peek_date' | 'after_date'
-  const [agentSelectedType, setAgentSelectedType] = useState('sentinel2'); // 'sentinel2' | 'sentinel1'
-  const [agentShowBaseImagery, setAgentShowBaseImagery] = useState(false);
-  const [agentBaseImageryVisibility, setAgentBaseImageryVisibility] = useState(defaultAgentBaseImageryVisibility);
-  const [agentShowFloodDetection, setAgentShowFloodDetection] = useState(true);
-  const [agentShowPopulationLayer, setAgentShowPopulationLayer] = useState(false);
-  const [agentShowUrbanLayer, setAgentShowUrbanLayer] = useState(false);
-  const [agentShowLandcoverLayer, setAgentShowLandcoverLayer] = useState(false);
-  const [agentRasterLayerVisibility, setAgentRasterLayerVisibility] = useState(defaultAgentRasterLayerVisibility);
-  const [agentRasterExpectedRequestKeys, setAgentRasterExpectedRequestKeys] = useState({});
-  const [agentImpactData, setAgentImpactData] = useState(null);
-  const [agentImpactLoading, setAgentImpactLoading] = useState(false);
-  const [agentTileLoading, setAgentTileLoading] = useState(false);
-  const [agentRecommendedLayerData, setAgentRecommendedLayerData] = useState({});
-  const [agentRecommendedLayerVisibility, setAgentRecommendedLayerVisibility] = useState({});
-  const [agentLayerOrder, setAgentLayerOrder] = useState(defaultAgentLayerOrder);
-  // Per-layer loading tracking: { 'base-imagery': bool, 'flood-detection': bool, 'population': bool, 'urban': bool, 'landcover': bool }
-  const [agentLayerLoading, setAgentLayerLoading] = useState({});
-  // Per-layer viewport tile progress. This measures client-side Mapbox tile requests,
-  // not Earth Engine server-side computation progress.
-  const [agentLayerProgress, setAgentLayerProgress] = useState({});
-  const [agentTileError, setAgentTileError] = useState(null); // tracks GEE tile load failures
-  
-  const clearAgentVisualState = useCallback(() => {
-    setAgentImagery(null);
-    setAgentImageryLoading(false);
-    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
-    setAgentImpactData(null);
-    setAgentImpactLoading(false);
-    setAgentTileLoading(false);
-    setAgentRecommendedLayerData({});
-    setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
-    setAgentRasterExpectedRequestKeys({});
-    setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
-    setAgentLayerOrder(buildDefaultAgentLayerOrder());
-    setAgentLayerLoading({});
-    setAgentLayerProgress({});
-    setAgentTileError(null);
-    setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
-    setAgentShowFloodDetection(false);
-    setAgentShowPopulationLayer(false);
-    setAgentShowUrbanLayer(false);
-    setAgentShowLandcoverLayer(false);
-    setAgentVisualResetVersion((value) => value + 1);
-  }, []);
 
   const setBusinessLayerActive = useCallback((activeLayerId) => {
     setBusinessLayers((previous) => {
@@ -212,34 +71,6 @@ export const AppProvider = ({ children }) => {
       ));
     });
   }, []);
-
-  const toggleBusinessLayerVisibility = useCallback((layerId) => {
-    if (!layerId) {
-      return;
-    }
-
-    setBusinessLayers((previous) => previous.map((record) => (
-      record.id === layerId
-        ? {
-          ...record,
-          is_visible: !(record.is_visible !== false),
-          updated_at: new Date().toISOString(),
-        }
-        : record
-    )));
-  }, []);
-
-  const fitAoiBoundsOnMap = useCallback((aoi, { padding = 64, duration = 700 } = {}) => {
-    if (!mapInstance?.fitBounds || !aoi?.bounds) {
-      return;
-    }
-
-    const { west, south, east, north } = aoi.bounds;
-    mapInstance.fitBounds([[west, south], [east, north]], {
-      padding,
-      duration,
-    });
-  }, [mapInstance]);
 
   const upsertBusinessLayerRecord = useCallback((record, { markActive = true } = {}) => {
     if (!record?.id) {
@@ -279,221 +110,17 @@ export const AppProvider = ({ children }) => {
     return nextRecord;
   }, [upsertBusinessLayerRecord]);
 
-  const activateBusinessLayerRecord = useCallback((layerId, { focus = true } = {}) => {
-    if (!layerId) {
-      return null;
-    }
-
-    const targetRecord = businessLayers.find((record) => record.id === layerId);
-    if (!targetRecord) {
-      return null;
-    }
-
-    const nextAoi = buildAoiFromBusinessLayerRecord({
-      ...targetRecord,
-      is_active: true,
-    });
-
-    setBusinessLayerActive(layerId);
-    if (nextAoi) {
-      setSelectedAOI(nextAoi);
-      setDraftAOI(null);
-      setWarning('');
-      if (focus) {
-        window.requestAnimationFrame(() => {
-          fitAoiBoundsOnMap(nextAoi, { padding: 72, duration: 650 });
-        });
-      }
-    }
-
-    return targetRecord;
-  }, [
-    businessLayers,
-    fitAoiBoundsOnMap,
-    setBusinessLayerActive,
-  ]);
-
-  const removeBusinessLayerRecord = useCallback((layerId, { nextSelectedAoi = null } = {}) => {
-    if (!layerId) {
-      return;
-    }
-
-    setBusinessLayers((previous) => {
-      const remaining = previous.filter((item) => item.id !== layerId);
-      if (!remaining.length) {
-        return [];
-      }
-
-      if (nextSelectedAoi?.id) {
-        return activateBusinessLayer(remaining, nextSelectedAoi.id).map((record) => (
-          record.id === nextSelectedAoi.id
-            ? { ...record, is_visible: true }
-            : record
-        ));
-      }
-
-      const activeCandidate = remaining.find((item) => item.is_active) || remaining[0];
-      return activateBusinessLayer(remaining, activeCandidate?.id || null).map((record) => (
-        activeCandidate?.id && record.id === activeCandidate.id
-          ? { ...record, is_visible: true }
-          : record
-      ));
-    });
-  }, []);
-
-  const deleteBusinessLayer = useCallback((layerId) => {
-    if (!layerId) {
-      return null;
-    }
-
-    const targetRecord = businessLayers.find((record) => record.id === layerId);
-    if (!targetRecord) {
-      return null;
-    }
-
-    const deletedActive = Boolean(targetRecord.is_active || selectedAOI?.id === layerId);
-    const remainingRecords = businessLayers.filter((record) => record.id !== layerId);
-    const fallbackRecord = deletedActive ? (remainingRecords[0] || null) : null;
-    const fallbackAoi = fallbackRecord ? buildAoiFromBusinessLayerRecord({
-      ...fallbackRecord,
-      is_active: true,
-    }) : null;
-
-    if (deletedActive) {
-      setSelectedAOI(fallbackAoi || null);
-    }
-
-    removeBusinessLayerRecord(layerId, { nextSelectedAoi: fallbackAoi });
-    setWarning('');
-    return {
-      deleted: targetRecord,
-      fallback: fallbackRecord,
-    };
-  }, [businessLayers, removeBusinessLayerRecord, selectedAOI]);
-
-  const startNewAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
-    const nextSessionId = createAgentSessionId();
-    persistAgentSessionId(nextSessionId);
-    setAgentSessionId(nextSessionId);
-
-    const shouldPreserveSelectedAoi = preserveSelectedAoi && isBusinessLayerAoiSource(selectedAOI?.source);
-    const seededLayers = shouldPreserveSelectedAoi
-      ? [buildBusinessLayerRecordFromAoi(selectedAOI, {
-          id: selectedAOI?.id,
-          label: selectedAOI?.label,
-          source: selectedAOI?.source,
-          origin: selectedAOI?.origin || (selectedAOI?.source === 'draw' ? 'draw' : 'upload'),
-          is_active: true,
-        })].filter(Boolean)
-      : [];
-
-    setBusinessLayers(seededLayers);
-    setBusinessLayersReady(false);
-    businessLayerRepository.saveLocal(nextSessionId, seededLayers).catch((error) => {
-      console.error('Failed to seed business layers for new agent session:', error);
-    });
-
-    if (!shouldPreserveSelectedAoi) {
-      setSelectedAOI(null);
-      setSelectedGridCords(null);
-    }
-
-    return nextSessionId;
-  }, [selectedAOI]);
-
-  const resetAgentSession = useCallback(({ preserveSelectedAoi = true } = {}) => {
-    setAgentAnalysisContext(createDefaultAgentAnalysisContext());
-    setAgentImagery(null);
-    setAgentImageryLoading(false);
-    setAgentImageryDateWindow(defaultAgentImageryDateWindow);
-    setAgentImpactData(null);
-    setAgentImpactLoading(false);
-    setAgentTileLoading(false);
-    setAgentRecommendedLayerData({});
-    setAgentRecommendedLayerVisibility({});
-    setAgentRasterLayerVisibility(buildDefaultAgentRasterLayerVisibility());
-    setAgentRasterExpectedRequestKeys({});
-    setAgentLayerOrder(buildDefaultAgentLayerOrder());
-    setAgentLayerLoading({});
-    setAgentLayerProgress({});
-    setAgentTileError(null);
-    setAgentSelectedPeriod(defaultAgentLayerVisibility.agentSelectedPeriod);
-    setAgentSelectedType(defaultAgentLayerVisibility.agentSelectedType);
-    setAgentShowBaseImagery(defaultAgentLayerVisibility.agentShowBaseImagery);
-    setAgentBaseImageryVisibility(defaultAgentBaseImageryVisibility);
-    setAgentShowFloodDetection(defaultAgentLayerVisibility.agentShowFloodDetection);
-    setAgentShowPopulationLayer(defaultAgentLayerVisibility.agentShowPopulationLayer);
-    setAgentShowUrbanLayer(defaultAgentLayerVisibility.agentShowUrbanLayer);
-    setAgentShowLandcoverLayer(defaultAgentLayerVisibility.agentShowLandcoverLayer);
-
-    if (!preserveSelectedAoi) {
-      setSelectedAOI(null);
-      setSelectedGridCords(null);
-    }
-  }, []);
-
   useEffect(() => {
     selectedAOIRef.current = selectedAOI;
   }, [selectedAOI]);
 
   const resetAskSession = useCallback(({ preserveResult = false } = {}) => {
     if (!preserveResult) {
-      setGptResponse(null);
       setResultText('');
     }
     setIsResultVisible(true);
     setWarning('');
-    setLayerData(createEmptyLayerData());
-    setGeeCodeUrl((previousUrl) => {
-      if (previousUrl) {
-        URL.revokeObjectURL(previousUrl);
-      }
-      return null;
-    });
   }, []);
-
-  const switchAppMode = useCallback((nextMode) => {
-    const transition = planAppModeTransition({
-      currentMode: appMode,
-      nextMode,
-      hasFishnetAoi: isFishnetAoi(selectedAOI),
-    });
-
-    if (!transition) {
-      return false;
-    }
-
-    if (transition.resetAsk) {
-      resetAskSession();
-    }
-    if (transition.resetAgent) {
-      resetAgentSession({ preserveSelectedAoi: true });
-    }
-
-    if (transition.clearFishnetAoi) {
-      setSelectedGridCords(null);
-      setSelectedAOI(null);
-      setDraftAOI(null);
-    } else if (transition.restoreBusinessScope) {
-      const nextScopeAoi = resolveCurrentBusinessScopeAoi(businessLayers, selectedAOI);
-      if (
-        nextScopeAoi
-        && (
-          !selectedAOI?.id
-          || !isBusinessLayerAoiSource(selectedAOI?.source)
-          || selectedAOI.id !== nextScopeAoi.id
-        )
-      ) {
-        setSelectedAOI(nextScopeAoi);
-        setDraftAOI(null);
-      }
-    }
-
-    setChatInput('');
-    setWarning('');
-    dispatchAppMode({ type: 'switch', mode: transition.nextMode });
-    return true;
-  }, [appMode, businessLayers, resetAgentSession, resetAskSession, selectedAOI]);
 
   useEffect(() => {
     let cancelled = false;
@@ -588,46 +215,6 @@ export const AppProvider = ({ children }) => {
       return activateBusinessLayer(merged, nextRecord.id);
     });
   }, [businessLayers, selectedAOI]);
-  
-  // Toggle layer visibility
-  const toggleLayerVisibility = useCallback((layerName) => {
-    setLayerVisibility(prev => ({
-      ...prev,
-      [layerName]: !prev[layerName]
-    }));
-  }, []);
-  
-  // Update layer opacity
-  const updateLayerOpacity = useCallback((layerName, opacity) => {
-    setLayerOpacity(prev => ({
-      ...prev,
-      [layerName]: opacity
-    }));
-  }, []);
-  
-  // Reset all layer opacities
-  const resetAllOpacity = useCallback(() => {
-    setLayerOpacity({
-      flood: 1,
-      water: 1,
-      lclu: 1,
-      populationDensity: 1,
-      soilTexture: 1,
-      healthCareAccess: 1,
-    });
-  }, []);
-  
-  // Update layer data from API response
-  const updateLayerData = useCallback((data) => {
-    setLayerData(normalizeLayerData(data));
-  }, []);
-
-  const mergeLayerData = useCallback((data, options = {}) => {
-    setLayerData((previous) => ({
-      ...previous,
-      ...normalizeLayerData(data, { partial: true, ...options }),
-    }));
-  }, []);
 
   const cancelDraftAoi = useCallback(() => {
     setDraftAOI(null);
@@ -642,10 +229,7 @@ export const AppProvider = ({ children }) => {
   }, []);
 
   const startAoiEdit = useCallback(() => {
-    const editableAoi = selectedAOI || buildAoiFromAgentState(agentAnalysisContext, {
-      source: 'agent_geocode',
-      label: agentAnalysisContext?.location || 'Agent-derived scope',
-    });
+    const editableAoi = selectedAOI;
 
     if (!editableAoi) {
       setWarning('Please select, upload, or resolve a spatial scope before editing.');
@@ -656,7 +240,7 @@ export const AppProvider = ({ children }) => {
     setAoiEditorMode('edit');
     setWarning('');
     return true;
-  }, [agentAnalysisContext, selectedAOI]);
+  }, [selectedAOI]);
 
   const applyDraftAoi = useCallback(() => {
     if (!draftAOI?.geojson) {
@@ -667,7 +251,7 @@ export const AppProvider = ({ children }) => {
     const nextAoi = JSON.parse(JSON.stringify(draftAOI));
     if (!isBusinessLayerAoiSource(nextAoi.source)) {
       nextAoi.source = aoiEditorMode === 'edit' ? 'edited' : 'draw';
-      nextAoi.origin = aoiEditorMode === 'edit' ? 'draw' : 'draw';
+      nextAoi.origin = 'draw';
       if (nextAoi.geojson?.properties) {
         nextAoi.geojson.properties.source = nextAoi.source;
       }
@@ -682,16 +266,14 @@ export const AppProvider = ({ children }) => {
       origin: nextAoi.source === 'draw' || nextAoi.source === 'edited' ? 'draw' : 'upload',
       markActive: true,
     });
-    resetAgentSession({ preserveSelectedAoi: true });
     setDraftAOI(null);
     setAoiEditorMode('idle');
     setWarning('');
     return nextAoi;
-  }, [aoiEditorMode, draftAOI, registerBusinessLayerFromAoi, resetAgentSession, resetAskSession]);
+  }, [aoiEditorMode, draftAOI, registerBusinessLayerFromAoi, resetAskSession]);
 
   const clearAoiState = useCallback(() => {
     resetAskSession();
-    resetAgentSession({ preserveSelectedAoi: false });
     setDraftAOI(null);
     setAoiEditorMode('idle');
     setSelectedGridCords(null);
@@ -699,26 +281,17 @@ export const AppProvider = ({ children }) => {
     setBusinessLayerActive(null);
     setWarning('');
     setAoiClearVersion((value) => value + 1);
-  }, [resetAgentSession, resetAskSession, setBusinessLayerActive]);
+  }, [resetAskSession, setBusinessLayerActive]);
 
   const isAoiEditing = aoiEditorMode !== 'idle';
 
   const value = {
-    // UI State
-    isPanelVisible,
-    setIsPanelVisible,
     isLoading,
     setIsLoading,
     warning,
     setWarning,
     setOwnedWarning,
     clearOwnedWarning,
-    
-    // Modal State
-    activeModal,
-    setActiveModal,
-    
-    // Map State
     mapInstance,
     setMapInstance,
     selectedGridCords,
@@ -740,120 +313,24 @@ export const AppProvider = ({ children }) => {
     setCountries,
     gridClickEnabled,
     setGridClickEnabled,
-    
-    // Layer State
-    dataType,
-    setDataType,
-    yearControl,
-    setYearControl,
     is3DEnabled,
     setIs3DEnabled,
     isBuildingsEnabled,
     setIsBuildingsEnabled,
-    
-    // Layer Visibility & Opacity
-    layerVisibility,
-    setLayerVisibility,
-    toggleLayerVisibility,
-    layerOpacity,
-    updateLayerOpacity,
-    resetAllOpacity,
-    
-    // Chat/GPT State
     chatInput,
     setChatInput,
-    gptResponse,
-    setGptResponse,
     resultText,
     setResultText,
     isResultVisible,
     setIsResultVisible,
-    
-    // Map Layer Data
-    layerData,
-    updateLayerData,
-    mergeLayerData,
     resetAskSession,
-    
-    // GEE Code
-    geeCodeUrl,
-    setGeeCodeUrl,
-
-    // Agent session + business layer inventory
     agentSessionId,
     businessLayers,
     businessLayersReady,
-    agentVisualResetVersion,
     setBusinessLayers,
     setBusinessLayerActive,
-    toggleBusinessLayerVisibility,
-    activateBusinessLayerRecord,
-    fitAoiBoundsOnMap,
     upsertBusinessLayerRecord,
     registerBusinessLayerFromAoi,
-    removeBusinessLayerRecord,
-    deleteBusinessLayer,
-    startNewAgentSession,
-    clearAgentVisualState,
-
-    // App Mode (ask/agent)
-    appMode,
-    switchAppMode,
-    agentSidebarCollapsed,
-    setAgentSidebarCollapsed,
-    agentModule,
-    setAgentModule,
-    
-    // Read-only analysis projection for map/view consumers.
-    agentAnalysisContext,
-    setAgentAnalysisContext,
-    resetAgentSession,
-    agentImagery,
-    setAgentImagery,
-    agentImageryLoading,
-    setAgentImageryLoading,
-    agentImageryDateWindow,
-    setAgentImageryDateWindow,
-    
-    // Agent Mode Controls
-    agentSelectedPeriod,
-    setAgentSelectedPeriod,
-    agentSelectedType,
-    setAgentSelectedType,
-    agentShowBaseImagery,
-    setAgentShowBaseImagery,
-    agentBaseImageryVisibility,
-    setAgentBaseImageryVisibility,
-    agentShowFloodDetection,
-    setAgentShowFloodDetection,
-    agentShowPopulationLayer,
-    setAgentShowPopulationLayer,
-    agentShowUrbanLayer,
-    setAgentShowUrbanLayer,
-    agentShowLandcoverLayer,
-    setAgentShowLandcoverLayer,
-    agentImpactData,
-    setAgentImpactData,
-    agentImpactLoading,
-    setAgentImpactLoading,
-    agentTileLoading,
-    setAgentTileLoading,
-    agentRecommendedLayerData,
-    setAgentRecommendedLayerData,
-    agentRecommendedLayerVisibility,
-    setAgentRecommendedLayerVisibility,
-    agentRasterLayerVisibility,
-    setAgentRasterLayerVisibility,
-    agentRasterExpectedRequestKeys,
-    setAgentRasterExpectedRequestKeys,
-    agentLayerOrder,
-    setAgentLayerOrder,
-    agentLayerLoading,
-    setAgentLayerLoading,
-    agentLayerProgress,
-    setAgentLayerProgress,
-    agentTileError,
-    setAgentTileError,
   };
 
   return (
