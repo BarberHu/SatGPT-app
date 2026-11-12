@@ -45,7 +45,11 @@ test('late responses cannot overwrite an updated region/parameter selection or r
 });
 test('persists only rebuildable selections, restores order and regenerates temporary tiles',async()=>{
   const {store,jobs,storage}=setup();
-  const first=store.add('slopeSteepness',aoi(),{});
+  const selected=aoi();selected.aoi_ref={id:selected.id,revision:1};
+  const first=store.add('slopeSteepness',selected,{});
+  selected.aoi_ref.revision=2;selected.geojson.geometry.coordinates[0][0][0]=0;
+  expect(store.rows[0].aoi.aoi_ref.revision).toBe(1);
+  expect(store.rows[0].aoi.geojson.geometry.coordinates[0][0][0]).toBe(100);
   const second=store.add('soilTexture',aoi(),{});await flush();
   jobs.forEach(job=>job.resolve({status:'ready',layer:{url:'temporary-secret-free-tile'}}));await flush();
   store.patch(first,{opacity:.35,visible:false});store.move(first,-1);
@@ -55,6 +59,7 @@ test('persists only rebuildable selections, restores order and regenerates tempo
   const restored=new PresetLayerStore(request,{getItem:()=>saved[1],setItem:vi.fn()});restored.start();await flush();
   expect(restored.rows.map(row=>row.presetId)).toEqual(['slopeSteepness','soilTexture']);
   expect(restored.rows[0]).toMatchObject({visible:false,opacity:.35,layer:{url:'renewed'}});
+  expect(restored.rows[0].aoi.aoi_ref).toEqual({id:selected.id,revision:1});
   expect(request).toHaveBeenCalledTimes(2);expect(second).not.toBe(first);
 });
 test('stop prevents queued work starting and resume is safe after effect replay',async()=>{

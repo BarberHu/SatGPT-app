@@ -21,7 +21,7 @@ export class PresetLayerStore {
   snapshot = () => this.rows;
   emit(persist = true) {
     try { if (persist) this.storage?.setItem(PRESET_STORAGE_KEY, JSON.stringify(this.rows.map(({ id, presetId, aoi, params, visible, opacity }) =>
-      ({ id, presetId, aoi: { geojson: aoi.geojson, label: aoi.label, source: aoi.source }, params, visible, opacity })))); } catch { /* Optional persistence. */ }
+      ({ id, presetId, aoi: { id: aoi.id, aoi_ref: aoi.aoi_ref, geojson: aoi.geojson, label: aoi.label, source: aoi.source }, params, visible, opacity })))); } catch { /* Optional persistence. */ }
     for (const listener of this.listeners) listener();
   }
   start() {
@@ -37,8 +37,9 @@ export class PresetLayerStore {
     const preset = presetById(presetId);
     if (!preset) throw new Error('This preset is unavailable.');
     const params = validPresetParams(preset, inputParams);
-    const aoi = buildAoiFromGeoJSON(inputAoi?.geojson, { source: inputAoi?.source || 'upload', label: String(inputAoi?.label || 'Study area').slice(0, 100) });
+    const aoi = buildAoiFromGeoJSON(inputAoi?.geojson, { id: inputAoi?.id, source: inputAoi?.source || 'upload', label: String(inputAoi?.label || 'Study area').slice(0, 100) });
     if (!aoi) throw new Error('Select a valid polygon study area first.');
+    aoi.aoi_ref = inputAoi?.aoi_ref ? JSON.parse(JSON.stringify(inputAoi.aoi_ref)) : null;
     const requestKey = presetRequestKey(presetId, aoi, params);
     const duplicate = this.rows.find(row => row.requestKey === requestKey && row.id !== replaceId);
     if (duplicate) return duplicate.id;

@@ -37,8 +37,8 @@ test('real Basic draw extension and grid survive mode switching; late preset res
   expect(observed.context.draftAOI?.bounds).toEqual({west:100,south:10,east:101,north:11});
   await act(async()=>observed.context.applyDraftAoi());
   const savedAoi=observed.context.selectedAOI;
-  expect(observed.context.businessLayers).toHaveLength(1);
-  expect(observed.context.businessLayers[0].geojson).toEqual(savedAoi.geojson);
+  expect(savedAoi.id).toBeTruthy();
+  expect(savedAoi.geojson.properties.id).toBe(savedAoi.id);
   await act(async()=>observed.context.startAoiEdit());
   await act(async()=>observed.context.cancelDraftAoi());
   expect(observed.context.selectedAOI).toBe(savedAoi);

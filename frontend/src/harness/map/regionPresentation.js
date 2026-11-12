@@ -10,7 +10,7 @@ export function regionPresentation(region, mapReady) {
   }
   if (region?.confirmed) {
     const area = formatGeometryArea(geometryAreaSquareMeters(region.confirmed));
-    return { state: 'confirmed', label: area ? `Area 1 · ${area}` : 'Area 1', hint: '' };
+    return { state: 'confirmed', label: area ? `${region.label || 'Area 1'} · ${area}` : region.label || 'Area 1', hint: region.error || region.persistenceError || '' };
   }
   return { state: 'viewport', label: 'Current map view', hint: mapReady ? '' : 'Waiting for map' };
 }

@@ -1,53 +1,64 @@
-import { buildAoiFromDrawFeatures, buildAoiFromGeoJSON } from '../../utils/aoi.js';
-import { geometryAreaSquareMeters } from '../../utils/geometryArea.js';
+import { buildAoiFromDrawFeatures } from '../../utils/aoi.js';
+import { aoiSnapshot, aoiMetadata, clone } from '../../aoi/snapshot.js';
+import { agentRegionError } from '../../aoi/agentValidation.js';
 
-const clone = value => value == null ? null : JSON.parse(JSON.stringify(value));
 export const regionKey = id => `satgpt:agent:analysis-region:v1:${id}`;
+export const selectionKey = id => `satgpt:agent:analysis-region:v2:${id}`;
+export const drawnRegionError = agentRegionError;
 
-export function drawnRegionError(geometry) {
-  if (!geometry) return 'Draw a polygon with at least three distinct vertices and a non-zero area.';
-  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
-  const points = polygons.flat(2);
-  if (points.length > 2048) return 'Use a simpler area (at most 2048 vertices).';
-  if (Math.max(...points.map(p => p[0])) - Math.min(...points.map(p => p[0])) > 180) return 'Areas crossing the antimeridian are not supported.';
-  const area = geometryAreaSquareMeters(geometry);
-  return area == null || area < 1 || area > 5e12 ? 'Choose an area between 1 m² and 5 million km².' : '';
-}
-
-/** One session's reversible edit transaction. Request snapshots are detached. */
+/** Session-local selection and edit transaction; every send captures detached geometry. */
 export class RegionSelection {
   constructor(id, storage, messages = []) {
-    this.id = id; this.storage = storage; this.confirmed = null; this.editing = false;
-    this.draft = null; this.error = ''; this.complete = false;
-    let saved;
-    try { saved = storage?.getItem(regionKey(id)); } catch { /* Memory-only fallback. */ }
-    if (saved != null) {
-      try { this.confirmed = this.validGeometry(JSON.parse(saved)); } catch { /* Ignore malformed new-key data only. */ }
-    } else {
-      const last = [...messages].reverse().find(m => m.role === 'user' && Object.hasOwn(m, 'analysis_region'));
-      this.confirmed = this.validGeometry(last?.analysis_region);
-    }
+    this.id = id; this.storage = storage; this.aoi = null; this.confirmed = null;
+    this.editing = false; this.draft = null; this.draftAoi = null; this.complete = false;
+    this.error = ''; this.persistenceError = ''; this.outlineVisible = true;
+    try {
+      const current = storage?.getItem(selectionKey(id));
+      if (current != null) {
+        const value = JSON.parse(current);
+        if (value?.schema_version !== 2 || !Object.hasOwn(value, 'aoi')) throw new Error('Unrecognized saved selection.');
+        this.aoi = aoiSnapshot(value.aoi); this.outlineVisible = value.outline_visible !== false;
+      } else {
+        const saved = storage?.getItem(regionKey(id));
+        const last = [...messages].reverse().find(m => m.role === 'user' && Object.hasOwn(m, 'analysis_region'));
+        const geometry = saved != null ? JSON.parse(saved) : last?.analysis_region;
+        if (geometry) this.aoi = aoiSnapshot({ geojson: geometry, source: 'draw', label: last?.analysis_aoi?.label || 'Area 1' });
+      }
+      this.confirmed = clone(this.aoi?.geojson.geometry);
+      if (this.confirmed) this.error = agentRegionError(this.confirmed);
+    } catch { this.persistenceError = 'The previous selection could not be read. Original data has been kept.'; }
   }
-  validGeometry(geometry) {
-    if (!geometry || !['Polygon', 'MultiPolygon'].includes(geometry.type)) return null;
-    return clone(buildAoiFromGeoJSON(geometry)?.geojson.geometry);
+  begin(input = this.aoi) {
+    if (input) { const error = agentRegionError(input.geojson?.geometry || input); if (error) throw new Error(error); }
+    this.editing = true; this.draftAoi = aoiSnapshot(input); this.draft = clone(this.draftAoi?.geojson.geometry);
+    this.complete = Boolean(this.draft); this.error = '';
   }
-  begin() { this.editing = true; this.draft = clone(this.confirmed); this.complete = Boolean(this.draft); this.error = ''; }
   update(features, complete) {
-    const aoi = buildAoiFromDrawFeatures(features, { source: 'draw', label: 'Drawn analysis area' });
-    this.draft = clone(aoi?.geojson.geometry);
-    this.complete = complete && Boolean(this.draft);
-    this.error = complete ? drawnRegionError(this.draft) : '';
+    const aoi = buildAoiFromDrawFeatures(features, { id: this.draftAoi?.id, source: 'draw', label: this.draftAoi?.label || 'Drawn analysis area' });
+    this.draftAoi = aoi ? aoiSnapshot({ ...aoi, aoi_ref: null, edit_ref: this.draftAoi?.edit_ref || this.draftAoi?.aoi_ref || null }) : null;
+    this.draft = clone(this.draftAoi?.geojson.geometry); this.complete = complete && Boolean(this.draft);
+    this.error = complete ? agentRegionError(this.draft) : '';
   }
-  persist() { try { this.storage?.setItem(regionKey(this.id), JSON.stringify(this.confirmed)); } catch { /* Keep live selection. */ } }
+  persist() {
+    try { this.storage?.setItem(selectionKey(this.id), JSON.stringify({ schema_version: 2, aoi: this.aoi, outline_visible: this.outlineVisible })); this.persistenceError = ''; }
+    catch { this.persistenceError = 'Selection is available now but could not be saved locally.'; }
+  }
+  use(input) {
+    const aoi = aoiSnapshot(input), error = agentRegionError(aoi?.geojson.geometry);
+    if (error) throw new Error(error);
+    this.cancel(); this.aoi = aoi; this.confirmed = clone(aoi.geojson.geometry); this.outlineVisible = true; this.persist();
+  }
   confirm() {
     if (!this.editing || !this.complete || !this.draft || this.error) return false;
-    this.confirmed = clone(this.draft); this.editing = false; this.persist(); return true;
+    this.use(this.draftAoi); return true;
   }
-  cancel() { this.editing = false; this.draft = null; this.error = ''; }
-  clear() { this.cancel(); this.confirmed = null; this.persist(); }
+  cancel() { this.editing = false; this.draft = null; this.draftAoi = null; this.error = this.confirmed ? agentRegionError(this.confirmed) : ''; }
+  clear() { this.cancel(); this.aoi = this.confirmed = null; this.error = ''; this.persist(); }
+  toggleOutline() { this.outlineVisible = !this.outlineVisible; this.persist(); }
   snapshot() {
     if (this.editing) throw new Error('Finish or cancel area editing before sending.');
+    if (this.error) throw new Error(this.error);
     return clone(this.confirmed);
   }
+  metadata() { return aoiMetadata(this.aoi); }
 }

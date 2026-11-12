@@ -16,7 +16,7 @@ from .agent import HarnessAgent, conversation_prompt
 from .model_config import model_key_configured, selected_provider
 from .trace import add_harness_event, remove_final_answer
 from .task_stream import TaskStream
-from .analysis_region import validate_analysis_region, region_bounds
+from .analysis_region import validate_analysis_region, region_bounds, validate_analysis_aoi
 from .layer_generation import LayerWorkerRunner, generation_recipe, replay_payload, restore_generation_recipes
 
 
@@ -308,10 +308,11 @@ class TaskController:
             messages = self._conversation_messages(cid)
             self._save_conversation(cid, [*messages, message])
 
-    def create(self, prompt: str, bounds, conversation_id=None, analysis_region=None) -> dict:
+    def create(self, prompt: str, bounds, conversation_id=None, analysis_region=None, analysis_aoi=None) -> dict:
         if not isinstance(prompt, str) or not (3 <= len(prompt.strip()) <= 2000):
             raise ValueError("The prompt must contain 3–2000 characters")
         analysis_region = validate_analysis_region(analysis_region)
+        analysis_aoi = validate_analysis_aoi(analysis_aoi, analysis_region)
         bounds = region_bounds(analysis_region) if analysis_region is not None else validate_bounds(bounds)
         with self.conversation_lock:
             if self._closed:
@@ -326,14 +327,14 @@ class TaskController:
             job = {
                 "id": job_id, "conversation_id": self.conversation_id,
                 "status": "queued", "prompt": prompt.strip(),
-                "bounds": bounds, "analysis_region": analysis_region, "revision": 0,
+                "bounds": bounds, "analysis_region": analysis_region, "analysis_aoi": analysis_aoi, "revision": 0,
                 "output": None, "error": None, "trace": [],
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             with self.lock:
                 self.jobs[job_id] = job
                 self.streams[job_id] = TaskStream(job, secrets=self.trace_secrets)
-            self._append_message("user", prompt.strip(), job_id, bounds=bounds, analysis_region=analysis_region)
+            self._append_message("user", prompt.strip(), job_id, bounds=bounds, analysis_region=analysis_region, **({"analysis_aoi": analysis_aoi} if analysis_aoi else {}))
             self.pool.submit(self._run, job_id)
             return self.get(job_id)
 
@@ -486,7 +487,7 @@ class TaskController:
                     continue
                 layer = {**event['layer'], 'bounds': layer_focus_bounds(event)}
                 context = {'task_id': job_id, 'conversation_id': job['conversation_id'],
-                           'bounds': job['bounds'], 'analysis_region': job.get('analysis_region')}
+                           'bounds': job['bounds'], 'analysis_region': job.get('analysis_region'), 'analysis_aoi': job.get('analysis_aoi')}
                 layer['generation'] = generation_recipe(event.get('code'), layer, context)
                 layer['code'] = event.get('code') or ''
                 layer['reloadable'] = layer['generation'] is not None

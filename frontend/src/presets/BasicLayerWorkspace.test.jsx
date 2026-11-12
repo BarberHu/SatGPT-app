@@ -10,7 +10,7 @@ vi.mock('../map/SharedMapContext',()=>({useSharedMap:()=>({ready:true,service:{s
 vi.mock('../api/presetLayers',()=>({requestPresetLayer:(...args)=>state.request(...args)}));
 vi.mock('../repositories/businessLayerRepository',async original=>({...await original(),default:{load:async()=>[],save:async()=>{}}}));
 let root,node;
-function Probe(){state.context=useAppContext();return <BasicLayerWorkspace/>;}
+function Probe({active=true}){state.context=useAppContext();return <BasicLayerWorkspace active={active}/>;}
 const flush=()=>act(async()=>{for(let i=0;i<12;i++)await Promise.resolve();});
 const click=async text=>{const button=[...node.querySelectorAll('button')].find(button=>button.textContent.includes(text) || button.getAttribute('aria-label')===text);expect(button, text).toBeTruthy();await act(async()=>button.click());};
 beforeEach(()=>{
@@ -72,4 +72,23 @@ test('Apply captures the visible date fields and cloud threshold as one explicit
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node.querySelector(`[name="${name}"]`),value);
  expect(state.request).not.toHaveBeenCalled();await click('Load layer');await flush();
  expect(state.request.mock.calls[0][0].params).toEqual({time_start:'2021-09-01',time_end:'2021-11-01',cloud_threshold:25});
+});
+
+test('a delayed upload cannot replace the selection after leaving Basic or choosing another area',async()=>{
+ let finish;
+ const render=active=>root.render(<AppProvider><Probe active={active}/></AppProvider>);
+ const geometry=buildAoiFromBounds({west:102,south:10,east:102.1,north:10.1}).geojson;
+ await act(async()=>render(true));await flush();
+ const input=node.querySelector('input[type=file]');
+ const start=async()=>{
+  Object.defineProperty(input,'files',{configurable:true,value:[{name:'late.geojson',size:150,text:()=>new Promise(resolve=>{finish=resolve;})}]});
+  await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+ };
+ await start();await act(async()=>render(false));await act(async()=>render(true));
+ await act(async()=>finish(JSON.stringify(geometry)));await flush();
+ expect(state.context.selectedAOI).toBeNull();
+ await start();await click('Use current map extent');
+ const selected=state.context.selectedAOI;
+ await act(async()=>finish(JSON.stringify(geometry)));await flush();
+ expect(state.context.selectedAOI).toBe(selected);expect(state.request).not.toHaveBeenCalled();
 });

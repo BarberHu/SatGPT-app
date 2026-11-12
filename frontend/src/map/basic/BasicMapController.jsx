@@ -149,7 +149,7 @@ function BasicMapController({ map }) {
   const {
     setMapInstance, setSelectedGridCords, setSelectedAOI, setDraftAOI,
     selectedAOI, draftAOI, aoiClearVersion, gridClickEnabled, setGridClickEnabled,
-    isAoiEditing, aoiEditorMode, setWarning, resetAskSession, is3DEnabled, isBuildingsEnabled,
+    isAoiEditing, aoiEditorMode, setAoiEditorMode, aoiOutlineVisible, setWarning, resetAskSession, is3DEnabled, isBuildingsEnabled,
   } = useAppContext();
 
   useEffect(() => {
@@ -495,8 +495,9 @@ function BasicMapController({ map }) {
 
   const syncDraftFromFeatures = useCallback((features) => {
     const nextDraftAoi = buildAoiFromDrawFeatures(features, {
+      id: draftAOI?.id,
       source: aoiEditorMode === 'edit' ? 'edited' : 'draw',
-      label: selectedAOI?.label || 'Manual scope',
+      label: draftAOI?.label || selectedAOI?.label || 'Manual scope',
     });
 
     if (!nextDraftAoi) {
@@ -505,9 +506,9 @@ function BasicMapController({ map }) {
       return;
     }
 
-    setDraftAOI(nextDraftAoi);
+    setDraftAOI({ ...nextDraftAoi, aoi_ref: null, edit_ref: draftAOI?.edit_ref || null });
     setWarning('');
-  }, [aoiEditorMode, selectedAOI, setDraftAOI, setWarning]);
+  }, [aoiEditorMode, draftAOI, selectedAOI, setDraftAOI, setWarning]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -518,6 +519,7 @@ function BasicMapController({ map }) {
       const nextMode = event?.mode || draw.getMode?.() || 'simple_select';
       const drawingPolygon = nextMode === 'draw_polygon';
       setIsPolygonDrawMode(drawingPolygon);
+      if (drawingPolygon && !isAoiEditingRef.current) setAoiEditorMode('draw');
       if (drawingPolygon && gridClickEnabledRef.current) {
         setGridClickEnabled(false);
       }
@@ -745,7 +747,7 @@ function BasicMapController({ map }) {
     reconcileLayerOrder(map);
   }, [isBuildingsEnabled, reconcileLayerOrder]);
 
-  const displayedAoi = isAoiEditing ? null : selectedAOI;
+  const displayedAoi = isAoiEditing || aoiOutlineVisible === false ? null : selectedAOI;
 
   useEffect(() => {
     const map = mapRef.current;

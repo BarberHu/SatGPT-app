@@ -41,6 +41,7 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.6.2",
+    "fake-indexeddb": "^6.2.8",
     "jsdom": "^26.1.0",
     "postcss": "^8.5.32",
     "sucrase": "^3.35.1",

@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useState } from 'react';
 import App from './App';
+import { AoiLibraryProvider } from './aoi/AoiLibraryContext';
 import { AppProvider } from './context/AppContext';
 import WorkspaceHeader from './components/WorkspaceHeader';
 import { SharedMapProvider, SharedMapSurface, useSharedMap } from './map/SharedMapContext';
@@ -51,7 +52,7 @@ export default function ModeRoot() {
     setMode(next);
     try { sessionStorage.setItem(MODE_STORAGE_KEY, next); } catch { /* Optional storage. */ }
   };
-  return <AppProvider><SharedMapProvider mode={mode}>
+  return <AoiLibraryProvider><AppProvider><SharedMapProvider mode={mode}>
     <Workspace mode={mode} changeMode={changeMode} agentVisited={agentVisited} />
-  </SharedMapProvider></AppProvider>;
+  </SharedMapProvider></AppProvider></AoiLibraryProvider>;
 }

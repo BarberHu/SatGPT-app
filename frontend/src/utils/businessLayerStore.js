@@ -34,7 +34,7 @@ function getCenterFromBounds(bounds) {
   };
 }
 
-function openDb() {
+export function openBusinessLayerDb() {
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -50,6 +50,8 @@ function openDb() {
     };
   });
 }
+
+const openDb = openBusinessLayerDb;
 
 function normalizeTimestamp(value) {
   if (typeof value === 'string' && value) {

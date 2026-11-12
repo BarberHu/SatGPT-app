@@ -1,5 +1,25 @@
 """Bounded GeoJSON input contract for task-local analysis geometry (EPSG:4326)."""
 import math
+import re
+
+
+def validate_analysis_aoi(value, region):
+    """Optional display provenance; execution always uses the detached geometry."""
+    if value is None:
+        return None
+    if region is None or not isinstance(value, dict):
+        raise ValueError('analysis_aoi requires an analysis_region geometry')
+    label = value.get('label')
+    if not isinstance(label, str) or not 1 <= len(label.strip()) <= 100:
+        raise ValueError('Area name must contain 1–100 characters')
+    result = {'label': label.strip()}
+    identifier, revision = value.get('id'), value.get('revision')
+    if identifier is not None or revision is not None:
+        if (not isinstance(identifier, str) or not re.fullmatch(r'[\w-]{1,120}', identifier)
+                or isinstance(revision, bool) or not isinstance(revision, int) or revision < 1):
+            raise ValueError('Saved area reference requires a valid ID and positive revision')
+        result.update(id=identifier, revision=revision)
+    return result
 
 
 def _cross(a, b, c):

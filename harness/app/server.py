@@ -47,6 +47,7 @@ class TaskRequest(BaseModel):
     bounds: list[float] = Field(min_length=4, max_length=4)
     conversation_id: str | None = None
     analysis_region: dict | None = None
+    analysis_aoi: dict | None = None
 
 
 @router.get("/api/harness/health")
@@ -119,7 +120,7 @@ def reload_layer(conversation_id: str, layer_id: str, request: Request):
 def create_task(request: TaskRequest, http_request: Request):
     try:
         return http_request.app.state.controller.create(request.prompt, request.bounds, request.conversation_id,
-                                                        analysis_region=request.analysis_region)
+                                                        analysis_region=request.analysis_region, analysis_aoi=request.analysis_aoi)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:

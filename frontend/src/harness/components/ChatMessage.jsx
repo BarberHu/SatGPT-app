@@ -1,4 +1,5 @@
 import React from 'react';
+import AreaControls from '../../aoi/AreaControls';
 import { Sparkles } from 'lucide-react';
 import Markdown from './Markdown';
 import RunTimeline from './RunTimeline';
@@ -8,7 +9,8 @@ export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
   const user = message.role === 'user';
   return <article className={`agent-message harness-message harness-message--${message.role}`} aria-label={user ? 'Your message' : 'Assistant response'}>
     {user ? <div className="agent-user-bubble">{message.text}
-      {message.hasScope ? <small className="agent-message-scope">{message.analysisRegion ? 'Drawn analysis area · snapshot' : 'Map view · snapshot'}</small> : null}
+      {message.hasScope ? <small className="agent-message-scope">{message.analysisRegion ? `${message.analysisAoi?.label || 'Drawn analysis area'} · snapshot` : 'Map view · snapshot'}</small> : null}
+      {message.analysisRegion ? <AreaControls historyOnly current={{ geojson: message.analysisRegion, source: 'draw', label: message.analysisAoi?.label || 'Historical analysis area' }} scopeKey={`history:${message.id}`} /> : null}
     </div> : <>
       <div className="agent-assistant-label"><Sparkles size={16} /><span>SatGPT</span>
         {message.streaming ? <small>Generating</small> : null}

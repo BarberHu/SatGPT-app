@@ -224,11 +224,11 @@ export const buildAoiFromGeoJSON = (input, overrides = {}) => {
     return null;
   }
 
+  const id = overrides.id !== undefined ? overrides.id
+    : (overrides.generateId === false ? null : createAoiId());
   return {
     version: AOI_VERSION,
-    id: Object.prototype.hasOwnProperty.call(overrides, 'id')
-      ? overrides.id
-      : (overrides.generateId === false ? null : createAoiId()),
+    id,
     source: overrides.source || 'upload',
     kind: geometry.type === 'MultiPolygon' ? 'multipolygon' : 'polygon',
     label: overrides.label || 'Uploaded scope',
@@ -240,7 +240,7 @@ export const buildAoiFromGeoJSON = (input, overrides = {}) => {
     geojson: {
       type: 'Feature',
       properties: {
-        id: overrides.id || null,
+        id,
         source: overrides.source || 'upload',
         label: overrides.label || 'Uploaded scope',
       },

@@ -3,6 +3,7 @@ import { Map as MapIcon, MessageSquare, PanelLeft, X } from 'lucide-react';
 import { useAgentChat } from './hooks/useAgentChat';
 import { useAgentMap } from './hooks/useAgentMap';
 import { useAgentRegion } from './hooks/useAgentRegion';
+import AreaControls from '../aoi/AreaControls';
 import { getBoundsFromGeometry } from '../utils/aoi';
 import ConversationSidebar from './components/ConversationSidebar';
 import MessageList from './components/MessageList';
@@ -52,12 +53,12 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
     disabled={chat.loading} onNew={() => changeConversation()}
     onSelect={id => changeConversation(id)} onCollapse={narrow ? () => setHistoryOpen(false) : undefined} />;
   const send = async () => {
-    if (region.editing || chat.loading) return;
+    if (region.editing || region.error || chat.loading) return;
     const text = prompt.trim();
     const geometry = region.snapshot();
     const area = geometry ? getBoundsFromGeometry(geometry) : null;
     const bounds = area ? [area.west, area.south, area.east, area.north] : map.bounds();
-    if (text && bounds && await chat.send(text, bounds, geometry)) setPrompt('');
+    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata())) setPrompt('');
   };
   const editRegion = () => {
     if (region.begin() && narrow) setMobileView('map');
@@ -91,8 +92,12 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
             {chat.error ? <div className="agent-chat-error" role="alert"><span>{chat.error}</span><Button type="button" variant="ghost" size="icon" aria-label="Dismiss error" onClick={chat.clearError}><X /></Button></div> : null}
             <Composer value={prompt} onChange={setPrompt} onSend={send} onStop={chat.stop}
               region={region} onEditRegion={editRegion}
+              areaControls={<AreaControls hideEditAction current={region.aoi} scopeKey={`${active ? 'agent' : 'inactive'}:${chat.conversationId}`} disabled={!active || !region.ready || region.editing || chat.loading || chat.pending}
+                onUse={region.use} onEdit={aoi => { if (region.begin(aoi) && narrow) setMobileView('map'); }}
+                onLocate={aoi => focusLayer({ bounds: [aoi.bounds.west,aoi.bounds.south,aoi.bounds.east,aoi.bounds.north] })}
+                outlineVisible={region.outlineVisible} onToggleOutline={region.toggleOutline} /> }
               busy={chat.busy} pending={chat.pending} stopping={chat.stopping} stopDisabled={chat.loading}
-              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || chat.stopping || !map.ready || region.editing} />
+              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || chat.stopping || !map.ready || region.editing || Boolean(region.error)} />
           </section>
         </ResizablePanel>
         <ResizableHandle className="agent-resize-handle" aria-label="Resize chat and map" />

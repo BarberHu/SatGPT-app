@@ -10,12 +10,14 @@ import PresetMapController from './PresetMapController';
 import PresetParameterForm from './PresetParameterForm';
 import PresetLayerCard from './PresetLayerCard';
 import './presets.css';
+import AreaControls from '../aoi/AreaControls';
 
 const labels = { flood: 'Flood', wildfire: 'Wildfire', landslide: 'Landslide' };
 const icons = { flood: Droplets, wildfire: Flame, landslide: Mountain };
-export default function BasicLayerWorkspace() {
+export default function BasicLayerWorkspace({ active = true }) {
   const { selectedAOI, setSelectedAOI, draftAOI, setDraftAOI, gridClickEnabled, setGridClickEnabled,
-    setCountries, is3DEnabled, setIs3DEnabled, isBuildingsEnabled, setIsBuildingsEnabled } = useAppContext();
+    setCountries, applyDraftAoi, cancelDraftAoi, startAoiDraw, startAoiEdit, clearAoiState, isAoiEditing,
+    setAoiEditorMode, aoiOutlineVisible, toggleAoiOutline, aoiStorageError, is3DEnabled, setIs3DEnabled, isBuildingsEnabled, setIsBuildingsEnabled } = useAppContext();
   const { service, ready } = useSharedMap();
   const { rows, store } = usePresetLayers();
   const [theme, setTheme] = useState('flood');
@@ -26,20 +28,13 @@ export default function BasicLayerWorkspace() {
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
   const upload = useRef(null);
-  const areaInitialized = useRef(false);
-  useEffect(() => {
-    if (!areaInitialized.current) {
-      areaInitialized.current = true;
-      try {
-        const saved = JSON.parse(localStorage.getItem('satgpt:basic-study-area:v1') || 'null');
-        const restored = saved && buildAoiFromGeoJSON(saved.geojson, { source: saved.source, label: saved.label });
-        if (!selectedAOI && restored) setSelectedAOI(restored);
-      } catch { /* Ignore obsolete study areas. */ }
-      return;
-    }
-    try { localStorage.setItem('satgpt:basic-study-area:v1', JSON.stringify(selectedAOI
-      ? { geojson: selectedAOI.geojson, label: selectedAOI.label, source: selectedAOI.source } : null)); } catch { /* Optional persistence. */ }
-  }, [selectedAOI, setSelectedAOI]);
+  const activeRef = useRef(active); activeRef.current = active;
+  const uploadScope = useRef({ active, selectedAOI, generation: 0 });
+  if (uploadScope.current.active !== active || uploadScope.current.selectedAOI !== selectedAOI) {
+    uploadScope.current = { active, selectedAOI, generation: uploadScope.current.generation + 1 };
+  }
+  useEffect(() => () => { uploadScope.current.generation++; }, []);
+  useEffect(() => { if (!active && isAoiEditing) cancelDraftAoi(); }, [active, isAoiEditing, cancelDraftAoi]);
   useEffect(() => {
     fetch('/assets/data/countries.json').then(response => response.json()).then(setCountries).catch(() => {});
   }, [setCountries]);
@@ -61,19 +56,22 @@ export default function BasicLayerWorkspace() {
   const loadFile = async event => {
     const file = event.target.files?.[0]; event.target.value = '';
     if (!file) return;
+    const generation = ++uploadScope.current.generation;
     try {
       if (file.size > 2_000_000) throw new Error();
-      const aoi = buildAoiFromGeoJSON(JSON.parse(await file.text()), { source: 'upload', label: file.name.replace(/\.(geo)?json$/i, '') });
+      const text = await file.text();
+      if (!activeRef.current || generation !== uploadScope.current.generation) return;
+      const aoi = buildAoiFromGeoJSON(JSON.parse(text), { source: 'upload', label: file.name.replace(/\.(geo)?json$/i, '') });
       if (!aoi) throw new Error();
       setSelectedAOI(aoi); setDraftAOI(null); setGridClickEnabled(false); setNotice('Study area uploaded. Apply a preset to load it.');
-    } catch { setNotice('Upload a valid polygon GeoJSON file smaller than 2 MB.'); }
+    } catch { if (activeRef.current && generation === uploadScope.current.generation) setNotice('Upload a valid polygon GeoJSON file smaller than 2 MB.'); }
   };
   const renderList = (entries, title) => <section className="preset-list"><h3>{title}</h3>{entries.map(preset => <div key={preset.key} className={`preset-catalog-item${selected === preset.key ? ' is-selected' : ''}`}>
     <button type="button" className="preset-select" aria-expanded={selected === preset.key} onClick={() => selectPreset(preset.key)}>
       <Layers size={16} /><span><strong>{preset.title}</strong><small>{preset.model ? 'Model-based index' : preset.detailText || 'JRC · 1984–2021'}</small></span><ChevronRight size={15} />
     </button>
     {selected === preset.key ? <PresetParameterForm key={`${preset.key}-${editing?.id || 'new'}`} preset={preset} initialParams={editing?.params}
-      editing={Boolean(editing)} disabled={!selectedAOI} onApply={apply} onCancel={editing ? () => setEditing(null) : undefined} /> : null}
+      editing={Boolean(editing)} disabled={!selectedAOI || isAoiEditing} onApply={apply} onCancel={editing ? () => setEditing(null) : undefined} /> : null}
   </div>)}</section>;
   const matches = preset => `${preset.title} ${preset.infoText}`.toLowerCase().includes(query.toLowerCase());
   return <div className={`basic-preset-workspace${collapsed ? ' library-collapsed' : ''}`}>
@@ -90,7 +88,14 @@ export default function BasicLayerWorkspace() {
               <button type="button" onClick={() => upload.current.click()}>Upload GeoJSON</button></div>
             <input ref={upload} type="file" accept=".json,.geojson,application/geo+json,application/json" aria-label="Upload study area" hidden onChange={loadFile} />
             <small>Draw a polygon with the map drawing tool, then use it below.</small>
-            {draftAOI ? <button type="button" className="preset-use-drawing" onClick={() => { setSelectedAOI(draftAOI); setDraftAOI(null); setGridClickEnabled(false); setNotice('Drawing applied as the study area.'); }}>Use drawn study area</button> : null}
+            <button type="button" disabled={!ready || isAoiEditing} onClick={startAoiDraw}>Draw area</button>
+            {draftAOI ? <button type="button" className="preset-use-drawing" onClick={() => { applyDraftAoi(); setGridClickEnabled(false); setNotice('Drawing applied as the study area.'); }}>Use drawn study area</button> : null}
+            {isAoiEditing ? <button type="button" onClick={cancelDraftAoi}>Cancel area editing</button> : null}
+            <AreaControls current={selectedAOI} scopeKey={active ? 'basic' : 'inactive:basic'} disabled={!active || isAoiEditing}
+              onUse={aoi => { setSelectedAOI(aoi); setDraftAOI(null); setAoiEditorMode('idle'); setGridClickEnabled(false); }}
+              onEdit={startAoiEdit} onClear={clearAoiState} outlineVisible={aoiOutlineVisible} onToggleOutline={toggleAoiOutline}
+              onLocate={aoi => service?.scope('basic:presets').setView({ bounds: [aoi.bounds.west,aoi.bounds.south,aoi.bounds.east,aoi.bounds.north] })} />
+            {aoiStorageError ? <p role="alert">{aoiStorageError}</p> : null}
           </section>
           {notice ? <p className="preset-notice" role="status">{notice}</p> : null}
           {renderList(presetLayerCatalog.filter(preset => preset.theme === theme && matches(preset)), `${labels[theme]} presets`)}

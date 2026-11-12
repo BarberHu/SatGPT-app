@@ -20,7 +20,7 @@ function presentRun(source, answer, busy, finalText) {
 export function chatViewModel(messages, task, answer) {
   const items = messages.map(message => ({
     id: message.id, role: message.role,
-    analysisRegion: message.analysis_region,
+    analysisRegion: message.analysis_region, analysisAoi: message.analysis_aoi,
     hasScope: Object.hasOwn(message, 'analysis_region'),
     ...presentRun(message, null, false, message.content || ''),
     failed: message.status === 'failed', streaming: false,

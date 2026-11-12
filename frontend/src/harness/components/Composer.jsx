@@ -4,7 +4,7 @@ import { Button } from '../ui/button';
 import AttachmentList from './AttachmentList';
 import { regionPresentation } from '../map/regionPresentation';
 
-export default function Composer({ value, onChange, onSend, onStop, busy, pending, stopping, stopDisabled, disabled, mapReady, region, onEditRegion }) {
+export default function Composer({ value, onChange, onSend, onStop, busy, pending, stopping, stopDisabled, disabled, mapReady, region, onEditRegion, areaControls }) {
   const input = useRef(null);
   const area = regionPresentation(region, mapReady);
   const sendingDisabled = disabled || region?.editing;
@@ -39,9 +39,10 @@ export default function Composer({ value, onChange, onSend, onStop, busy, pendin
                 disabled={!region?.ready || pending} aria-label="Edit analysis area" title="Edit analysis area"><Pencil size={13} aria-hidden="true" /></button> : null}
               <button type="button" className="agent-region-action" onClick={region?.editing ? region.cancel : region?.clear}
                 disabled={pending} aria-label={region?.editing ? 'Cancel area editing' : 'Clear analysis area'}
-                title={region?.editing ? 'Cancel area editing' : 'Clear analysis area'}><X size={14} aria-hidden="true" /></button>
+                title={region?.editing ? 'Cancel area editing' : 'Remove from this analysis; saved areas are kept'}><X size={14} aria-hidden="true" /></button>
             </div>}
           </div>
+          {areaControls}
           {area.hint ? <p className="agent-region-hint" role={region?.error ? 'alert' : undefined}>{area.hint}</p> : null}
         </div>
         {busy ? <Button type="button" size="icon" className="agent-send" onClick={onStop}
