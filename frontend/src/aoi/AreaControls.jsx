@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useAoiLibrary } from './AoiLibraryContext';
 import { aoiSnapshot, exportAoiGeoJSON, newAoiId, snapshotFromRecord } from './snapshot.js';
@@ -6,11 +6,14 @@ import { formatGeometryArea, geometryAreaSquareMeters } from '../utils/geometryA
 import './areas.css';
 
 export default function AreaControls({ current, scopeKey, disabled, onUse, onEdit, onLocate, onClear,
-  outlineVisible = true, onToggleOutline, historyOnly = false, hideEditAction = false }) {
+  outlineVisible = true, onToggleOutline, historyOnly = false, hideEditAction = false, compact = false }) {
   const library = useAoiLibrary();
   const [view, setView] = useState(null), [draft, setDraft] = useState(null), [label, setLabel] = useState('');
   const [target, setTarget] = useState(null), [search, setSearch] = useState(''), [deleted, setDeleted] = useState(false);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  const [secondaryOpen, setSecondaryOpen] = useState(false);
+  const secondaryId = useId();
+  useEffect(() => { setSecondaryOpen(false); }, [scopeKey, current?.id]);
   const saveId = useRef(null), operation = useRef(0), scope = useRef(scopeKey);
   scope.current = scopeKey;
   useEffect(() => { operation.current++; setView(null); setBusy(false); setError(''); setNotice(''); }, [scopeKey]);
@@ -62,16 +65,20 @@ export default function AreaControls({ current, scopeKey, disabled, onUse, onEdi
     {current ? <button type="button" disabled={disabled || !library.ready} onClick={() => startSave(current,
       historyOnly ? null : current.edit_ref || current.aoi_ref)}>{historyOnly ? 'Save this area' : 'Save area'}</button> : null}
     {!historyOnly && !hideEditAction && current && onEdit ? <button type="button" disabled={disabled} onClick={() => { try { onEdit(current); } catch (e) { setNotice(e.message); } }}>Edit area</button> : null}
-    {!historyOnly && current && onToggleOutline ? <button type="button" disabled={disabled} onClick={onToggleOutline}>{outlineVisible ? 'Hide boundary' : 'Show boundary'}</button> : null}
-    {!historyOnly && current && onClear ? <button type="button" disabled={disabled} onClick={onClear}>Remove selection</button> : null}
+    {compact && !historyOnly && current && (onToggleOutline || onClear) ? <button type="button" disabled={disabled}
+      aria-label="More area actions" title="More area actions" aria-expanded={secondaryOpen} aria-controls={secondaryId} onClick={() => setSecondaryOpen(open => !open)}>More</button> : null}
+    <div id={secondaryId} className={`aoi-secondary-actions${compact ? ' is-compact' : ''}`} hidden={compact && !secondaryOpen}>
+      {!historyOnly && current && onToggleOutline ? <button type="button" disabled={disabled} onClick={onToggleOutline}>{outlineVisible ? 'Hide boundary' : 'Show boundary'}</button> : null}
+      {!historyOnly && current && onClear ? <button type="button" disabled={disabled} onClick={onClear}>Remove selection</button> : null}
+    </div>
     {notice ? <small role="status">{notice}</small> : null}
     <Dialog.Root open={Boolean(view)} onOpenChange={open => { if (!open) { operation.current++; setView(null); setBusy(false); } }}>
       <Dialog.Portal><Dialog.Overlay className="aoi-dialog-overlay" /><Dialog.Content className="aoi-dialog">
-        <Dialog.Title>{view === 'save' ? 'Save area' : 'Saved areas'}</Dialog.Title>
+        <div className="aoi-dialog-header"><Dialog.Title>{view === 'save' ? 'Save area' : 'Saved areas'}</Dialog.Title>
         <Dialog.Description>Saved in this browser for this site. Export GeoJSON to keep a backup or move an area to another device.</Dialog.Description>
-        <Dialog.Close className="aoi-close" aria-label="Close saved areas">×</Dialog.Close>
+        <Dialog.Close className="aoi-close" aria-label="Close saved areas">×</Dialog.Close></div>
         {error || library.error ? <p role="alert">{error || library.error}</p> : null}
-        {view === 'save' ? <form onSubmit={event => { event.preventDefault(); event.stopPropagation(); save(false); }}>
+        {view === 'save' ? <form className="aoi-save-form" onSubmit={event => { event.preventDefault(); event.stopPropagation(); save(false); }}>
           <label>Area name<input autoFocus value={label} maxLength={100} onChange={e => setLabel(e.target.value)} /></label>
           <p>{draft && formatGeometryArea(geometryAreaSquareMeters(draft.geojson.geometry))} · {draft?.source}</p>
           {duplicate ? <p>The same geometry is already in Saved areas. You can keep a separate named copy.</p> : null}

@@ -1,0 +1,16 @@
+.workspace-layer-panel { position: absolute; z-index: 7; top: 16px; right: 56px; bottom: auto; width: min(360px, calc(100% - 72px)); max-width: calc(100% - 72px); max-height: min(46%, 380px); display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; box-sizing: border-box; border: 1px solid var(--satgpt-ui-border, #dce3ed); border-radius: 12px; background: #fffffff7; box-shadow: 0 5px 24px #2734491a; color: var(--satgpt-ui-heading, #303b50); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; container-type: inline-size; }
+.workspace-layer-panel.is-collapsed { width: 192px; }
+.workspace-layer-panel.is-editing { visibility: hidden; pointer-events: none; }
+.workspace-layer-panel > .workspace-layer-heading { display: flex; align-items: center; flex: none; gap: 8px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 0; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.workspace-layer-heading strong { font-size: 13px; font-weight: 600; }
+.workspace-layer-heading > svg:first-child { color: var(--satgpt-ui-accent, #5574b5); flex: none; }
+.workspace-layer-heading > svg:last-child { margin-left: auto; flex: none; transition: transform .15s; }
+.is-collapsed > .workspace-layer-heading > svg:last-child { transform: rotate(180deg); }
+.workspace-layer-heading:disabled { cursor: default; opacity: .65; }
+.workspace-layer-heading:focus-visible { outline: 2px solid var(--satgpt-ui-accent, #5574b5); outline-offset: -3px; }
+.workspace-layer-count { min-width: 20px; padding: 0 5px; border-radius: 12px; border: 1px solid #dce3ed; background: #f4f7fc; color: #64738b; font-size: 11px; text-align: center; }
+.workspace-layer-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 10px 10px; }
+.workspace-layer-scroll > p { margin: 2px 2px 4px; color: var(--satgpt-ui-muted, #68788c); font-size: 12px; }
+.workspace-layer-panel .agent-layer-no-preview > span { display: none; }
+@media (max-width: 960px) { .workspace-layer-panel { max-height: min(42%, 360px); } }
+@media (prefers-reduced-motion: reduce) { .workspace-layer-heading > svg { transition: none; } }

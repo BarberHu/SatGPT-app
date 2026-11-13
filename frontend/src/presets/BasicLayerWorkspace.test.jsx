@@ -32,7 +32,7 @@ test('loads only on Apply, retains mixed themes, deduplicates and updates an exp
  expect(node.textContent).toContain('Verified source');expect(node.textContent).toContain('2021');
  await act(async()=>state.context.setSelectedAOI(buildAoiFromBounds({west:101,south:10,east:101.1,north:10.1})));
  expect(node.querySelectorAll('.preset-stale')).toHaveLength(2);expect(state.request).toHaveBeenCalledTimes(2);
- const detail=node.querySelector('.preset-layer-menu');detail.open=true;
+ await click('Details for Slope Steepness');
  await click('Edit / update study area');await click('Apply to this layer');await flush();
  expect(state.request).toHaveBeenCalledTimes(3);expect(node.querySelectorAll('.preset-layer-card')).toHaveLength(2);
  expect(node.querySelectorAll('.preset-stale')).toHaveLength(1);
@@ -43,6 +43,7 @@ test('per-layer visibility, opacity, ordering, focus and removal use the shared 
  await click('Landslide');await click('Slope Steepness');await click('Load layer');await flush();
  await act(async()=>node.querySelector('[aria-label="Hide Slope Steepness"]').click());
  expect(state.scope.setVisibility).toHaveBeenCalledWith(expect.any(String),false);
+ await click('Details for Slope Steepness');
  const slider=node.querySelector('[aria-label="Opacity for Slope Steepness"]');
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(slider,'0.35');slider.dispatchEvent(new Event('input',{bubbles:true}));});
  expect(state.scope.setOpacity).toHaveBeenCalledWith(expect.any(String),.35);
@@ -91,4 +92,9 @@ test('a delayed upload cannot replace the selection after leaving Basic or choos
  const selected=state.context.selectedAOI;
  await act(async()=>finish(JSON.stringify(geometry)));await flush();
  expect(state.context.selectedAOI).toBe(selected);expect(state.request).not.toHaveBeenCalled();
+ await start();await act(async()=>state.context.startAoiEdit());
+ await act(async()=>finish(JSON.stringify(geometry)));await flush();
+ expect(state.context.selectedAOI).toBe(selected);
+ expect([...node.querySelectorAll('button')].find(button=>button.textContent==='Use current map extent').disabled).toBe(true);
+ await act(async()=>state.context.cancelDraftAoi());expect(state.context.selectedAOI).toBe(selected);
 });

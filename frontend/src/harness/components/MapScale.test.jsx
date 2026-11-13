@@ -35,3 +35,14 @@ test('ruler measures at its actual map position, updates on map moves and panel 
     rect.mockRestore();vi.unstubAllGlobals();node.remove();delete globalThis.IS_REACT_ACT_ENVIRONMENT;
   }
 });
+
+test('a hidden map exposes no ruler or stale accessible distance', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const node = document.createElement('div'); document.body.appendChild(node); const root = createRoot(node);
+  const subscribeViewport = vi.fn(), measureGroundDistance = vi.fn();
+  try {
+    await act(async () => root.render(<MapScale map={{ ready: true, visible: false, container: { current: node }, subscribeViewport, measureGroundDistance }} />));
+    expect(node.childElementCount).toBe(0);
+    expect(subscribeViewport).not.toHaveBeenCalled(); expect(measureGroundDistance).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); node.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT; }
+});

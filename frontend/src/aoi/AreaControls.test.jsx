@@ -117,3 +117,14 @@ test('invalid legacy data remains visibly reported after opening or refreshing t
   expect(document.querySelector('[role=alert]').textContent).toContain('Original data has been kept');
   expect(state.library.ready).toBe(true);
 });
+
+test('compact area actions require an explicit expansion and keep boundary hiding separate from clearing',async()=>{
+  const onClear=vi.fn(),onToggleOutline=vi.fn();
+  const current=aoiSnapshot({geojson:geometry,label:'Compact basin'});
+  await act(async()=>root.render(<AoiLibraryProvider><AreaControls compact current={current} scopeKey="basic"
+    onClear={onClear} onToggleOutline={onToggleOutline}/></AoiLibraryProvider>));await flush();await flush();
+  const group=document.querySelector('.aoi-secondary-actions');expect(group.hidden).toBe(true);
+  await click('More area actions');expect(group.hidden).toBe(false);
+  await click('Hide boundary');expect(onToggleOutline).toHaveBeenCalledTimes(1);expect(onClear).not.toHaveBeenCalled();
+  await click('Remove selection');expect(onClear).toHaveBeenCalledTimes(1);
+});

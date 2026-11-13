@@ -8,7 +8,7 @@ import CodeBlock from './CodeBlock';
 export function Thumbnail({ layer, basic = false }) {
   const [failedUrl, setFailedUrl] = useState(null);
   const url = layer.thumbnail?.url;
-  if (!url || failedUrl === url) return <div className="agent-layer-thumbnail agent-layer-no-preview" aria-label="Static preview unavailable">
+  if (!url || failedUrl === url) return <div className="agent-layer-thumbnail agent-layer-no-preview" aria-label="Static preview unavailable" title="Static preview unavailable">
     <ImageOff size={19} strokeWidth={1.4} /><span>{url ? 'Preview unavailable' : 'No preview'}</span>
   </div>;
   return <Dialog><DialogTrigger asChild>
@@ -29,6 +29,10 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
   const created = Date.parse(metadata.createdAt);
   const reload = layer.reload || {};
   const unavailable = reload.tiles === 'error';
+  const reloadAction = <Button type="button" variant="ghost" size="sm" onClick={() => onReload?.(layer)} disabled={!layer.reloadable || reload.reloading || !onReload}
+    aria-label={`Reload ${layer.name}`} title={layer.reloadable ? 'Run the original code with its saved analysis area' : layer.reloadUnavailableReason || 'Original generation parameters are unavailable'}>
+    {reload.reloading ? <Loader2 size={14} className="agent-spin" /> : <RotateCw size={14} />} {reload.reloading ? 'Reloading' : 'Reload'}</Button>;
+  const urgentReload = unavailable || reload.reloading || Boolean(reload.error);
   return <article className={`agent-map-layer${layer.visible ? '' : ' is-hidden'}`} aria-label={`Layer ${layer.name}`}>
     <div className="agent-layer-heading">
       <Thumbnail layer={layer} />
@@ -44,12 +48,10 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
       <Button type="button" variant="ghost" size="icon" className="agent-layer-more" aria-label={`Layer details ${layer.name}`}
         aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}><MoreVertical size={19} /></Button>
     </div>
-    <div className="agent-layer-reload-bar">
+    {urgentReload ? <div className="agent-layer-reload-bar">
       <span role="status">{reload.reloading ? 'Reloading from Earth Engine…' : unavailable ? 'Layer unavailable or expired' : layer.reloadedAt ? 'Layer reloaded' : ''}</span>
-      <Button type="button" variant="ghost" size="sm" onClick={() => onReload?.(layer)} disabled={!layer.reloadable || reload.reloading || !onReload}
-        aria-label={`Reload ${layer.name}`} title={layer.reloadable ? 'Run the original code with its saved analysis area' : layer.reloadUnavailableReason || 'Original generation parameters are unavailable'}>
-        {reload.reloading ? <Loader2 size={14} className="agent-spin" /> : <RotateCw size={14} />} {reload.reloading ? 'Reloading' : 'Reload'}</Button>
-    </div>
+      {reloadAction}
+    </div> : null}
     {reload.error ? <p className="agent-layer-reload-error" role="alert">{reload.error}</p> : null}
     {expanded ? <div className="agent-layer-details" id={detailsId}>
       <dl><dt>Data source</dt><dd>{metadata.source || 'Google Earth Engine'}</dd>
@@ -66,6 +68,7 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
       </details> : <p>Generation code is unavailable for this legacy layer.</p>}
       {!layer.reloadable ? <p>{layer.reloadUnavailableReason || 'Original generation parameters are unavailable. Run the original analysis again.'}</p> : null}
       <div className="agent-layer-actions">
+        {!urgentReload ? reloadAction : null}
         {layer.bounds ? <Button type="button" variant="ghost" size="sm" aria-label={`Zoom to ${layer.name}`} onClick={() => onFocus(layer)}><LocateFixed size={14} />Zoom to layer</Button> : null}
         <Button type="button" variant="ghost" size="sm" className="agent-layer-remove" aria-label={`Remove ${layer.name}`} onClick={() => onRemove(layer.id)}><Trash2 size={14} />Remove layer</Button>
       </div>

@@ -13,13 +13,18 @@ function readActivity() {
 }
 
 /** Only task IDs and read markers are stored; conversation content stays on the server. */
-export function useConversationActivity(rows, conversation, visible) {
+export function useConversationActivity(rows, conversation, visible, deletedId = null) {
   const [activity, setActivity] = useState(readActivity);
   useEffect(() => {
     setActivity(previous => {
       const next = { ...previous };
       let changed = false;
+      if (deletedId && Object.hasOwn(next, deletedId)) {
+        delete next[deletedId];
+        changed = true;
+      }
       for (const row of rows) {
+        if (row.id === deletedId) continue;
         const latest = row.latest_task || (row.active_task ? { id: row.active_task, status: row.task_status } : null);
         const old = previous[row.id];
         let item = old;
@@ -39,7 +44,7 @@ export function useConversationActivity(rows, conversation, visible) {
       }
       return changed ? next : previous;
     });
-  }, [rows, conversation, visible]);
+  }, [rows, conversation, visible, deletedId]);
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(activity)); }
     catch { /* Read indicators still work when browser storage is unavailable. */ }

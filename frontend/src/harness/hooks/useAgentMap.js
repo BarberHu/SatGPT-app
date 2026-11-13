@@ -66,6 +66,12 @@ export function useAgentMap(conversationId, messages) {
     }
   }, [shared.service, shared.ready, conversationId, messages]);
   const prepareConversationChange = () => { focusIntent.current = shared.captureViewIntent('agent', true); };
+  const forgetConversation = id => {
+    const scope = shared.service?.scope(`agent:${id}`);
+    for (const layer of scope?.listLayers() || []) scope.removeLayer(layer.id);
+    try { localStorage.removeItem(choicesKey(id)); }
+    catch { /* Deletion still succeeds when browser storage is unavailable. */ }
+  };
   const persist = () => {
     try { localStorage.setItem(choicesKey(choices.current.id), JSON.stringify({
       visibility: choices.current.visibility, removed: [...choices.current.removed],
@@ -93,5 +99,5 @@ export function useAgentMap(conversationId, messages) {
   };
   const bounds = useCallback(() => shared.service?.getCurrentView().bounds, [shared.service]);
   return { ready: shared.ready, layers: layers.map(layer => ({ ...layer, reload: layerStatus[`${conversationId}:${layer.id}`] || {} })), error, configured: shared.configured,
-    toggleLayer, removeLayer, focusLayer, reloadLayer, bounds, prepareConversationChange };
+    toggleLayer, removeLayer, focusLayer, reloadLayer, bounds, prepareConversationChange, forgetConversation };
 }

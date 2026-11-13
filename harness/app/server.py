@@ -76,6 +76,20 @@ def list_conversations(request: Request):
     return {'conversations': request.app.state.controller.list_conversations()}
 
 
+@router.delete('/api/harness/conversations/{conversation_id}')
+def delete_conversation(conversation_id: str, request: Request):
+    try:
+        return request.app.state.controller.delete_conversation(conversation_id)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, 'Unable to delete the conversation. Please try again.') from exc
+
+
 @router.post('/api/harness/conversations/{conversation_id}/activate')
 def activate_conversation(conversation_id: str, request: Request):
     try:

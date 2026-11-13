@@ -54,12 +54,13 @@ test('late reloads stay in the original hidden conversation and cannot resurrect
 test('layer card offers reload with loading/error states and disables unavailable legacy replay',()=>{
   const render=layer=>renderToStaticMarkup(React.createElement(MapLayerCard,{layer,onToggle:()=>{},onFocus:()=>{},onRemove:()=>{},onReload:()=>{}}));
   const base={...spec('one'),visible:true,metadata:{},visualization:{},legend:{type:'unavailable'}};
-  assert.match(render(base),/aria-label="Reload Layer one"/);
+  assert.match(render(base),/aria-label="Layer details Layer one"/);
+  assert.doesNotMatch(render(base),/aria-label="Reload Layer one"/);
   const loading=render({...base,reload:{reloading:true}});
   assert.match(loading,/Reloading from Earth Engine/); assert.match(loading,/disabled=""/);
   const failed=render({...base,reload:{tiles:'error',error:'GEE unavailable'}});
   assert.match(failed,/Layer unavailable or expired/); assert.match(failed,/role="alert"/);
   assert.match(failed,/GEE unavailable/);
-  const legacy=render({...base,reloadable:false,reloadUnavailableReason:'Missing original scope'});
+  const legacy=render({...base,reload:{tiles:'error'},reloadable:false,reloadUnavailableReason:'Missing original scope'});
   assert.match(legacy,/title="Missing original scope"/); assert.match(legacy,/disabled=""/);
 });

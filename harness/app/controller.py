@@ -265,6 +265,31 @@ class TaskController:
                                'latest_task': {'id': latest['id'], 'status': latest['status']} if latest else None})
             return sorted(result, key=lambda item: (item['updated_at'], item['current']), reverse=True)
 
+    def delete_conversation(self, conversation_id):
+        with self.conversation_lock, self.lock:
+            self._conversation_messages(conversation_id)  # Validate ID and existence before touching files.
+            if (any(job['conversation_id'] == conversation_id and job['status'] in {'queued', 'running'}
+                    for job in self.jobs.values())
+                    or any(cid == conversation_id for cid, _ in self._layer_reloads)):
+                raise RuntimeError('This conversation is busy. Wait for its task or layer reload to finish before deleting it.')
+            target = self.archive_dir / f'{conversation_id}.json'
+            if conversation_id == self.conversation_id:
+                # Persist a fresh current session without archiving the deleted one.
+                previous_id, previous_messages = self.conversation_id, self.messages
+                self.conversation_id = f"webgis-{uuid.uuid4().hex[:16]}"
+                self.messages = []
+                try:
+                    self._save_messages()
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    self.conversation_id, self.messages = previous_id, previous_messages
+                    self._save_messages()
+                    raise
+            else:
+                target.unlink()
+            return {'deleted_id': conversation_id, 'conversation': self.conversation(),
+                    'conversations': self.list_conversations()}
+
     def activate_conversation(self, conversation_id):
         if not re.fullmatch(r'webgis-[A-Za-z0-9_-]{1,80}', conversation_id):
             raise ValueError('Invalid conversation ID')

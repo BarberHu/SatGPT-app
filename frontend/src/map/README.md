@@ -43,3 +43,28 @@ The repository reuses the existing `satgpt-business-layers` database and `layers
 On first load, migration reads all legacy IndexedDB namespaces and the old Basic and per-conversation Agent v1 selection keys. Every valid source is copied with its own atomic migration marker. The original records and keys remain untouched; retries cannot resurrect an edited or deleted import. Invalid sources are reported and retained for recovery. The library does not reconstruct the original shape of data that had already been deleted before this change. Legacy duplicates may appear as separate recovered records to avoid discarding distinct source entries.
 
 `aoi/repository.test.js` uses fake-indexeddb to exercise actual IndexedDB transactions, reopen, migration, stale writes and aborts. `aoi/AreaControls.test.jsx` covers cross-mode adoption, rename/delete/restore, errors, delayed saves, import/export and chat-form isolation. These are automated simulated checks, separate from browser and real GEE validation.
+
+## Desktop overlay layout
+
+`LayerPanel` is the common presentation shell for Basic and Agent Current layers. Each mode still owns its records and callbacks. The panel stays at the map's upper right (16 px from the top, 56 px from the right to clear map tools), up to 360 px wide and 46% of the map-slot height (capped at 380 px). Its width also respects the map's available space. Its list scrolls independently. Collapsing the panel retains the mounted cards and their details; AOI editing temporarily hides the panel without changing the user's expansion preference or layer visibility. Basic questions has lower layout priority: it is centered below the actual Basic map slot, adjusts when the library collapses, and scrolls within a height bound that leaves the upper layer panel clear. Opening questions never suppresses Current layers.
+
+At desktop widths above 960 px, Basic's viewport excludes the visible library width and expands again when the library collapses. CSS defines the slot; the existing shared observer resizes the single map without a fit/focus request. The shared ruler is at the actual map's lower right without a white background, rounded plate or shadow; it measures at its current position and is absent when the map slot is hidden. It does not have a second mode-specific instance.
+
+Basic's selected-area summary keeps save/reuse actions visible. Selection and drawing methods expand on demand and remain expanded while no selection exists or an edit is active. Boundary visibility and removal are in More area actions. Saved-area dialogs keep their header and tools outside the scrolling list. Agent keeps its existing Composer entry and displays the selected name in the map context. Current-layer cards use compact legends; opacity and full metadata stay in Basic details. Normal Agent replay is in details, while tile failure, replay failure and running replay expose an inline action/status. All replay requests still use the original layer recipe.
+
+The desktop pass does not redesign mobile navigation or introduce account synchronization, storage migrations, algorithms or backend API changes. Use browser geometry/hit-testing in addition to unit tests when checking overlay overlap and click interception; DOM-only test environments do not provide real layout measurements.
+
+## Pending verification before remote repository synchronization
+
+For the 2026-11-13 upper-right layout adjustment, the user requested necessary checks only. Full verification is a gate before synchronizing/pushing to the remote repository, not before a local Git commit. This task does not authorize either action.
+
+Completed for this adjustment: 9 targeted LayerPanel/MapScale/ChatBox tests and a production build. The old test for question-triggered layer suspension was retired with that behavior; AOI edit preference/state retention remains covered. A single desktop page check covers Basic/Agent positioning and Basic question priority; backend/model/GEE services are not started for this smoke check. Per-run evidence and the original working-file baseline are in `outputs/layout-top-right-20261113/` (ignored artifacts).
+
+Before remote synchronization, verify against the final diff and close or explicitly report these pending items:
+- Full frontend regressions and frontend Node integration tests.
+- Existing Harness/backend Python suites and Node tool/gateway integration tests; production build from the final source state.
+- Other desktop sizes, narrow map splits, 0/1/3/many layers, long titles, continuous/categorical/RGB legends, long question answers, error feedback and control hit-testing.
+- AOI draw/edit/confirm/cancel, save/reuse, mode switching, and existing browser data/history compatibility.
+- Harness conversations, stopping, session changes, layer failures and real GEE replay using original snapshots, in isolated test sessions. Report missing service prerequisites; simulated checks do not replace real-service checks.
+
+Keep each item marked pending until actually checked. Earlier task results are historical evidence and do not certify the final remote-sync version. Mobile redesign remains outside this desktop adjustment.

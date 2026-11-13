@@ -65,3 +65,24 @@ test('card has real static preview, metadata, legend, visibility/details/locate/
     expect(node.querySelector('[aria-label="Static preview unavailable"]').textContent).toContain('Preview unavailable');
   } finally { await act(async () => root.unmount());node.remove();delete globalThis.IS_REACT_ACT_ENVIRONMENT; }
 });
+
+test('normal reload lives in details while unavailable and running layers keep a direct, guarded action', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const node = document.createElement('div'); document.body.appendChild(node); const root = createRoot(node);
+  const onReload = vi.fn(), layer = { ...normalizeLayer(raw), reloadable: true };
+  const render = reload => root.render(<MapLayerCard layer={{ ...layer, reload }} onReload={onReload} />);
+  try {
+    await act(async () => render({}));
+    expect(node.querySelector('[aria-label="Reload 地形高程"]')).toBeNull();
+    await act(async () => node.querySelector('[aria-label="Layer details 地形高程"]').click());
+    await act(async () => node.querySelector('[aria-label="Reload 地形高程"]').click());
+    expect(onReload.mock.calls[0][0].id).toBe(layer.id);
+    await act(async () => node.querySelector('[aria-label="Layer details 地形高程"]').click());
+    await act(async () => render({ tiles: 'error' }));
+    expect(node.textContent).toContain('Layer unavailable or expired');
+    expect(node.querySelector('[aria-label="Reload 地形高程"]').disabled).toBe(false);
+    await act(async () => render({ reloading: true }));
+    expect(node.querySelector('[aria-label="Reload 地形高程"]').disabled).toBe(true);
+    expect(node.querySelectorAll('[aria-label="Reload 地形高程"]')).toHaveLength(1);
+  } finally { await act(async () => root.unmount()); node.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT; }
+});

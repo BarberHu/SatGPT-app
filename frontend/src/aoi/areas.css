@@ -1,15 +1,15 @@
 .aoi-controls { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; align-items: center; }
-.aoi-controls > button { border: 1px solid #d8dfeb; border-radius: 5px; padding: 4px 7px; background: #fff; color: #405170; font: inherit; font-size: 11px; cursor: pointer; }
+.aoi-controls button { border: 1px solid #d8dfeb; border-radius: 5px; min-height: 30px; padding: 4px 7px; background: #fff; color: #405170; font: inherit; font-size: 11px; cursor: pointer; }
 .aoi-controls button:disabled, .aoi-dialog button:disabled { opacity: .5; cursor: default; }
 .aoi-controls > small { flex-basis: 100%; color: #566579; font-size: 11px; }
 .aoi-dialog-overlay { position: fixed; inset: 0; background: #15233b66; z-index: 140; pointer-events: auto; }
-.aoi-dialog { box-sizing: border-box; position: fixed; z-index: 141; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(680px,calc(100vw - 28px)); max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; border-radius: 14px; background: #fff; color: #26354c; box-shadow: 0 24px 90px #14243b55; font: 13px/1.55 system-ui,sans-serif; pointer-events: auto; }
+.aoi-dialog { box-sizing: border-box; position: fixed; z-index: 141; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(680px,calc(100vw - 28px)); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; overflow: hidden; padding: 24px; border-radius: 14px; background: #fff; color: #26354c; box-shadow: 0 24px 90px #14243b55; font: 13px/1.55 system-ui,sans-serif; pointer-events: auto; }
 .aoi-dialog h2 { font-size: 20px; margin: 0 30px 8px 0; }
 .aoi-dialog [role=alert] { padding: 9px; border-radius: 6px; background: #fff0eb; color: #904320; }
 .aoi-dialog input:not([type=checkbox]):not([type=file]) { box-sizing: border-box; display: block; width: 100%; padding: 9px; border: 1px solid #cbd4e1; border-radius: 6px; font: inherit; }
 .aoi-dialog button, .aoi-import { padding: 6px 9px; border: 1px solid #d2dbe8; border-radius: 6px; background: #f7f9fc; color: #304c82; font: inherit; cursor: pointer; }
 .aoi-dialog .aoi-close { position: absolute; top: 12px; right: 12px; font-size: 20px; border: 0; background: transparent; }
-.aoi-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 16px 0; }
+.aoi-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 14px 0; }
 .aoi-toolbar > input { flex-basis: 100%; }
 .aoi-toolbar label { display: flex; gap: 6px; align-items: center; }
 .aoi-import { position: relative; overflow: hidden; }
@@ -18,3 +18,10 @@
 .aoi-list strong, .aoi-list small { display: block; overflow-wrap: anywhere; }
 .aoi-list small { color: #68788c; margin: 3px 0 9px; }
 .aoi-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.aoi-dialog-header, .aoi-toolbar, .aoi-dialog > [role=alert] { flex: none; }
+.aoi-dialog-header p { margin: 0; }
+.aoi-list, .aoi-save-form { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.aoi-list { flex: 1 1 auto; }
+.aoi-secondary-actions { display: contents; }
+.aoi-secondary-actions.is-compact { display: flex; flex-basis: 100%; gap: 5px; flex-wrap: wrap; }
+.aoi-controls button:focus-visible, .aoi-dialog button:focus-visible { outline: 2px solid var(--satgpt-ui-accent, #5574b5); outline-offset: 2px; }

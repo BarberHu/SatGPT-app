@@ -13,6 +13,8 @@ export function useAgentChat({ visible = true } = {}) {
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deletedId, setDeletedId] = useState(null);
   const [error, setError] = useState('');
   const source = useRef(null);
   const generation = useRef(0);
@@ -22,6 +24,7 @@ export function useAgentChat({ visible = true } = {}) {
   const alive = useRef(false);
   const action = useRef(false);
   const listRequest = useRef(0);
+  const deleteRequest = useRef(false);
 
   const refreshList = useCallback(async (signal) => {
     const version = ++listRequest.current;
@@ -97,6 +100,7 @@ export function useAgentChat({ visible = true } = {}) {
   }, [load, refreshList]);
 
   const changeConversation = useCallback(async (id) => {
+    if (deleteRequest.current) return false;
     if (id && id === conversationId.current && !loading) return true;
     const previousId = conversationId.current;
     setLoading(true);
@@ -136,8 +140,42 @@ export function useAgentChat({ visible = true } = {}) {
     }
   }, [load, loading, refreshList]);
 
+  const deleteConversation = useCallback(async id => {
+    if (deleteRequest.current || loading || pending || stopping || action.current) return false;
+    deleteRequest.current = true;
+    setDeleting(true);
+    setError('');
+    const epoch = generation.current;
+    try {
+      const data = await chatApi.remove(id, request.current?.signal);
+      if (!alive.current || epoch !== generation.current) return false;
+      ++listRequest.current; // Ignore list requests that started before this deletion.
+      setConversations(data.conversations);
+      setDeletedId(id);
+      if (id === conversationId.current) {
+        ++generation.current;
+        request.current?.abort();
+        request.current = new AbortController();
+        source.current?.close();
+        source.current = null;
+        conversationId.current = data.conversation.conversation_id;
+        setConversation(data.conversation);
+        setTask(null);
+        setAnswer(null);
+        setReconnecting(false);
+      }
+      return true;
+    } catch (cause) {
+      if (alive.current && epoch === generation.current && cause.name !== 'AbortError') setError(cause.message);
+      return false;
+    } finally {
+      deleteRequest.current = false;
+      if (alive.current) setDeleting(false);
+    }
+  }, [loading, pending, stopping]);
+
   const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null) => {
-    if (action.current || pending || loading || ['queued', 'running'].includes(task?.status)) return false;
+    if (deleteRequest.current || action.current || pending || loading || ['queued', 'running'].includes(task?.status)) return false;
     action.current = true;
     setPending(true);
     setError('');
@@ -215,8 +253,8 @@ export function useAgentChat({ visible = true } = {}) {
     let timer = setTimeout(update, 3000);
     return () => { disposed = true; clearTimeout(timer); };
   }, [hasActiveTasks, refreshList]);
-  const conversationsWithActivity = useConversationActivity(sidebarConversations, conversation, visible && !loading);
+  const conversationsWithActivity = useConversationActivity(sidebarConversations, conversation, visible && !loading, deletedId);
   return { ...view, conversationId: conversation.conversation_id, messages: conversation.messages,
-    conversations: conversationsWithActivity, loading, pending, stopping, reconnecting, error, clearError: () => setError(''),
-    changeConversation, send, stop };
+    conversations: conversationsWithActivity, loading, pending, stopping, deleting, reconnecting, error, clearError: () => setError(''),
+    changeConversation, deleteConversation, send, stop };
 }

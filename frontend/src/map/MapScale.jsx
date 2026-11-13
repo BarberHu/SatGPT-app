@@ -6,7 +6,7 @@ export default function MapScale({ map }) {
   const ruler = useRef(null);
   const [scale, setScale] = useState(null);
   useEffect(() => {
-    if (!map.ready || !ruler.current || !map.container.current || !map.measureGroundDistance) return undefined;
+    if (!map.ready || map.visible === false || !ruler.current || !map.container.current || !map.measureGroundDistance) return undefined;
     let frame = null;
     let disposed = false;
     const update = () => {
@@ -29,8 +29,8 @@ export default function MapScale({ map }) {
     if (ruler.current.parentElement) observer?.observe(ruler.current.parentElement);
     update();
     return () => { disposed = true; if (frame !== null) cancelAnimationFrame(frame); observer?.disconnect(); unsubscribe?.(); };
-  }, [map.ready, map.container, map.measureGroundDistance, map.subscribeViewport]);
-  if (!map.ready) return null;
+  }, [map.ready, map.visible, map.container, map.measureGroundDistance, map.subscribeViewport]);
+  if (!map.ready || map.visible === false) return null;
   const description = scale ? `Map scale: ${scale.ticks.map(tick => tick.label).join(', ')} ${scale.unit}` : undefined;
   return <div ref={ruler} className="workspace-distance-scale" role="img" aria-label={description}
     aria-hidden={scale ? undefined : true} style={{ visibility: scale ? 'visible' : 'hidden' }}>

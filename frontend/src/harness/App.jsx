@@ -5,6 +5,7 @@ import { useAgentMap } from './hooks/useAgentMap';
 import { useAgentRegion } from './hooks/useAgentRegion';
 import AreaControls from '../aoi/AreaControls';
 import { getBoundsFromGeometry } from '../utils/aoi';
+import { regionKey, selectionKey } from './map/regionSelection';
 import ConversationSidebar from './components/ConversationSidebar';
 import MessageList from './components/MessageList';
 import Composer from './components/Composer';
@@ -43,17 +44,28 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
   useEffect(() => { setPrompt(''); }, [chat.conversationId]);
   useEffect(() => { if (narrow) setHistoryOpen(false); }, [narrow]);
   const changeConversation = async id => {
+    if (chat.deleting) return;
     map.prepareConversationChange();
     if (await chat.changeConversation(id)) {
       setMobileView('chat');
       if (narrow) setHistoryOpen(false);
     }
   };
+  const deleteConversation = async id => {
+    if (!await chat.deleteConversation(id)) return false;
+    map.forgetConversation(id);
+    try {
+      localStorage.removeItem(regionKey(id));
+      localStorage.removeItem(selectionKey(id));
+    } catch { /* A storage restriction must not turn a successful deletion into a failure. */ }
+    return true;
+  };
   const sidebar = <ConversationSidebar conversations={chat.conversations} currentId={chat.conversationId}
-    disabled={chat.loading} onNew={() => changeConversation()}
+    disabled={chat.loading || chat.pending || chat.stopping || chat.deleting} onNew={() => changeConversation()}
+    onDelete={deleteConversation} deleteError={chat.error}
     onSelect={id => changeConversation(id)} onCollapse={narrow ? () => setHistoryOpen(false) : undefined} />;
   const send = async () => {
-    if (region.editing || region.error || chat.loading) return;
+    if (region.editing || region.error || chat.loading || chat.deleting) return;
     const text = prompt.trim();
     const geometry = region.snapshot();
     const area = geometry ? getBoundsFromGeometry(geometry) : null;
@@ -96,8 +108,8 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
                 onUse={region.use} onEdit={aoi => { if (region.begin(aoi) && narrow) setMobileView('map'); }}
                 onLocate={aoi => focusLayer({ bounds: [aoi.bounds.west,aoi.bounds.south,aoi.bounds.east,aoi.bounds.north] })}
                 outlineVisible={region.outlineVisible} onToggleOutline={region.toggleOutline} /> }
-              busy={chat.busy} pending={chat.pending} stopping={chat.stopping} stopDisabled={chat.loading}
-              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || chat.stopping || !map.ready || region.editing || Boolean(region.error)} />
+              busy={chat.busy} pending={chat.pending} stopping={chat.stopping} stopDisabled={chat.loading || chat.deleting}
+              mapReady={map.ready} disabled={chat.loading || chat.busy || chat.pending || chat.stopping || chat.deleting || !map.ready || region.editing || Boolean(region.error)} />
           </section>
         </ResizablePanel>
         <ResizableHandle className="agent-resize-handle" aria-label="Resize chat and map" />

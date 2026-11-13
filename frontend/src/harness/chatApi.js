@@ -9,6 +9,7 @@ export const chatApi = {
   current: signal => request('/conversation', { signal }),
   get: (id, signal) => request(`/conversations/${encodeURIComponent(id)}`, { signal }),
   list: signal => request('/conversations', { signal }),
+  remove: (id, signal) => request(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', signal }),
   create: signal => request('/conversation/new', { method: 'POST', signal }),
   activate: (id, signal) => request(`/conversations/${encodeURIComponent(id)}/activate`, { method: 'POST', signal }),
   send: (body, signal) => request('/tasks', { method: 'POST', signal,

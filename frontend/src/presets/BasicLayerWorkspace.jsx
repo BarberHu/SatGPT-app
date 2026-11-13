@@ -11,6 +11,7 @@ import PresetParameterForm from './PresetParameterForm';
 import PresetLayerCard from './PresetLayerCard';
 import './presets.css';
 import AreaControls from '../aoi/AreaControls';
+import LayerPanel from '../map/LayerPanel';
 
 const labels = { flood: 'Flood', wildfire: 'Wildfire', landslide: 'Landslide' };
 const icons = { flood: Droplets, wildfire: Flame, landslide: Mountain };
@@ -27,11 +28,12 @@ export default function BasicLayerWorkspace({ active = true }) {
   const [layersOpen, setLayersOpen] = useState(true);
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
+  const [areaToolsOpen, setAreaToolsOpen] = useState(false);
   const upload = useRef(null);
   const activeRef = useRef(active); activeRef.current = active;
-  const uploadScope = useRef({ active, selectedAOI, generation: 0 });
-  if (uploadScope.current.active !== active || uploadScope.current.selectedAOI !== selectedAOI) {
-    uploadScope.current = { active, selectedAOI, generation: uploadScope.current.generation + 1 };
+  const uploadScope = useRef({ active, selectedAOI, editing: isAoiEditing, generation: 0 });
+  if (uploadScope.current.active !== active || uploadScope.current.selectedAOI !== selectedAOI || uploadScope.current.editing !== isAoiEditing) {
+    uploadScope.current = { active, selectedAOI, editing: isAoiEditing, generation: uploadScope.current.generation + 1 };
   }
   useEffect(() => () => { uploadScope.current.generation++; }, []);
   useEffect(() => { if (!active && isAoiEditing) cancelDraftAoi(); }, [active, isAoiEditing, cancelDraftAoi]);
@@ -82,16 +84,20 @@ export default function BasicLayerWorkspace({ active = true }) {
         <div className="preset-library-scroll"><input className="preset-search" aria-label="Find a layer" placeholder="Find a layer" value={query} onChange={event => setQuery(event.target.value)} />
           <nav className="preset-themes" aria-label="Hazard theme">{presetThemes.map(id => { const Icon = icons[id]; return <button key={id} type="button" aria-pressed={theme === id} onClick={() => { setTheme(id); selectPreset(presetLayerCatalog.find(preset => preset.theme === id).key); }}><Icon size={16} />{labels[id]}</button>; })}</nav>
           <section className="preset-study-area"><h3>Study area</h3><strong>{selectedAOI?.label || 'Select a study area'}</strong>
+            <details className="preset-area-tools" open={areaToolsOpen || !selectedAOI || isAoiEditing}
+              onToggle={event => { if (selectedAOI && !isAoiEditing) setAreaToolsOpen(event.currentTarget.open); }}>
+            <summary>Choose or draw an area</summary>
             {selectedAOI ? <small>{Object.values(selectedAOI.bounds).map(value => Number(value).toFixed(3)).join(', ')}</small> : null}
-            <div className="preset-area-actions"><button type="button" aria-pressed={gridClickEnabled} onClick={() => setGridClickEnabled(!gridClickEnabled)}>Select grid</button>
-              <button type="button" disabled={!ready} onClick={captureExtent}>Use current map extent</button>
-              <button type="button" onClick={() => upload.current.click()}>Upload GeoJSON</button></div>
+            <div className="preset-area-actions"><button type="button" disabled={isAoiEditing} aria-pressed={gridClickEnabled} onClick={() => setGridClickEnabled(!gridClickEnabled)}>Select grid</button>
+              <button type="button" disabled={!ready || isAoiEditing} onClick={captureExtent}>Use current map extent</button>
+              <button type="button" disabled={isAoiEditing} onClick={() => upload.current.click()}>Upload GeoJSON</button></div>
             <input ref={upload} type="file" accept=".json,.geojson,application/geo+json,application/json" aria-label="Upload study area" hidden onChange={loadFile} />
             <small>Draw a polygon with the map drawing tool, then use it below.</small>
             <button type="button" disabled={!ready || isAoiEditing} onClick={startAoiDraw}>Draw area</button>
             {draftAOI ? <button type="button" className="preset-use-drawing" onClick={() => { applyDraftAoi(); setGridClickEnabled(false); setNotice('Drawing applied as the study area.'); }}>Use drawn study area</button> : null}
             {isAoiEditing ? <button type="button" onClick={cancelDraftAoi}>Cancel area editing</button> : null}
-            <AreaControls current={selectedAOI} scopeKey={active ? 'basic' : 'inactive:basic'} disabled={!active || isAoiEditing}
+            </details>
+            <AreaControls compact current={selectedAOI} scopeKey={active ? 'basic' : 'inactive:basic'} disabled={!active || isAoiEditing}
               onUse={aoi => { setSelectedAOI(aoi); setDraftAOI(null); setAoiEditorMode('idle'); setGridClickEnabled(false); }}
               onEdit={startAoiEdit} onClear={clearAoiState} outlineVisible={aoiOutlineVisible} onToggleOutline={toggleAoiOutline}
               onLocate={aoi => service?.scope('basic:presets').setView({ bounds: [aoi.bounds.west,aoi.bounds.south,aoi.bounds.east,aoi.bounds.north] })} />
@@ -104,10 +110,10 @@ export default function BasicLayerWorkspace({ active = true }) {
             <label><input type="checkbox" checked={isBuildingsEnabled} onChange={event => setIsBuildingsEnabled(event.target.checked)} />Buildings</label></details>
         </div>
       </aside>}
-    <section className="preset-current-layers" aria-label="Current layers"><button type="button" className="preset-current-heading" aria-expanded={layersOpen} onClick={() => setLayersOpen(!layersOpen)}><strong>Current layers</strong><span>{rows.length}</span><span className="preset-heading-chevron">{layersOpen ? '⌄' : '⌃'}</span></button>
-      {layersOpen ? <div className="preset-current-scroll">{rows.length ? rows.map((row, index) => <PresetLayerCard key={row.id} row={row} store={store} first={index === 0} last={index === rows.length - 1}
+    <LayerPanel count={rows.length} open={layersOpen} onOpenChange={setLayersOpen} editing={isAoiEditing} className="preset-current-layers" scrollClassName="preset-current-scroll">
+      {rows.length ? rows.map((row, index) => <PresetLayerCard key={row.id} row={row} store={store} first={index === 0} last={index === rows.length - 1}
         stale={aoiKey(row.aoi) !== aoiKey(selectedAOI)} onEdit={edit} onFocus={row => service?.scope('basic:presets').setView({ bounds: [row.aoi.bounds.west, row.aoi.bounds.south, row.aoi.bounds.east, row.aoi.bounds.north] })} />)
-        : <p className="preset-empty">Select a study area and load a preset. Layers from different themes stay here together.</p>}</div> : null}
-    </section>
+        : <p className="preset-empty">Select a study area and load a preset. Layers from different themes stay here together.</p>}
+    </LayerPanel>
   </div>;
 }
