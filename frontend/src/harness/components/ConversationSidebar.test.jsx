@@ -26,6 +26,10 @@ function Probe({ visible = true }) {
   return <ConversationSidebar conversations={chat.conversations} currentId={chat.conversationId} onSelect={() => {}} />;
 }
 const row = id => node.querySelector(`[title="${id}"]`);
+async function openDelete(title) {
+  await act(async () => node.querySelector(`[aria-label="Conversation options: ${title}"]`).click());
+  await act(async () => node.querySelector('[role="menuitem"]').click());
+}
 
 test('history is text-only; work uses spinners and only unread non-current chats have dots', async () => {
   const onSelect = vi.fn();
@@ -41,6 +45,88 @@ test('history is text-only; work uses spinners and only unread non-current chats
   expect(row('New answer').querySelector('[aria-label="Unread response"]')).not.toBeNull();
   await act(async () => row('Running chat').click());
   expect(onSelect).toHaveBeenCalledWith('live');
+});
+
+test('delete is a separate accessible button, asks for confirmation and Cancel preserves the chat', async () => {
+  const onDelete = vi.fn(), onSelect = vi.fn();
+  await act(async () => root.render(<ConversationSidebar conversations={[{ id: 'old', title: 'History' }]}
+    onSelect={onSelect} onDelete={onDelete} />));
+  const remove = node.querySelector('[aria-label="Conversation options: History"]');
+  expect(remove.closest('.agent-conversation')).toBeNull();
+  await openDelete('History');
+  const dialog = document.querySelector('.agent-delete-dialog');
+  expect(dialog.textContent).toContain('History');
+  expect(document.activeElement.textContent).toBe('Cancel');
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(onDelete).not.toHaveBeenCalled();
+  await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === 'Cancel').click());
+  expect(document.querySelector('.agent-delete-dialog')).toBeNull();
+  expect(onDelete).not.toHaveBeenCalled();
+});
+
+test('confirmation blocks repeated clicks, shows failures and closes after a successful retry', async () => {
+  const onDelete = vi.fn(); let finish;
+  onDelete.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(true);
+  await act(async () => root.render(<ConversationSidebar conversations={[{ id: 'old', title: 'History' }]}
+    onDelete={onDelete} deleteError="This conversation is busy." />));
+  await openDelete('History');
+  const confirm = [...document.querySelectorAll('.agent-delete-dialog button')].find(button => button.textContent === 'Delete');
+  await act(async () => { confirm.click(); confirm.click(); });
+  expect(onDelete).toHaveBeenCalledTimes(1);
+  expect(confirm.disabled).toBe(true);
+  await act(async () => finish(false));
+  expect(document.querySelector('.agent-delete-dialog [role="alert"]').textContent).toBe('This conversation is busy.');
+  expect(row('History')).not.toBeNull();
+  await act(async () => confirm.click());
+  expect(onDelete).toHaveBeenLastCalledWith('old');
+  expect(document.querySelector('.agent-delete-dialog')).toBeNull();
+});
+
+test.each(['running', 'queued'])('delete is disabled for a %s conversation', async status => {
+  const onDelete = vi.fn();
+  await act(async () => root.render(<ConversationSidebar onDelete={onDelete}
+    conversations={[{ id: 'work', title: 'Busy', task_status: status }]} />));
+  const remove = node.querySelector('[aria-label="Conversation options: Busy"]');
+  expect(remove.disabled).toBe(true);
+  await act(async () => remove.click());
+  expect(document.querySelector('.agent-delete-dialog')).toBeNull();
+});
+
+test('the row menu supports keyboard opening, Escape, outside click and focus restoration', async () => {
+  const onSelect = vi.fn();
+  await act(async () => root.render(<ConversationSidebar onSelect={onSelect} onDelete={vi.fn()}
+    conversations={[{ id: 'old', title: 'History' }]} />));
+  const trigger = node.querySelector('[aria-label="Conversation options: History"]');
+  await act(async () => {
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  });
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(document.activeElement.getAttribute('role')).toBe('menuitem');
+  await act(async () => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(node.querySelector('[role="menu"]')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  await act(async () => trigger.click());
+  await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+  expect(node.querySelector('[role="menu"]')).toBeNull();
+  expect(onSelect).not.toHaveBeenCalled();
+  await act(async () => trigger.click());
+  await act(async () => node.querySelector('[role="menuitem"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+  expect(node.querySelector('[role="menu"]')).toBeNull();
+});
+
+test('history groups use actual local dates and leave invalid or future dates unlabelled', async () => {
+  vi.setSystemTime(new Date(2026, 10, 13, 12));
+  await act(async () => root.render(<ConversationSidebar conversations={[
+    { id: 'today', title: 'Today chat', updated_at: new Date(2026, 10, 13, 9).toISOString() },
+    { id: 'earlier', title: 'Earlier chat', updated_at: new Date(2026, 10, 12, 23).toISOString() },
+    { id: 'invalid', title: 'Undated chat', updated_at: 'unknown' },
+    { id: 'future', title: 'Future chat', updated_at: new Date(2026, 10, 15).toISOString() },
+  ]} />));
+  expect(row('Today chat').closest('section').querySelector('h3').textContent).toBe('Today');
+  expect(row('Earlier chat').closest('section').querySelector('h3').textContent).toBe('Earlier');
+  expect(row('Undated chat').closest('section').querySelector('h3')).toBeNull();
+  expect(row('Future chat').closest('section').querySelector('h3')).toBeNull();
 });
 
 test('background completion refreshes the badge without switching chats and stops polling when idle', async () => {

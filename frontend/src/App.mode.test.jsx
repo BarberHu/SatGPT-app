@@ -16,7 +16,7 @@ vi.mock('./App',async()=>{
 });
 vi.mock('./harness/App',async()=>{
  const {SharedMapViewport}=await import('./map/SharedMapContext');
- return {default:({active,onHistoryToolsChange})=>{const [open,setOpen]=useState(true);React.useEffect(()=>{state.mounts.agent++;return()=>state.unmounts.agent++;},[]);React.useEffect(()=>{onHistoryToolsChange?.({open,toggle:()=>setOpen(x=>!x)});},[open,onHistoryToolsChange]);return <div><SharedMapViewport active={active}/><p>Harness analysis</p></div>;}};
+ return {default:({active})=>{React.useEffect(()=>{state.mounts.agent++;return()=>state.unmounts.agent++;},[]);return <div><SharedMapViewport active={active}/><p>Harness analysis</p></div>;}};
 });
 let node,root,observers,rect;
 beforeEach(()=>{

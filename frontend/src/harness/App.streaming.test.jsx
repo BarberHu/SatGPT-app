@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import HarnessApp from './App';
 import { SharedMapProvider, SharedMapSurface } from '../map/SharedMapContext';
 function AgentWorkspace(props) { return <SharedMapProvider mode="agent"><div><SharedMapSurface /><HarnessApp {...props} /></div></SharedMapProvider>; }
-const { mapSetView } = vi.hoisted(() => ({ mapSetView: vi.fn() }));
+const { mapSetView, mapRemoveLayer } = vi.hoisted(() => ({ mapSetView: vi.fn(), mapRemoveLayer: vi.fn() }));
 vi.mock('../map/config', () => ({ mapOptions: { token: 'test-token', style: 'mapbox://styles/test' } }));
 
 vi.mock('../map/mapboxAdapter', () => ({
@@ -15,7 +15,7 @@ vi.mock('../map/mapboxAdapter', () => ({
     getView() { return { center: [100, 10], zoom: 5, bounds: [99, 9, 101, 11] }; }
     setView(view) { mapSetView(view); }
     addLayer() {}
-    removeLayer() {}
+    removeLayer(id) { mapRemoveLayer(id); }
     setVisibility() {}
     dispose() {}
   },
@@ -173,17 +173,16 @@ test('history switching restores independent layers and persists visibility and 
     await act(async () => [...node.querySelectorAll('.agent-conversation')].find(b => b.textContent.includes(title)).click());
     await flush();
   };
-  const registerHistory = vi.fn();
   try {
-    await act(async () => root.render(<AgentWorkspace onHistoryToolsChange={registerHistory} />));
+    await act(async () => root.render(<AgentWorkspace />));
     for (let i = 0; i < 100 && !node.querySelector('.agent-map-layer input'); i++) await flush();
     expect(node.querySelector('.agent-chat-header, .agent-brand, .agent-history-footer')).toBeNull();
     expect(node.querySelectorAll('.agent-new')).toHaveLength(1);
     expect(node.textContent).not.toContain('地理空间助手');
-    await act(async () => registerHistory.mock.lastCall[0].toggle());
+    await act(async () => node.querySelector('[aria-label="Collapse conversation history"]').click());
     expect(node.querySelector('.agent-history')).toBeNull();
     expect(node.querySelector('.agent-map-layer').textContent).toContain('one layer');
-    await act(async () => registerHistory.mock.lastCall[0].toggle());
+    await act(async () => node.querySelector('.agent-conversation-header [aria-label="Open conversation history"]').click());
     expect(node.querySelector('.agent-history')).not.toBeNull();
     const checkbox = node.querySelector('.agent-map-layer input');
     expect(checkbox.checked).toBe(true);
@@ -232,6 +231,59 @@ test('narrow layout uses a working history dialog and result location opens the 
     expect(mapSetView).toHaveBeenLastCalledWith({ bounds: [113.45, 34.3, 114.2, 35] });
   } finally {
     await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals();
+    delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  }
+});
+
+test.each([false, true])('deleting current history clears results and scoped storage in narrow=%s layout', async narrow => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear(); mapRemoveLayer.mockClear();
+  vi.stubGlobal('matchMedia', () => ({ matches: narrow, addEventListener() {}, removeEventListener() {} }));
+  let deleted = false;
+  const old = { conversation_id: 'webgis-delete', active_task: null, messages: [{ id: 'a', role: 'assistant',
+    content: 'Delete this answer', job_id: 'old', layers: [{ name: 'Old layer',
+      url: 'https://earthengine.googleapis.com/v1/projects/test/maps/example/tiles/{z}/{x}/{y}' }] }] };
+  const fresh = { conversation_id: 'webgis-fresh', active_task: null, messages: [] };
+  const list = () => [{ id: deleted ? 'webgis-fresh' : 'webgis-delete', title: deleted ? 'New chat' : 'Delete this history' }];
+  const fetcher = vi.fn(async (url, options) => {
+    if (options?.method === 'DELETE') {
+      deleted = true;
+      return { ok: true, json: async () => ({ deleted_id: 'webgis-delete', conversation: fresh, conversations: list() }) };
+    }
+    return { ok: true, json: async () => url.endsWith('/conversations') ? { conversations: list() } : deleted ? fresh : old };
+  });
+  vi.stubGlobal('fetch', fetcher);
+  localStorage.setItem('satgpt:harness:layers:webgis-delete', JSON.stringify({ visibility: {} }));
+  localStorage.setItem('satgpt:agent:analysis-region:v1:webgis-delete', 'null');
+  localStorage.setItem('satgpt:agent:analysis-region:v2:webgis-delete', JSON.stringify({ schema_version: 2, aoi: null }));
+  localStorage.setItem('unrelated-saved-area', 'keep');
+  const node = document.createElement('div'); document.body.appendChild(node); const root = createRoot(node);
+  try {
+    await act(async () => root.render(<AgentWorkspace />));
+    await act(async () => new Promise(resolve => setTimeout(resolve, 50)));
+    expect(node.textContent).toContain('Delete this answer');
+    if (narrow) await act(async () => node.querySelector('[aria-label="Open conversation history"]').click());
+    await act(async () => document.querySelector('[aria-label="Conversation options: Delete this history"]').click());
+    if (narrow) {
+      await act(async () => document.querySelector('[role="menuitem"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(document.querySelector('.agent-history-dialog')).not.toBeNull();
+      await act(async () => document.querySelector('[aria-label="Conversation options: Delete this history"]').click());
+    }
+    await act(async () => document.querySelector('[role="menuitem"]').click());
+    await act(async () => [...document.querySelectorAll('.agent-delete-dialog button')].find(button => button.textContent === 'Delete').click());
+    expect(document.querySelector('.agent-delete-dialog')).toBeNull();
+    expect(document.body.textContent).not.toContain('Delete this history');
+    expect(node.textContent).not.toContain('Delete this answer');
+    expect(node.querySelector('.agent-result-card')).toBeNull();
+    expect(mapRemoveLayer).toHaveBeenCalledWith('scope--agent%3Awebgis-delete--old-0');
+    for (const key of ['satgpt:harness:layers:webgis-delete', 'satgpt:agent:analysis-region:v1:webgis-delete', 'satgpt:agent:analysis-region:v2:webgis-delete']) {
+      expect(localStorage.getItem(key)).toBeNull();
+    }
+    expect(localStorage.getItem('unrelated-saved-area')).toBe('keep');
+    expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'DELETE')).toHaveLength(1);
+  } finally {
+    await act(async () => root.unmount()); node.remove(); localStorage.clear(); vi.unstubAllGlobals();
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
   }
 });

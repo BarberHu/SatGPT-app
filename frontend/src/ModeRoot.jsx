@@ -15,7 +15,6 @@ function initialMode() {
 }
 function Workspace({ mode, changeMode, agentVisited }) {
   const map = useSharedMap();
-  const [historyTools, setHistoryTools] = useState(null);
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState('');
   const canCapture = map.ready && map.visible;
@@ -28,7 +27,7 @@ function Workspace({ mode, changeMode, agentVisited }) {
   };
   return <div className="satgpt-root" data-mode={mode}>
     <WorkspaceHeader mode={mode} onModeChange={changeMode} canCapture={canCapture} capturing={capturing} onCapture={capture}
-      captureHint="Show the map workspace to capture an image" historyTools={mode === 'agent' ? historyTools : null} />
+      captureHint="Show the map workspace to capture an image" />
     {captureError ? <div className="satgpt-capture-error" role="alert">{captureError}</div> : null}
     <main className="satgpt-mode-content">
       <SharedMapSurface />
@@ -37,7 +36,7 @@ function Workspace({ mode, changeMode, agentVisited }) {
       </div>
       {agentVisited ? <div className="satgpt-business-panel satgpt-agent-panel" hidden={mode !== 'agent'} role="tabpanel" id="satgpt-panel-agent" aria-labelledby="satgpt-tab-agent">
         <Suspense fallback={<div className="satgpt-mode-loading" role="status">Loading intelligent analysis…</div>}>
-          <HarnessApp active={mode === 'agent'} onHistoryToolsChange={setHistoryTools} />
+          <HarnessApp active={mode === 'agent'} />
         </Suspense>
       </div> : null}
     </main>

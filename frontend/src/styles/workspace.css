@@ -1,8 +1,10 @@
 /* Shared chrome is scoped independently of Basic styles and lazy Agent theme. */
 .satgpt-root { width: 100%; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--satgpt-ui-soft); }
 .satgpt-topbar { position: relative; z-index: 40; flex: 0 0 58px; min-height: 58px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--satgpt-ui-border); background: var(--satgpt-ui-header); color: var(--satgpt-ui-heading); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; }
-.satgpt-topbar-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.satgpt-topbar-logo { display: block; width: 174px; max-width: 100%; height: auto; justify-self: start; }
+.satgpt-topbar-brand { --satgpt-brand-reference-width: 174px; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.satgpt-topbar-mark { display: block; flex: none; width: 30px; height: 30px; object-fit: contain; }
+/* Preserve the wordmark's original scale: 2954px crop from the 3543px-wide logo. */
+.satgpt-topbar-wordmark { display: block; flex: none; width: calc(var(--satgpt-brand-reference-width) * 2954 / 3543); max-width: calc(100% * 2954 / 3543); height: auto; }
 .satgpt-mode-tabs { display: inline-flex; align-items: center; padding: 4px; border-radius: 10px; background: var(--satgpt-ui-hover); gap: 3px; }
 .satgpt-mode-tabs > button { appearance: none; border: 0; border-radius: 8px; background: transparent; color: var(--satgpt-ui-muted); font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .2px; height: 36px; min-width: 110px; padding: 0 20px; cursor: pointer; transition: background .15s, color .15s; }
 .satgpt-mode-tabs > button:hover { background: var(--satgpt-ui-border); }
@@ -32,7 +34,7 @@
 .satgpt-settings-close { display: flex; align-items: center; justify-content: center; position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--satgpt-ui-muted); cursor: pointer; }
 @media (max-width: 640px) {
   .satgpt-topbar { flex-basis: 100px; min-height: 100px; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 46px 46px; column-gap: 12px; padding: 0 14px 8px; }
-  .satgpt-topbar-logo { width: 136px; }
+  .satgpt-topbar-brand { --satgpt-brand-reference-width: 136px; }
   .satgpt-topbar-actions { grid-column: 2; grid-row: 1; gap: 6px; }
   .satgpt-mode-tabs { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
   .satgpt-mode-tabs > button { min-width: 110px; height: 32px; padding: 0 18px; font-size: 12px; }
@@ -50,7 +52,7 @@
 .satgpt-basic-panel .water { pointer-events: none; }
 .satgpt-basic-panel :is(.ui, .ask-dock, .settings-button, .spinner-overlay) { pointer-events: auto; }
 .satgpt-business-panel .harness-app.harness-shell { height: 100%; min-height: 0; background: transparent; }
-.satgpt-agent-panel :is(.agent-history, .agent-chat, .agent-mobile-tabs, .agent-resize-handle, .agent-map-layers, .agent-map-error) { pointer-events: auto; }
+.satgpt-agent-panel :is(.agent-history, .agent-chat, .agent-chat-reopen, .agent-mobile-tabs, .agent-resize-handle, .agent-map-layers, .agent-map-error) { pointer-events: auto; }
 .satgpt-business-panel.satgpt-agent-panel .agent-map-workspace { background: transparent; }
 .satgpt-map-status { position: absolute; bottom: 140px; left: 20px; right: 20px; background: #fff8f3; color: #a4664b; border-radius: 8px; padding: 12px; font-size: 12px; pointer-events: none; }
 .satgpt-shared-scale { position: absolute; bottom: 30px; left: 16px; right: 16px; display: flex; justify-content: flex-end; pointer-events: none; }

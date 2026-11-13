@@ -1,9 +1,9 @@
 import React from 'react';
-import { Camera, PanelLeft, PanelLeftClose, Settings2, X } from 'lucide-react';
+import { Camera, Settings2, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 
 const modes = [{ id: 'basic', label: 'Static layers' }, { id: 'agent', label: 'Intelligent analysis' }];
-export default function WorkspaceHeader({ mode, onModeChange, canCapture, capturing, onCapture, captureHint, historyTools }) {
+export default function WorkspaceHeader({ mode, onModeChange, canCapture, capturing, onCapture, captureHint }) {
   const navigate = event => {
     const index = modes.findIndex(item => item.id === mode);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? modes.length - 1
@@ -16,11 +16,8 @@ export default function WorkspaceHeader({ mode, onModeChange, canCapture, captur
   };
   return <header className="satgpt-topbar" aria-label="SatGPT workspace">
     <div className="satgpt-topbar-brand">
-      <img className="satgpt-topbar-logo" src="/assets/images/Sat-GPT-Logos-01.png" alt="SatGPT Logo" />
-      {historyTools ? <button type="button" className="satgpt-toolbar-button" aria-label={historyTools.open ? 'Collapse conversation history' : 'Open conversation history'}
-        aria-expanded={historyTools.open} title={historyTools.open ? 'Collapse conversation history' : 'Open conversation history'} onClick={historyTools.toggle}>
-        {historyTools.open ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
-      </button> : null}
+      <img className="satgpt-topbar-mark" src="/assets/images/satgpt-avatar.png" width="30" height="30" alt="" aria-hidden="true" />
+      <img className="satgpt-topbar-wordmark" src="/assets/images/satgpt-wordmark.png" width="2954" height="369" alt="SatGPT Logo" />
     </div>
     <div className="satgpt-mode-tabs" role="tablist" aria-label="Workspace mode" onKeyDown={navigate}>
       {modes.map(item => <button key={item.id} type="button" role="tab" id={`satgpt-tab-${item.id}`}

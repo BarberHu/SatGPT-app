@@ -1,14 +1,28 @@
 import React, { useRef, useState } from 'react';
-import { Loader2, Plus, Trash2, X } from 'lucide-react';
+import { ChevronsLeft, Loader2, Plus } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog';
+import ConversationActions from './ConversationActions';
 
-export default function ConversationSidebar({ conversations, currentId, disabled, onNew, onSelect, onCollapse, onDelete, deleteError }) {
+function groupedConversations(conversations) {
+  const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const groups = [{ label: null, rows: [] }, { label: 'Today', rows: [] }, { label: 'Earlier', rows: [] }];
+  for (const item of conversations) {
+    const date = typeof item.updated_at === 'string' && item.updated_at ? new Date(item.updated_at) : null;
+    const group = !date || !Number.isFinite(date.getTime()) ? 0 : date.toDateString() === now.toDateString() ? 1 : date < start ? 2 : 0;
+    groups[group].rows.push(item);
+  }
+  return groups.filter(group => group.rows.length);
+}
+
+export default function ConversationSidebar({ conversations, currentId, disabled, onNew, onSelect, onCollapse, onDelete, deleteError, collapseButtonRef }) {
   const [selected, setSelected] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [failed, setFailed] = useState(false);
   const submitting = useRef(false);
   const cancelButton = useRef(null);
+  const deleteButton = useRef(null);
+  const newChatButton = useRef(null);
   const confirmDelete = async () => {
     if (submitting.current) return;
     submitting.current = true;
@@ -24,13 +38,19 @@ export default function ConversationSidebar({ conversations, currentId, disabled
       setDeleting(false);
     }
   };
-  return <aside className={`agent-history${onCollapse ? ' has-close' : ''}`} aria-label="Conversation history">
-    {onCollapse ? <Button type="button" variant="ghost" size="icon" className="agent-history-close" aria-label="Collapse conversation history" onClick={onCollapse}><X /></Button> : null}
-    <Button type="button" variant="outline" className="agent-new" onClick={onNew} disabled={disabled}><Plus />New chat</Button>
-    <p className="agent-history-label">Your conversations</p>
+  return <aside className="agent-history" aria-label="Conversation history">
+    <div className="agent-history-header">
+      <h2>Conversations</h2>
+      <Button ref={newChatButton} type="button" variant="ghost" size="icon" className="agent-new" onClick={onNew}
+        disabled={disabled} aria-label="New chat" title="New chat"><Plus size={18} /></Button>
+      {onCollapse ? <Button ref={collapseButtonRef} type="button" variant="ghost" size="icon" className="agent-history-close"
+        aria-label="Collapse conversation history" aria-expanded={true} title="Collapse conversation history" onClick={onCollapse}><ChevronsLeft size={18} /></Button> : null}
+    </div>
     <nav className="agent-conversations" aria-label="Conversations">
       {conversations.length === 0 ? <p className="agent-history-empty">Your conversations will appear here</p> : null}
-      {conversations.map(item => {
+      {groupedConversations(conversations).map(group => <section key={group.label || 'undated'}>
+      {group.label ? <h3 className="agent-history-label">{group.label}</h3> : null}
+      {group.rows.map(item => {
         const running = item.task_status === 'running';
         const queued = item.task_status === 'queued';
         return <div key={item.id} className="agent-conversation-row">
@@ -42,16 +62,18 @@ export default function ConversationSidebar({ conversations, currentId, disabled
           <Loader2 size={14} className="agent-spin" aria-hidden="true" />
         </span> : item.unread && item.id !== currentId ? <span className="agent-conversation-unread" role="status" aria-label="Unread response" title="New response" /> : null}
         </button>
-        {onDelete ? <Button type="button" variant="ghost" size="icon" className="agent-conversation-delete"
-          aria-label={`Delete conversation: ${item.title}`} title={running || queued ? 'Wait for this task to finish before deleting' : 'Delete conversation'}
-          disabled={disabled || running || queued} onClick={() => { setFailed(false); setSelected(item); }}><Trash2 size={14} /></Button> : null}
+        {onDelete ? <ConversationActions title={item.title} disabled={disabled || running || queued}
+          onDelete={trigger => { deleteButton.current = trigger; setFailed(false); setSelected(item); }} /> : null}
         </div>;
-      })}
+      })}</section>)}
     </nav>
     <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open && !submitting.current) setSelected(null); }}>
       <DialogContent className="agent-delete-dialog" onOpenAutoFocus={event => {
         event.preventDefault();
         cancelButton.current?.focus();
+      }} onCloseAutoFocus={event => {
+        event.preventDefault();
+        (deleteButton.current?.isConnected ? deleteButton.current : newChatButton.current)?.focus();
       }}>
         <DialogTitle>Delete conversation?</DialogTitle>
         <DialogDescription>This will delete “{selected?.title}” from your conversation history. This cannot be undone.</DialogDescription>

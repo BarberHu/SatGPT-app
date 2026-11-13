@@ -1,10 +1,94 @@
+import json
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from harness.app.controller import TaskController
+from harness.app.server import router
+
+
+class ConversationDeletionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.controller = TaskController(Path(self.temp.name))
+        self.addCleanup(self.controller.close)
+        app = FastAPI()
+        app.include_router(router)
+        app.state.controller = self.controller
+        self.client = TestClient(app)
+
+    def delete(self, cid):
+        return self.client.delete(f'/api/harness/conversations/{cid}')
+
+    def seed(self, text):
+        self.controller.messages = [{'role': 'user', 'content': text}]
+        self.controller._save_messages()
+        return self.controller.conversation_id
+
+    def test_delete_archived_history_preserves_current_and_survives_restart(self):
+        old = self.seed('Old conversation')
+        current = self.controller.new_conversation()
+        result = self.delete(old)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()['deleted_id'], old)
+        self.assertEqual(result.json()['conversation'], current)
+        self.assertEqual([row['id'] for row in result.json()['conversations']], [current['conversation_id']])
+        self.assertEqual(self.delete(old).status_code, 404)
+        self.assertEqual(self.client.post(f'/api/harness/conversations/{old}/activate').status_code, 404)
+        restarted = TaskController(Path(self.temp.name))
+        try:
+            self.assertEqual(restarted.conversation(), current)
+            self.assertNotIn(old, [row['id'] for row in restarted.list_conversations()])
+        finally:
+            restarted.close()
+
+    def test_delete_current_removes_its_archive_without_rearchiving_it(self):
+        old = self.seed('Delete current')
+        other = self.controller.new_conversation()['conversation_id']
+        self.controller.activate_conversation(old)
+        result = self.delete(old)
+        self.assertEqual(result.status_code, 200)
+        fresh = result.json()['conversation']
+        self.assertNotIn(fresh['conversation_id'], [old, other])
+        self.assertEqual(fresh['messages'], [])
+        self.assertIsNone(fresh['active_task'])
+        self.assertFalse((self.controller.archive_dir / f'{old}.json').exists())
+        self.assertEqual({row['id'] for row in result.json()['conversations']}, {other, fresh['conversation_id']})
+        restarted = TaskController(Path(self.temp.name))
+        try:
+            self.assertEqual(restarted.conversation(), fresh)
+            self.assertNotIn(old, [row['id'] for row in restarted.list_conversations()])
+            with self.assertRaises(FileNotFoundError): restarted.activate_conversation(old)
+        finally:
+            restarted.close()
+
+    def test_reject_invalid_missing_running_and_queued_without_changing_history(self):
+        cid = self.seed('Keep me')
+        before = self.controller.conversation()
+        self.assertEqual(self.delete('invalid-id').status_code, 400)
+        self.assertEqual(self.delete('webgis-missing').status_code, 404)
+        for status in ['queued', 'running']:
+            with self.subTest(status=status):
+                self.controller.jobs['job'] = {'id': 'job', 'conversation_id': cid, 'status': status}
+                self.assertEqual(self.delete(cid).status_code, 409)
+        self.controller.jobs.clear()
+        self.assertEqual(self.controller.conversation(), before)
+
+    def test_disk_failure_leaves_current_conversation_intact(self):
+        cid = self.seed('Keep on failure')
+        self.controller._archive_current()
+        before = self.controller.conversation()
+        with patch.object(Path, 'unlink', side_effect=PermissionError('test-only')):
+            result = self.delete(cid)
+        self.assertEqual(result.status_code, 500)
+        self.assertEqual(self.controller.conversation(), before)
+        self.assertEqual(json.loads(self.controller.chat_file.read_text(encoding='utf-8'))['conversation_id'], cid)
 
 
 class ConversationTests(unittest.TestCase):

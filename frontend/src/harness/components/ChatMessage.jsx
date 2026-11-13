@@ -1,6 +1,5 @@
 import React from 'react';
 import AreaControls from '../../aoi/AreaControls';
-import { Sparkles } from 'lucide-react';
 import Markdown from './Markdown';
 import RunTimeline from './RunTimeline';
 import ResultCards from './ResultCards';
@@ -12,7 +11,7 @@ export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
       {message.hasScope ? <small className="agent-message-scope">{message.analysisRegion ? `${message.analysisAoi?.label || 'Drawn analysis area'} · snapshot` : 'Map view · snapshot'}</small> : null}
       {message.analysisRegion ? <AreaControls historyOnly current={{ geojson: message.analysisRegion, source: 'draw', label: message.analysisAoi?.label || 'Historical analysis area' }} scopeKey={`history:${message.id}`} /> : null}
     </div> : <>
-      <div className="agent-assistant-label"><Sparkles size={16} /><span>SatGPT</span>
+      <div className="agent-assistant-label"><img className="agent-assistant-avatar" src="/assets/images/satgpt-avatar.png" width="22" height="22" alt="" aria-hidden="true" /><span>SatGPT</span>
         {message.streaming ? <small>Generating</small> : null}
         {message.failed ? <small className="agent-failure">Incomplete</small> : null}
       </div>
