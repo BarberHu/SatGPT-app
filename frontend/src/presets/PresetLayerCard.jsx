@@ -32,7 +32,7 @@ export default function PresetLayerCard({ row, store, stale, onEdit, onFocus, fi
         <div className="preset-menu-content">
           {iconButton('Move up', () => store.move(row.id, -1), ArrowUp, first)}{iconButton('Move down', () => store.move(row.id, 1), ArrowDown, last)}
           {iconButton('Locate layer', () => onFocus(row), LocateFixed)}{iconButton('Remove layer', () => store.remove(row.id), Trash2)}
-          <button type="button" onClick={() => onEdit(row)}>Edit / update study area</button>
+          <button type="button" onClick={() => onEdit(row)}>Edit layer</button>
           <button type="button" onClick={() => store.retry(row.id)}>Regenerate / retry</button>
         </div>
     <div className="preset-layer-footer"><label>Opacity <input type="range" min="0" max="1" step="0.05" aria-label={`Opacity for ${preset.title}`} value={row.opacity} onChange={event => store.patch(row.id, { opacity: Number(event.target.value) })} /><span>{Math.round(row.opacity * 100)}%</span></label>

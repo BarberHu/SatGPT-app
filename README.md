@@ -10,7 +10,7 @@ The application has two modes: **Static layers (Basic)** and **Intelligent analy
 
 | Area | Capabilities |
 | --- | --- |
-| Basic analysis | Map exploration, flood-related layers, grid and drawn-area selection, and basic question answering. |
+| Basic analysis | Map exploration, flood-related layers, grid selection, and basic question answering. |
 | Agent analysis | GEE dataset search, coverage and statistics queries, image previews, and interactive result layers through the DeepSeek Harness SDK. |
 | Conversations | Streamed answers, an ordered run timeline, saved conversation history, switching during a run, and stopping running or queued tasks. |
 | Result layers | Per-conversation layer isolation, thumbnails, observation dates, sources, legends, visibility controls, location, and removal. |
@@ -111,7 +111,7 @@ Open **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)**.
 
 ## Using SatGPT
 
-1. Start in **Static layers** to explore the map, select a grid or draw an area, and use Basic analysis. Grid selection loads data for the complete original grid cell.
+1. In **Static layers**, use the grid toggle on the right side of the map and click a grid cell to select it. Choose a preset and click **Load layer** to load data for the complete original cell.
 2. Switch to **Intelligent analysis** to ask the Agent about the current map area or another explicitly named location. Follow the streamed answer and run timeline.
 3. Use conversation history to open another chat or start a new one during a run. Returning to a running chat restores its task subscription. New tasks remain subject to the shared execution queue.
 4. Use the square **Stop response** button to cancel a running or queued task. The task is recorded as **Stopped**, its runtime is closed when applicable, and you can send a follow-up. Stopping does not require text in the input or an available map.

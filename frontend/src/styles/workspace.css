@@ -50,7 +50,7 @@
 .satgpt-map-viewport { position: absolute; inset: 0; pointer-events: none; }
 .satgpt-business-panel { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
 .satgpt-basic-panel .water { pointer-events: none; }
-.satgpt-basic-panel :is(.ui, .ask-dock, .settings-button, .spinner-overlay) { pointer-events: auto; }
+.satgpt-basic-panel :is(.warnings, .ask-dock, .settings-button, .spinner-overlay) { pointer-events: auto; }
 .satgpt-business-panel .harness-app.harness-shell { height: 100%; min-height: 0; background: transparent; }
 .satgpt-agent-panel :is(.agent-history, .agent-chat, .agent-chat-reopen, .agent-mobile-tabs, .agent-resize-handle, .agent-map-layers, .agent-map-error) { pointer-events: auto; }
 .satgpt-business-panel.satgpt-agent-panel .agent-map-workspace { background: transparent; }

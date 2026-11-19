@@ -27,7 +27,7 @@ function App({ active = true }) {
       <Profiler id="MapContainer" onRender={mapProfiler}>
         <MapContainer active={active} />
       </Profiler>
-      <BasicLayerWorkspace active={active} />
+      <BasicLayerWorkspace />
       <div className="ui">
         <Warnings />
       </div>
