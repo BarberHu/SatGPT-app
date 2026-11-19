@@ -4,6 +4,7 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/index.html frontend/vite.config.mjs frontend/projectEnv.cjs frontend/tailwind.config.cjs frontend/postcss.config.cjs ./
+COPY frontend/precompress-grid.cjs ./
 COPY frontend/public ./public
 COPY frontend/src ./src
 

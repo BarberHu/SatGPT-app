@@ -6,6 +6,7 @@ const zlib = require('node:zlib');
 const frontendRoot = __dirname;
 const projectRoot = path.resolve(frontendRoot, '..');
 const buildRoot = path.join(frontendRoot, 'build');
+const gridPath = path.join(buildRoot, 'assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson');
 
 const config = require('./projectEnv.cjs');
 const env = config.loadProjectEnv(projectRoot);
@@ -113,6 +114,31 @@ async function serveReadiness(res) {
   res.end(JSON.stringify({ status: ready ? 'ready' : 'degraded', harness, basic }));
 }
 
+function acceptsPrecompressedGzip(acceptEncoding) {
+  return acceptEncoding.split(',').some(entry => {
+    const gzip = /^gzip(?:\s*;\s*q\s*=\s*(0(?:\.\d{0,3})?|1(?:\.0{0,3})?))?$/i.exec(entry.trim());
+    return gzip !== null && (gzip[1] === undefined || Number(gzip[1]) > 0);
+  });
+}
+
+function gridEtag(encoding) {
+  try {
+    const metadata = JSON.parse(fs.readFileSync(`${gridPath}.etag.json`, 'utf8'));
+    const digest = metadata?.[encoding];
+    if (typeof digest === 'string' && /^[a-f0-9]{64}$/.test(digest)) return `"${digest}"`;
+  } catch {
+    // Builds without usable version metadata can still serve the grid.
+  }
+  return undefined;
+}
+
+function matchesIfNoneMatch(header, etag) {
+  return header.trim() === '*' || header.split(',').some(value => {
+    const tag = value.trim();
+    return tag === etag || tag === `W/${etag}`;
+  });
+}
+
 function serveStatic(req, res) {
   let pathname;
   try {
@@ -137,29 +163,49 @@ function serveStatic(req, res) {
   const extension = path.extname(filePath).toLowerCase();
   const stat = fs.statSync(filePath);
   const isHashedAsset = pathname.startsWith('/static/');
-  const acceptsGzip = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
-  const compressible = ['.css', '.geojson', '.html', '.js', '.json', '.svg', '.txt'].includes(extension);
+  const acceptEncoding = req.headers['accept-encoding'] || '';
+  const gzipPath = `${filePath}.gz`;
+  const gzipStat = extension === '.geojson' && acceptsPrecompressedGzip(acceptEncoding)
+    ? fs.statSync(gzipPath, { throwIfNoEntry: false })
+    : undefined;
+  const usePrecompressedGzip = gzipStat?.isFile() === true;
+  const responsePath = usePrecompressedGzip ? gzipPath : filePath;
+  const responseLength = usePrecompressedGzip ? gzipStat.size : stat.size;
+  const compressible = ['.css', '.html', '.js', '.json', '.svg', '.txt'].includes(extension);
 
   setSecurityHeaders(res);
-  res.setHeader('Content-Type', mimeTypes[extension] || 'application/octet-stream');
   res.setHeader('Cache-Control', isHashedAsset
     ? 'public, max-age=31536000, immutable'
     : 'no-cache');
   res.setHeader('Vary', 'Accept-Encoding');
 
+  if (filePath === gridPath) {
+    const etag = gridEtag(usePrecompressedGzip ? 'gzip' : 'identity');
+    if (etag) {
+      res.setHeader('ETag', etag);
+      if (matchesIfNoneMatch(req.headers['if-none-match'] || '', etag)) {
+        res.writeHead(304).end();
+        return;
+      }
+    }
+  }
+
+  res.setHeader('Content-Type', mimeTypes[extension] || 'application/octet-stream');
+  if (usePrecompressedGzip) res.setHeader('Content-Encoding', 'gzip');
+
   if (req.method === 'HEAD') {
-    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Length', responseLength);
     res.writeHead(200).end();
     return;
   }
 
-  const stream = fs.createReadStream(filePath);
-  if (acceptsGzip && compressible) {
+  const stream = fs.createReadStream(responsePath);
+  if (compressible && /\bgzip\b/.test(acceptEncoding)) {
     res.setHeader('Content-Encoding', 'gzip');
     res.writeHead(200);
     stream.pipe(zlib.createGzip({ level: 6 })).pipe(res);
   } else {
-    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Length', responseLength);
     res.writeHead(200);
     stream.pipe(res);
   }

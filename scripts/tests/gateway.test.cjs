@@ -1,11 +1,19 @@
 const assert = require('node:assert/strict');
-const { readFile } = require('node:fs/promises');
+const { createHash } = require('node:crypto');
+const { copyFile, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } = require('node:fs/promises');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { test } = require('node:test');
+const { promisify } = require('node:util');
 const { gunzipSync } = require('node:zlib');
+
+const frontend = path.resolve(__dirname, '../../frontend');
+const gridAsset = 'assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson';
+const runFile = promisify(execFile);
+const etagFor = content => `"${createHash('sha256').update(content).digest('hex')}"`;
 
 async function listen(server) {
   server.listen(0, '127.0.0.1');
@@ -13,9 +21,11 @@ async function listen(server) {
   return server.address().port;
 }
 
-function getRawResponse(url, encoding) {
+function getRawResponse(url, { encoding, method = 'GET', ifNoneMatch } = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, { headers: { 'Accept-Encoding': encoding } }, async response => {
+    const headers = encoding === undefined ? {} : { 'Accept-Encoding': encoding };
+    if (ifNoneMatch !== undefined) headers['If-None-Match'] = ifNoneMatch;
+    const request = http.get(url, { method, headers }, async response => {
       try {
         const chunks = [];
         for await (const chunk of response) chunks.push(chunk);
@@ -27,6 +37,38 @@ function getRawResponse(url, encoding) {
     request.on('error', reject);
     request.setTimeout(5000, () => request.destroy(new Error('Static response timed out')));
   });
+}
+
+async function startGateway(t, backendPort, directory = frontend) {
+  const reservation = http.createServer();
+  const frontendPort = await listen(reservation);
+  await new Promise(resolve => reservation.close(resolve));
+  const child = spawn(process.execPath, [path.join(directory, 'server.cjs')], {
+    windowsHide: true,
+    env: {
+      ...process.env,
+      FRONTEND_HOST: '127.0.0.1', FRONTEND_PORT: String(frontendPort),
+      SATGPT_SERVICE_HOST: '127.0.0.1', AGENT_PORT: String(backendPort), HARNESS_PORT: 'ignored',
+      BASIC_SERVICE_HOST: 'ignored.invalid', HARNESS_SERVICE_HOST: 'ignored.invalid',
+      PROXY_TIMEOUT_MS: '5000', PROXY_MAX_SOCKETS: '16',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
+    }
+  });
+  await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code) => reject(new Error(`Gateway exited before ready: ${code}`)));
+    child.stdout.on('data', (chunk) => {
+      if (chunk.toString().includes('production frontend listening')) resolve();
+    });
+  });
+  return `http://127.0.0.1:${frontendPort}`;
 }
 
 test('production gateway preserves Basic and Harness contracts', { timeout: 20000 }, async (t) => {
@@ -58,35 +100,7 @@ test('production gateway preserves Basic and Harness contracts', { timeout: 2000
   });
   t.after(() => { backend.closeAllConnections(); backend.close(); });
   const backendPort = await listen(backend);
-  const reservation = http.createServer();
-  const frontendPort = await listen(reservation);
-  await new Promise((resolve) => reservation.close(resolve));
-  const child = spawn(process.execPath, [path.resolve(__dirname, '../../frontend/server.cjs')], {
-    windowsHide: true,
-    env: {
-      ...process.env,
-      FRONTEND_HOST: '127.0.0.1', FRONTEND_PORT: String(frontendPort),
-      SATGPT_SERVICE_HOST: '127.0.0.1', AGENT_PORT: String(backendPort), HARNESS_PORT: 'ignored',
-      BASIC_SERVICE_HOST: 'ignored.invalid', HARNESS_SERVICE_HOST: 'ignored.invalid',
-      PROXY_TIMEOUT_MS: '5000', PROXY_MAX_SOCKETS: '16',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  t.after(async () => {
-    if (child.exitCode === null) {
-      const exited = once(child, 'exit');
-      child.kill();
-      await exited;
-    }
-  });
-  await new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code) => reject(new Error(`Gateway exited before ready: ${code}`)));
-    child.stdout.on('data', (chunk) => {
-      if (chunk.toString().includes('production frontend listening')) resolve();
-    });
-  });
-  const base = `http://127.0.0.1:${frontendPort}`;
+  const base = await startGateway(t, backendPort);
 
   await t.test('forwards Harness task requests', async () => {
     const body = JSON.stringify({ prompt: 'Map rainfall', bounds: [100, 10, 101, 11] });
@@ -147,25 +161,133 @@ test('production gateway preserves Basic and Harness contracts', { timeout: 2000
     assert.match(await response.text(), /<div id="root">/);
   });
 
-  await t.test('serves the original grid GeoJSON with or without gzip', async () => {
-    const asset = 'assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson';
-    const original = await readFile(path.join(__dirname, '../../frontend/public', asset));
-    const url = `${base}/${asset}`;
-    const gzip = await getRawResponse(url, 'gzip');
-    const identity = await getRawResponse(url, 'identity');
-
-    for (const response of [gzip, identity]) {
-      assert.equal(response.status, 200);
-      assert.equal(response.headers['content-type'], 'application/geo+json');
-      assert.equal(response.headers['vary'], 'Accept-Encoding');
-      assert.equal(response.headers['cache-control'], 'no-cache');
+  await t.test('serves the built grid gzip and honors the requested encoding', async t => {
+    const original = await readFile(path.join(frontend, 'public', gridAsset));
+    const compressed = await readFile(path.join(frontend, 'build', `${gridAsset}.gz`));
+    const url = `${base}/${gridAsset}`;
+    for (const [encoding, useGzip] of [
+      ['gzip', true], ['br, GZIP; q=0.5', true], ['identity', false], [undefined, false], ['br', false],
+      ['br, gzip;q=0', false], ['gzip;q=0.000, *;q=1', false],
+    ]) {
+      const expected = useGzip ? compressed : original;
+      const response = await getRawResponse(url, { encoding });
+      assert.equal(response.status, 200, encoding);
+      assert.equal(response.headers['content-type'], 'application/geo+json', encoding);
+      assert.equal(response.headers['vary'], 'Accept-Encoding', encoding);
+      assert.equal(response.headers['cache-control'], 'no-cache', encoding);
+      assert.equal(response.headers['content-encoding'], useGzip ? 'gzip' : undefined, encoding);
+      assert.equal(response.headers.etag, etagFor(expected), encoding);
+      assert.equal(Number(response.headers['content-length']), expected.length, encoding);
+      assert.ok(response.body.equals(expected), `unexpected HTTP body for ${encoding ?? 'no encoding header'}`);
     }
-    assert.equal(gzip.headers['content-encoding'], 'gzip');
+
+    for (const encoding of ['gzip', 'gzip;q=0']) {
+      const head = await getRawResponse(url, { encoding, method: 'HEAD' });
+      const get = await getRawResponse(url, { encoding });
+      assert.equal(head.status, get.status);
+      assert.equal(head.body.length, 0);
+      for (const header of ['content-type', 'content-length', 'content-encoding', 'cache-control', 'vary', 'etag']) {
+        assert.equal(head.headers[header], get.headers[header], header);
+      }
+    }
+
+    assert.ok(gunzipSync(compressed).equals(original), 'decompressed GeoJSON must match the source asset');
+    assert.ok(compressed.length <= original.length * 0.05, 'gzip must save at least 95% of the grid payload');
+    t.diagnostic(`GeoJSON HTTP body: ${original.length} bytes uncompressed, ${compressed.length} bytes gzip`);
+  });
+
+  await t.test('revalidates both grid encodings with zero-body GET and HEAD responses', async t => {
+    const url = `${base}/${gridAsset}`;
+    const gzip = await getRawResponse(url, { encoding: 'gzip' });
+    const raw = await getRawResponse(url, { encoding: 'identity' });
+    assert.notEqual(gzip.headers.etag, raw.headers.etag);
+
+    for (const [encoding, response] of [['gzip', gzip], ['gzip;q=0', raw]]) {
+      const etag = response.headers.etag;
+      for (const [method, ifNoneMatch] of [
+        ['GET', etag], ['GET', `"other,tag", W/${etag}`], ['GET', '*'], ['HEAD', etag],
+      ]) {
+        const checked = await getRawResponse(url, { encoding, method, ifNoneMatch });
+        assert.equal(checked.status, 304);
+        assert.equal(checked.body.length, 0);
+        assert.equal(checked.headers['content-length'], undefined);
+        assert.equal(checked.headers.etag, etag);
+        assert.equal(checked.headers['cache-control'], 'no-cache');
+        assert.equal(checked.headers.vary, 'Accept-Encoding');
+      }
+    }
+
+    const crossEncoding = await getRawResponse(url, { encoding: 'gzip;q=0', ifNoneMatch: gzip.headers.etag });
+    assert.equal(crossEncoding.status, 200);
+    assert.equal(crossEncoding.headers.etag, raw.headers.etag);
+    assert.ok(crossEncoding.body.equals(raw.body));
+    t.diagnostic('Revalidated grid HTTP body: 0 bytes for both encodings');
+  });
+
+  await t.test('falls back to the original GeoJSON without a precompressed file', async t => {
+    const build = path.join(frontend, 'build');
+    const fixture = await mkdtemp(path.join(build, 'geojson-test-'));
+    const file = path.join(fixture, 'uncompressed.geojson');
+    t.after(async () => {
+      await rm(file, { force: true });
+      await rmdir(fixture);
+    });
+    const original = Buffer.from('{"type":"FeatureCollection","features":[]}');
+    await writeFile(file, original);
+    const url = `${base}/${path.basename(fixture)}/${path.basename(file)}`;
+    const response = await getRawResponse(url, { encoding: 'gzip' });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers['content-encoding'], undefined);
+    assert.equal(Number(response.headers['content-length']), original.length);
+    assert.deepEqual(response.body, original);
+  });
+
+  await t.test('detects a changed grid at the same URL and supports older build artifacts', async t => {
+    const temporaryRoot = os.tmpdir();
+    const fixture = await mkdtemp(path.join(temporaryRoot, 'satgpt-grid-gateway-'));
+    t.after(async () => {
+      assert.match(path.relative(temporaryRoot, fixture), /^satgpt-grid-gateway-[\w-]+$/);
+      await rm(fixture, { recursive: true, force: true });
+    });
+    const grid = path.join(fixture, 'build', gridAsset);
+    await mkdir(path.dirname(grid), { recursive: true });
+    await Promise.all(['server.cjs', 'projectEnv.cjs', 'precompress-grid.cjs']
+      .map(file => copyFile(path.join(frontend, file), path.join(fixture, file))));
+    const publish = async version => {
+      const content = Buffer.from(JSON.stringify({ type: 'FeatureCollection', features: [], name: version }));
+      await writeFile(grid, content);
+      await runFile(process.execPath, [path.join(fixture, 'precompress-grid.cjs')], { windowsHide: true });
+      return content;
+    };
+
+    const original = await publish('v1');
+    const fixtureBase = await startGateway(t, backendPort, fixture);
+    const url = `${fixtureBase}/${gridAsset}`;
+    const encoding = 'gzip';
+    const before = await getRawResponse(url, { encoding });
+    assert.deepEqual(gunzipSync(before.body), original);
+    const updated = await publish('v2');
+    assert.equal(updated.length, original.length);
+    const after = await getRawResponse(url, { encoding, ifNoneMatch: before.headers.etag });
+    assert.equal(after.status, 200);
+    assert.notEqual(after.headers.etag, before.headers.etag);
+    assert.deepEqual(gunzipSync(after.body), updated);
+    const revalidated = await getRawResponse(url, { encoding, ifNoneMatch: after.headers.etag });
+    assert.equal(revalidated.status, 304);
+    assert.equal(revalidated.body.length, 0);
+
+    await rm(`${grid}.gz`);
+    const identity = await getRawResponse(url, { encoding, ifNoneMatch: after.headers.etag });
+    assert.equal(identity.status, 200);
     assert.equal(identity.headers['content-encoding'], undefined);
-    assert.equal(Number(identity.headers['content-length']), original.length);
-    assert.ok(identity.body.equals(original), 'uncompressed GeoJSON must match the source asset');
-    assert.ok(gunzipSync(gzip.body).equals(original), 'decompressed GeoJSON must match the source asset');
-    assert.ok(gzip.body.length <= identity.body.length * 0.05, 'gzip must save at least 95% of the grid payload');
-    t.diagnostic(`GeoJSON HTTP body: ${identity.body.length} bytes uncompressed, ${gzip.body.length} bytes gzip`);
+    assert.equal(identity.headers.etag, etagFor(updated));
+    assert.deepEqual(identity.body, updated);
+    assert.equal((await getRawResponse(url, { encoding, ifNoneMatch: identity.headers.etag })).status, 304);
+
+    await rm(`${grid}.etag.json`);
+    const legacy = await getRawResponse(url, { encoding, ifNoneMatch: identity.headers.etag });
+    assert.equal(legacy.status, 200);
+    assert.equal(legacy.headers.etag, undefined);
+    assert.deepEqual(legacy.body, updated);
   });
 });

@@ -23,6 +23,7 @@
     "dev": "vite",
     "start:prod": "node server.cjs",
     "build": "vite build",
+    "postbuild": "node precompress-grid.cjs",
     "test": "vitest run",
     "test:node": "node --test src/harness/hooks/useAgentChat.test.cjs src/map/tests/fishnetSelection.test.cjs"
   },
