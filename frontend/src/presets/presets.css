@@ -9,7 +9,6 @@
 .preset-library h2 { margin: 0; font-size: 18px; color: var(--satgpt-ui-heading); }
 .preset-library header button { display: flex; border: 0; }
 .preset-library-scroll { overflow: auto; padding: 0 16px 18px; scrollbar-width: thin; }
-.preset-search { width: 100%; box-sizing: border-box; border: 1px solid var(--satgpt-ui-border); border-radius: 9px; padding: 10px 12px; font: inherit; background: #fff; }
 .preset-themes { display: flex; gap: 6px; margin: 12px 0 16px; }
 .preset-themes button { display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1; padding: 8px 3px; font-size: 12px; font-weight: 600; }
 .basic-preset-workspace button[aria-pressed=true] { border-color: var(--satgpt-ui-accent); color: var(--satgpt-ui-accent); background: #edf4ff; }

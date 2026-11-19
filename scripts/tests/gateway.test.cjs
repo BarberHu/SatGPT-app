@@ -1,14 +1,32 @@
 const assert = require('node:assert/strict');
+const { readFile } = require('node:fs/promises');
 const http = require('node:http');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { test } = require('node:test');
+const { gunzipSync } = require('node:zlib');
 
 async function listen(server) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return server.address().port;
+}
+
+function getRawResponse(url, encoding) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { headers: { 'Accept-Encoding': encoding } }, async response => {
+      try {
+        const chunks = [];
+        for await (const chunk of response) chunks.push(chunk);
+        resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) });
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on('error', reject);
+    request.setTimeout(5000, () => request.destroy(new Error('Static response timed out')));
+  });
 }
 
 test('production gateway preserves Basic and Harness contracts', { timeout: 20000 }, async (t) => {
@@ -127,5 +145,27 @@ test('production gateway preserves Basic and Harness contracts', { timeout: 2000
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /text\/html/);
     assert.match(await response.text(), /<div id="root">/);
+  });
+
+  await t.test('serves the original grid GeoJSON with or without gzip', async () => {
+    const asset = 'assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson';
+    const original = await readFile(path.join(__dirname, '../../frontend/public', asset));
+    const url = `${base}/${asset}`;
+    const gzip = await getRawResponse(url, 'gzip');
+    const identity = await getRawResponse(url, 'identity');
+
+    for (const response of [gzip, identity]) {
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['content-type'], 'application/geo+json');
+      assert.equal(response.headers['vary'], 'Accept-Encoding');
+      assert.equal(response.headers['cache-control'], 'no-cache');
+    }
+    assert.equal(gzip.headers['content-encoding'], 'gzip');
+    assert.equal(identity.headers['content-encoding'], undefined);
+    assert.equal(Number(identity.headers['content-length']), original.length);
+    assert.ok(identity.body.equals(original), 'uncompressed GeoJSON must match the source asset');
+    assert.ok(gunzipSync(gzip.body).equals(original), 'decompressed GeoJSON must match the source asset');
+    assert.ok(gzip.body.length <= identity.body.length * 0.05, 'gzip must save at least 95% of the grid payload');
+    t.diagnostic(`GeoJSON HTTP body: ${identity.body.length} bytes uncompressed, ${gzip.body.length} bytes gzip`);
   });
 });

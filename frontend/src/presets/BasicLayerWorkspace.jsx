@@ -26,7 +26,6 @@ export default function BasicLayerWorkspace({ active = true }) {
   const [editing, setEditing] = useState(null);
   const [collapsed, setCollapsed] = useState(() => window.matchMedia?.('(max-width: 760px)').matches || false);
   const [layersOpen, setLayersOpen] = useState(true);
-  const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
   const [areaToolsOpen, setAreaToolsOpen] = useState(false);
   const upload = useRef(null);
@@ -75,13 +74,12 @@ export default function BasicLayerWorkspace({ active = true }) {
     {selected === preset.key ? <PresetParameterForm key={`${preset.key}-${editing?.id || 'new'}`} preset={preset} initialParams={editing?.params}
       editing={Boolean(editing)} disabled={!selectedAOI || isAoiEditing} onApply={apply} onCancel={editing ? () => setEditing(null) : undefined} /> : null}
   </div>)}</section>;
-  const matches = preset => `${preset.title} ${preset.infoText}`.toLowerCase().includes(query.toLowerCase());
   return <div className={`basic-preset-workspace${collapsed ? ' library-collapsed' : ''}`}>
     <PresetMapController rows={rows} store={store} />
     {collapsed ? <button type="button" className="preset-library-open" aria-label="Open Layer library" onClick={() => setCollapsed(false)}><Layers size={17} />Layer library</button> :
       <aside className="preset-library" aria-label="Layer library">
         <header><h2>Layer library</h2><button type="button" aria-label="Collapse Layer library" onClick={() => setCollapsed(true)}><ChevronLeft size={19} /></button></header>
-        <div className="preset-library-scroll"><input className="preset-search" aria-label="Find a layer" placeholder="Find a layer" value={query} onChange={event => setQuery(event.target.value)} />
+        <div className="preset-library-scroll">
           <nav className="preset-themes" aria-label="Hazard theme">{presetThemes.map(id => { const Icon = icons[id]; return <button key={id} type="button" aria-pressed={theme === id} onClick={() => { setTheme(id); selectPreset(presetLayerCatalog.find(preset => preset.theme === id).key); }}><Icon size={16} />{labels[id]}</button>; })}</nav>
           <section className="preset-study-area"><h3>Study area</h3><strong>{selectedAOI?.label || 'Select a study area'}</strong>
             <details className="preset-area-tools" open={areaToolsOpen || !selectedAOI || isAoiEditing}
@@ -104,8 +102,8 @@ export default function BasicLayerWorkspace({ active = true }) {
             {aoiStorageError ? <p role="alert">{aoiStorageError}</p> : null}
           </section>
           {notice ? <p className="preset-notice" role="status">{notice}</p> : null}
-          {renderList(presetLayerCatalog.filter(preset => preset.theme === theme && matches(preset)), `${labels[theme]} presets`)}
-          {renderList(presetLayerCatalog.filter(preset => preset.theme === 'context' && matches(preset)), 'Context')}
+          {renderList(presetLayerCatalog.filter(preset => preset.theme === theme), `${labels[theme]} presets`)}
+          {renderList(presetLayerCatalog.filter(preset => preset.theme === 'context'), 'Context')}
           <details className="preset-map-options"><summary>Map display</summary><label><input type="checkbox" checked={is3DEnabled} onChange={event => setIs3DEnabled(event.target.checked)} />3D terrain</label>
             <label><input type="checkbox" checked={isBuildingsEnabled} onChange={event => setIsBuildingsEnabled(event.target.checked)} />Buildings</label></details>
         </div>

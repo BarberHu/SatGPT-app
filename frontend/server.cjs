@@ -25,6 +25,7 @@ const upstreamAgent = new http.Agent({
 
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
+  '.geojson': 'application/geo+json',
   '.html': 'text/html; charset=utf-8',
   '.ico': 'image/x-icon',
   '.jpeg': 'image/jpeg',
@@ -137,7 +138,7 @@ function serveStatic(req, res) {
   const stat = fs.statSync(filePath);
   const isHashedAsset = pathname.startsWith('/static/');
   const acceptsGzip = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
-  const compressible = ['.css', '.html', '.js', '.json', '.svg', '.txt'].includes(extension);
+  const compressible = ['.css', '.geojson', '.html', '.js', '.json', '.svg', '.txt'].includes(extension);
 
   setSecurityHeaders(res);
   res.setHeader('Content-Type', mimeTypes[extension] || 'application/octet-stream');
