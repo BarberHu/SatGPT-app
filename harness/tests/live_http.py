@@ -26,8 +26,6 @@ class BrowserHttp:
     def request(self, method, path, body=None, expected=None):
         if method == 'POST' and path == '/api/harness/tasks':
             body = {'request_id': uuid.uuid4().hex, **(body or {})}
-            if not body.get('conversation_id'):
-                body['conversation_id'] = self.request('GET', '/api/harness/conversation')['conversation_id']
         with self._connection() as connection:
             connection.request(method, path, json.dumps(body) if body is not None else None,
                                {'Origin': self.origin, 'Content-Type': 'application/json', 'Cookie': self.cookie})

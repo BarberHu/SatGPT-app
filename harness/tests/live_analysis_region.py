@@ -4,6 +4,7 @@ Run with AGENT_PORT set to the isolated server's port. Never prints answers,
 credentials, tool payloads or layer URLs. Writes only a compact safe report.
 """
 import json
+import re
 import time
 from pathlib import Path
 from satgpt_config import load_project_env, integer
@@ -17,12 +18,17 @@ def main():
     browser = BrowserHttp(port)
     request = browser.request
 
-    cid = request('POST', '/api/harness/conversation/new')['conversation_id']
+    cid = None
+    assert request('GET', '/api/harness/conversations')['conversations'] == []
     report = {'conversation_isolated':True, 'cases':[]}
     def run(name, prompt, expect_tools, reconnect=False):
+        nonlocal cid
         started = time.monotonic()
         job = request('POST', '/api/harness/tasks', {'prompt':prompt, 'bounds':[0,0,1,1],
                       'analysis_region':TRIANGLE, 'conversation_id':cid}, expected=202)
+        assert job['conversation_id'] and (cid is None or job['conversation_id'] == cid)
+        cid = job['conversation_id']
+        assert [row['id'] for row in request('GET', '/api/harness/conversations')['conversations']] == [cid]
         # Same conversation cannot start a duplicate while this job is active.
         request('POST', '/api/harness/tasks', {'prompt':prompt, 'bounds':[0,0,1,1],
                 'conversation_id':cid}, expected=409)
@@ -74,7 +80,8 @@ def main():
     run('knowledge_without_GEE', 'In two sentences, what is NDVI? This is a general knowledge question.', False)
     result, tools = run('drawn_polygon_GEE_statistics_and_layer',
         "For this selected area, use NASA SRTM USGS/SRTMGL1_003. With gee_eval return a dictionary containing "
-        "the exact analysis_region_geojson, polygon area in square meters and mean elevation in meters, using "
+        "the exact geometry, polygon area in square meters and mean elevation in meters. Use the exact "
+        "dictionary keys analysis_region_geojson, area_sq_m, and mean_elevation_m. Use "
         "analysis_region for clip and reduceRegion at scale=90, maxPixels=1000000. Then create one gee_layer "
         "clipped to analysis_region with bounds=[113.6,34.7,113.64,34.74], name='Selected area elevation', "
         "min=0,max=300,palette=['ffffff','449977'], metadata dataset_id=USGS/SRTMGL1_003 and unit=m. "
@@ -91,7 +98,8 @@ def main():
     report['mean_elevation_m'] = statistics['mean_elevation_m']
     conflict, _ = run('obvious_place_conflict_asks_before_tools',
                      'Calculate the mean elevation of Tokyo, Japan.', False)
-    assert '?' in conflict['output']['message'], 'Expected clarification question'
+    scope_choice = r'[?？]|\bplease\s+(?:choose|confirm|specify)\b'
+    assert re.search(scope_choice, conflict['output']['message'], re.I), 'Expected a request to choose the analysis scope'
     confirmed, _ = run('confirmation_continues_without_repeated_question',
         'Use the currently selected drawn polygon. I confirm this scope; calculate its mean elevation '
         'using analysis_region and SRTM at scale=90. Report which scope you used in under 80 words.', True)

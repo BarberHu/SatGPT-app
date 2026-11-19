@@ -43,19 +43,20 @@ export default function HarnessApp({ active = true }) {
   const focusAfterRender = useRef(null);
   const desktopCollapsed = !narrow && !conversationOpen;
   const chat = useAgentChat({ visible: active && (narrow ? mobileView === 'chat' && !mobileHistoryOpen : conversationOpen) });
+  const conversationKey = chat.conversationId ?? chat.draftKey;
   const map = useAgentMap(chat.conversationId, chat.messages);
-  const region = useAgentRegion(chat.conversationId, chat.messages, active);
+  const region = useAgentRegion(chat.conversationId, chat.messages, active, chat.draftKey);
   useEffect(() => {
     const target = focusAfterRender.current?.current;
     if (target?.isConnected) { target.focus(); focusAfterRender.current = null; }
   }, [desktopCollapsed, historyOpen, narrow]);
-  useEffect(() => { setPrompt(''); }, [chat.conversationId]);
+  useEffect(() => { setPrompt(''); }, [conversationKey]);
   useEffect(() => { setMobileHistoryOpen(false); }, [narrow]);
   const conversationTitle = chat.conversations.find(item => item.id === chat.conversationId)?.title
     || chat.messages.find(item => item.role === 'user')?.content || 'New chat';
   const changeConversation = async id => {
     if (chat.deleting) return;
-    map.prepareConversationChange();
+    map.prepareConversationChange(Boolean(id && id !== chat.conversationId));
     if (await chat.changeConversation(id)) {
       setMobileView('chat');
       if (narrow) setMobileHistoryOpen(false);
@@ -83,7 +84,7 @@ export default function HarnessApp({ active = true }) {
     const geometry = region.snapshot();
     const area = geometry ? getBoundsFromGeometry(geometry) : null;
     const bounds = area ? [area.west, area.south, area.east, area.north] : map.bounds();
-    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata())) setPrompt('');
+    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata(), region.attach)) setPrompt('');
   };
   const editRegion = () => {
     if (region.begin() && narrow) setMobileView('map');
@@ -128,12 +129,12 @@ export default function HarnessApp({ active = true }) {
                 aria-label="Collapse conversation panel" aria-expanded={true} title="Collapse conversation panel"
                 onClick={() => { focusAfterRender.current = restoreButton; setConversationOpen(false); }}><PanelLeftClose size={18} /></Button> : null}
             </div>
-            <MessageList key={chat.conversationId || 'loading'} items={chat.items} loading={chat.loading}
+            <MessageList key={conversationKey} items={chat.items} loading={chat.loading}
               reconnecting={chat.reconnecting} onSuggest={setPrompt} onFocusLayer={focusLayer} />
             {chat.error ? <div className="agent-chat-error" role="alert"><span>{chat.error}</span><Button type="button" variant="ghost" size="icon" aria-label="Dismiss error" onClick={chat.clearError}><X /></Button></div> : null}
             <Composer value={prompt} onChange={setPrompt} onSend={send} onStop={chat.stop}
               region={region} onEditRegion={editRegion}
-              areaControls={<AreaControls hideEditAction current={region.aoi} scopeKey={`${active ? 'agent' : 'inactive'}:${chat.conversationId}`} disabled={!active || !region.ready || region.editing || chat.loading || chat.pending}
+              areaControls={<AreaControls hideEditAction current={region.aoi} scopeKey={`${active ? 'agent' : 'inactive'}:${conversationKey}`} disabled={!active || !region.ready || region.editing || chat.loading || chat.pending}
                 onUse={region.use} onEdit={aoi => { if (region.begin(aoi) && narrow) setMobileView('map'); }}
                 onLocate={aoi => focusLayer({ bounds: [aoi.bounds.west,aoi.bounds.south,aoi.bounds.east,aoi.bounds.north] })}
                 outlineVisible={region.outlineVisible} onToggleOutline={region.toggleOutline} /> }

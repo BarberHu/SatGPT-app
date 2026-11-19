@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from harness.app.identity import PrivateRoutes
+from harness.app.identity import COOKIE, PrivateRoutes
 from harness.app.server import router
 from harness.app.session_store import TERMINAL
 
@@ -99,7 +99,12 @@ def client_for(controller, *, app=None):
 
 
 def new_chat(client):
-    return client.post('/api/harness/conversation/new').json()['conversation_id']
+    """Seed a legacy conversation for tests of requests with an existing ID."""
+    controller = client.app.state.controller
+    owner = controller.identity.verify(client.cookies.get(COOKIE))
+    assert owner
+    with controller.store.connect(write=True) as db:
+        return controller.store.new(db, owner)
 
 
 def task_body(cid, prompt='Analyze the area', **extra):

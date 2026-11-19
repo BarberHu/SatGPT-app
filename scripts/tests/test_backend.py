@@ -126,17 +126,17 @@ class UnifiedBackendTests(unittest.TestCase):
     def test_task_concurrency_cancellation_and_sse(self):
         with self.client as client, patch.object(basic, 'get_chatgpt_response', return_value='offline'):
             client.get('/api/harness/session')
-            conversation = client.get('/api/harness/conversation').json()
-            response = client.post('/api/harness/tasks', json=task_body(conversation['conversation_id'], 'Hold task'))
+            response = client.post('/api/harness/tasks', json=task_body(None, 'Hold task'))
             self.assertEqual(response.status_code, 202)
             job = response.json()['id']
+            cid = response.json()['conversation_id']
             self.assertTrue(HoldingSession.arrived.wait(2))
             started = time.perf_counter()
             self.assertEqual(client.post('/api/chat', json={'message': 'hello'}).json(), {'message': 'offline'})
             self.assertEqual(client.get('/readyz').status_code, 200)
             self.assertLess(time.perf_counter() - started, 1)
             self.assertEqual(client.get(f'/api/harness/tasks/{job}').json()['status'], 'running')
-            conflict = client.post('/api/harness/tasks', json=task_body(conversation['conversation_id'], 'Another'))
+            conflict = client.post('/api/harness/tasks', json=task_body(cid, 'Another'))
             self.assertEqual(conflict.status_code, 409)
             self.assertEqual(client.post(f'/api/harness/tasks/{job}/cancel').json()['status'], 'cancelling')
             self.assertEqual(wait_for_task(client, job)['status'], 'cancelled')
@@ -148,17 +148,16 @@ class UnifiedBackendTests(unittest.TestCase):
             self.assertEqual(client.get('/api/harness/tasks/absent').status_code, 404)
             self.assertEqual(client.post('/api/harness/tasks/absent/cancel').status_code, 404)
             new = client.post('/api/harness/conversation/new').json()
-            self.assertNotEqual(new['conversation_id'], conversation['conversation_id'])
+            self.assertIsNone(new['conversation_id'])
             self.assertEqual(client.get('/api/harness/conversations').status_code, 200)
-            self.assertEqual(client.post(f"/api/harness/conversations/{conversation['conversation_id']}/activate").status_code, 200)
+            self.assertEqual(client.post(f'/api/harness/conversations/{cid}/activate').status_code, 200)
 
     def test_shutdown_cancels_running_task_and_joins_threads(self):
         with self.client as client:
             controller = backend.app.state.controller
             client.get('/api/harness/session')
-            cid = client.get('/api/harness/conversation').json()['conversation_id']
             owner = controller.identity.verify(client.cookies.get('satgpt_browser'))
-            job = client.post('/api/harness/tasks', json=task_body(cid, 'Hold on shutdown')).json()
+            job = client.post('/api/harness/tasks', json=task_body(None, 'Hold on shutdown')).json()
             self.assertTrue(HoldingSession.arrived.wait(2))
         self.assertEqual(controller.get(owner, job['id'])['status'], 'cancelled')
         self.assertTrue(all(not thread.is_alive() for thread in controller.pool._threads))

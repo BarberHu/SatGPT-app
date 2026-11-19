@@ -4,24 +4,136 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import HarnessApp from './App';
 import { SharedMapProvider, SharedMapSurface } from '../map/SharedMapContext';
+import { AoiLibraryProvider } from '../aoi/AoiLibraryContext';
+import { selectionKey } from './map/regionSelection';
 function AgentWorkspace(props) { return <SharedMapProvider mode="agent"><div><SharedMapSurface /><HarnessApp {...props} /></div></SharedMapProvider>; }
-const { mapSetView, mapRemoveLayer } = vi.hoisted(() => ({ mapSetView: vi.fn(), mapRemoveLayer: vi.fn() }));
+const { mapSetView, mapRemoveLayer, mapVisibility } = vi.hoisted(() => ({ mapSetView: vi.fn(), mapRemoveLayer: vi.fn(), mapVisibility: vi.fn() }));
 vi.mock('../map/config', () => ({ mapOptions: { token: 'test-token', style: 'mapbox://styles/test' } }));
+vi.mock('@mapbox/mapbox-gl-draw', () => ({ default: class {
+  static modes = {};
+  changeMode() {}
+  deleteAll() {}
+  add() {}
+} }));
 
 vi.mock('../map/mapboxAdapter', () => ({
   MapboxAdapter: class {
     onStyleReady(callback) { let disposed = false; queueMicrotask(() => { if (!disposed) callback(); }); return () => { disposed = true; }; }
     getBasicPort() { return null; }
+    getAgentDrawPort() { return this.drawPort ??= { addControl() {}, removeControl() {}, on() {}, off() {} }; }
     setBasicActive() {}
     onViewChange() { return () => {}; }
     getView() { return { center: [100, 10], zoom: 5, bounds: [99, 9, 101, 11] }; }
     setView(view) { mapSetView(view); }
-    addLayer() {}
+    addLayer(layer) { mapVisibility(layer.id, layer.visible); }
     removeLayer(id) { mapRemoveLayer(id); }
-    setVisibility() {}
+    setVisibility(id, visible) { mapVisibility(id, visible); }
     dispose() {}
   },
 }));
+
+test('new chats stay local until a retry succeeds and carry their selected area into the conversation', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear();
+  mapVisibility.mockClear();
+  const oldId = 'webgis-old', newId = 'webgis-created';
+  const oldHistory = [{ id: 'old', role: 'assistant', job_id: 'old-job', content: 'Old reply',
+    layers: [{ name: 'Old layer', url: 'https://earthengine.googleapis.com/v1/projects/p/maps/m/tiles/{z}/{x}/{y}' }] }];
+  const geometry = { type: 'Polygon', coordinates: [[[100, 10], [101, 10], [100, 11], [100, 10]]] };
+  const area = { id: 'saved-area', revision: 1, label: 'Saved triangle', source: 'draw',
+    geojson: { type: 'Feature', properties: {}, geometry } };
+  const repository = { list: async () => [area], migrate: async () => ({ invalid: 0 }) };
+  const sources = [], sent = [];
+  let messages = [], active = null;
+  class Source {
+    constructor(url) { this.url = url; sources.push(this); }
+    close() {}
+  }
+  const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
+  const fetcher = vi.fn(async (url, options) => {
+    const path = url.slice('/api/harness'.length);
+    if (path === '/conversation' || path === `/conversations/${oldId}/activate`) {
+      return response({ conversation_id: oldId, messages: oldHistory, active_task: null });
+    }
+    if (path === '/conversations') return response({ conversations: [
+      ...(messages.length ? [{ id: newId, title: messages[0].content, active_task: active }] : []), { id: oldId, title: 'Old chat' },
+    ] });
+    if (path === `/conversations/${newId}`) return response({ conversation_id: newId, messages, active_task: active });
+    if (path === '/tasks') {
+      const body = JSON.parse(options.body); sent.push(body);
+      if (sent.length === 1) return response({ detail: { message: 'Please retry' } }, 503);
+      active = `job-${sent.length}`;
+      messages = [...messages, { id: `user-${active}`, role: 'user', job_id: active, content: body.prompt }];
+      return response({ id: active, conversation_id: newId, prompt: body.prompt, status: 'queued' }, 202);
+    }
+    throw new Error(`Unexpected request ${path}`);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  vi.stubGlobal('EventSource', Source);
+  const node = document.body.appendChild(document.createElement('div'));
+  const root = createRoot(node);
+  const render = () => act(async () => root.render(<AoiLibraryProvider repository={repository}><AgentWorkspace /></AoiLibraryProvider>));
+  const click = (selector, container = node) => act(async () => container.querySelector(selector).click());
+  const button = label => [...node.querySelectorAll('button')].find(item => item.textContent === label);
+  const enterPrompt = value => act(async () => {
+    const input = node.querySelector('textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  try {
+    await render();
+    await vi.waitFor(() => expect(node.querySelector('.agent-map-layer')?.textContent).toContain('Old layer'));
+    fetcher.mockClear();
+    await click('[aria-label="New chat"]');
+    await click('[aria-label="New chat"]');
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(node.querySelector('.agent-conversations').textContent).toBe('Old chat');
+    expect(node.textContent).not.toContain('Old layer');
+    expect(mapVisibility).toHaveBeenCalledWith(expect.stringContaining('old-job'), false);
+
+    await act(async () => root.render(null));
+    await render();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/harness/conversations']);
+    const draw = node.querySelector('[aria-label="Draw analysis area"]');
+    expect(draw.disabled).toBe(false);
+    await act(async () => button('Saved areas').click());
+    await click('[aria-label="Saved area Saved triangle"] button', document);
+    await act(async () => button('Hide boundary').click());
+    await enterPrompt('First scoped prompt');
+    await click('[aria-label="Send"]');
+    expect(node.textContent).toContain('Please retry');
+    expect(node.querySelector('textarea').value).toBe('First scoped prompt');
+    expect(button('Show boundary')).toBeDefined();
+    expect(node.querySelector('.agent-conversations').textContent).toBe('Old chat');
+
+    await click('[aria-label="Send"]');
+    expect(sent[0]).toEqual(sent[1]);
+    expect(sent[1]).toMatchObject({ conversation_id: null, analysis_region: geometry,
+      analysis_aoi: { id: area.id, revision: 1, label: area.label }, bounds: [100, 10, 101, 11] });
+    expect(node.querySelector('[aria-current="page"]').title).toBe('First scoped prompt');
+    expect(node.querySelector('textarea').value).toBe('');
+    expect(button('Show boundary')).toBeDefined();
+    expect(JSON.parse(localStorage.getItem(selectionKey(newId)))).toMatchObject({ outline_visible: false,
+      aoi: { label: area.label, aoi_ref: { id: area.id, revision: 1 } } });
+    expect(sources[0].url).toBe('/api/harness/tasks/job-2/events');
+    active = null;
+    messages = [...messages, { id: 'reply', role: 'assistant', job_id: 'job-2', content: 'First reply' }];
+    await act(async () => sources[0].onmessage({ data: JSON.stringify({ id: 1, task_id: 'job-2', type: 'snapshot',
+      task: { id: 'job-2', status: 'completed' }, answer: null }) }));
+    expect(node.textContent).toContain('First reply');
+    await enterPrompt('Continue here');
+    await click('[aria-label="Send"]');
+    expect(sent[2].conversation_id).toBe(newId);
+    await click('button[title="Old chat"]');
+    expect(node.querySelector('.agent-map-layer')?.textContent).toContain('Old layer');
+    expect(mapVisibility).toHaveBeenLastCalledWith(expect.stringContaining('old-job'), true);
+  } finally {
+    await act(async () => root.unmount());
+    node.remove();
+    vi.unstubAllGlobals();
+    delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  }
+});
 
 test('real Agent surface streams, reconnects, settles once and restores after remount', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;

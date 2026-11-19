@@ -60,10 +60,14 @@ def main():
 
     started = time.monotonic()
     try:
+        assert request('GET', '/api/harness/conversation')['conversation_id'] is None
+        assert request('GET', '/api/harness/conversations')['conversations'] == []
         job = request('POST', '/api/harness/tasks', {
             'prompt': '先调用 gee_status 检查连接，然后用中文分六个短段落解释如何正确理解遥感降雨、土壤湿度和洪水图层。正文约500字，不要再调用其他Tool。',
             'bounds': [100, 10, 101, 11],
         })
+        assert job['conversation_id']
+        assert [row['id'] for row in request('GET', '/api/harness/conversations')['conversations']] == [job['conversation_id']]
         connection, response = stream(job['id'])
         seen = []
         reconnected = False

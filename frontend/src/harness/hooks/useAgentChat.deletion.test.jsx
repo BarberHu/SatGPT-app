@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { useAgentChat } from './useAgentChat';
 import { chatApi } from '../chatApi';
 
-vi.mock('../chatApi', () => ({ chatApi: {
+vi.mock('../chatApi', async importOriginal => ({ ...await importOriginal(), chatApi: {
   current: vi.fn(), list: vi.fn(), remove: vi.fn(), activate: vi.fn(), subscribe: vi.fn(), send: vi.fn(),
 } }));
 
@@ -77,12 +77,13 @@ test('current deletion adopts fresh state, prevents duplicate requests, navigati
   expect(chatApi.remove).toHaveBeenCalledTimes(1);
   expect(chatApi.activate).not.toHaveBeenCalled();
   expect(chatApi.send).not.toHaveBeenCalled();
-  const fresh = { conversation_id: 'webgis-fresh', messages: [], active_task: null };
+  const fresh = { conversation_id: null, messages: [], active_task: null };
   await act(async () => {
-    finish({ conversation: fresh, conversations: [{ id: 'webgis-fresh', title: 'New chat' }, rows[1]] });
+    finish({ conversation: fresh, conversations: [] });
     expect(await deletion).toBe(true);
   });
-  expect(chat.conversationId).toBe('webgis-fresh');
+  expect(chat.conversationId).toBeNull();
+  expect(chat.conversations).toEqual([]);
   expect(chat.messages).toEqual([]);
   expect(chat.deleting).toBe(false);
 });

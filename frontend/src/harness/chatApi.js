@@ -1,15 +1,21 @@
 import { ensureBrowserSession } from './browserSession.js';
 
 const SELECTION = 'satgpt:harness:current-tab';
+const DRAFT = 'draft';
 const pending = new Map();
+export const emptyConversation = { conversation_id: null, messages: [], active_task: null };
 
-function tabSelection(id) {
+function tabSelection() {
   try {
-    if (id) sessionStorage.setItem(SELECTION, id);
     return sessionStorage.getItem(SELECTION);
   } catch {
     return null;
   }
+}
+
+export function rememberConversation(id) {
+  try { sessionStorage.setItem(SELECTION, id ?? DRAFT); }
+  catch { /* The current selection still works in memory. */ }
 }
 
 function requestId() {
@@ -33,40 +39,30 @@ async function request(path, { signal, ...options } = {}) {
 
 const conversationPath = id => '/conversations/' + encodeURIComponent(id);
 const taskPath = id => '/tasks/' + encodeURIComponent(id);
-const selected = value => { tabSelection(value.conversation_id); return value; };
-
 export const chatApi = {
   async current(signal) {
     const id = tabSelection();
+    if (id === DRAFT) return emptyConversation;
     if (id) {
       try { return await this.get(id, signal); }
       catch (error) { if (error.status !== 404) throw error; }
     }
-    return selected(await request('/conversation', { signal }));
+    return request('/conversation', { signal });
   },
   get: (id, signal) => request(conversationPath(id), { signal }),
   list: signal => request('/conversations', { signal }),
-  async remove(id, signal) {
-    const result = await request(conversationPath(id), { method: 'DELETE', signal });
-    if (tabSelection() === id) selected(result.conversation);
-    return result;
-  },
-  async create(signal) {
-    return selected(await request('/conversation/new', { method: 'POST', signal }));
-  },
-  async activate(id, signal) {
-    return selected(await request(conversationPath(id) + '/activate', { method: 'POST', signal }));
-  },
-  async send(body, signal) {
-    const cid = body.conversation_id;
+  remove: (id, signal) => request(conversationPath(id), { method: 'DELETE', signal }),
+  activate: (id, signal) => request(conversationPath(id) + '/activate', { method: 'POST', signal }),
+  async send(body, signal, draftKey) {
+    const key = body.conversation_id ?? draftKey;
     const fingerprint = JSON.stringify(body);
-    const previous = pending.get(cid);
+    const previous = pending.get(key);
     const id = previous?.fingerprint === fingerprint ? previous.id : requestId();
-    pending.set(cid, { fingerprint, id });
+    pending.set(key, { fingerprint, id });
     if (pending.size > 16) pending.delete(pending.keys().next().value);
     const task = await request('/tasks', { method: 'POST', signal,
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, request_id: id }) });
-    if (pending.get(cid)?.id === id) pending.delete(cid);
+    if (pending.get(key)?.id === id) pending.delete(key);
     return task;
   },
   cancel: (id, signal) => request(taskPath(id) + '/cancel', { method: 'POST', signal }),

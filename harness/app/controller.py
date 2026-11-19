@@ -41,6 +41,10 @@ def validate_bounds(value) -> list[float]:
     return [west, south, east, north]
 
 
+def empty_conversation():
+    return {'conversation_id': None, 'messages': [], 'active_task': None}
+
+
 def layer_code_bounds(code: str) -> list[float] | None:
     """Find a single literal GEE rectangle used by one layer tool call."""
     if not isinstance(code, str):
@@ -160,15 +164,11 @@ class TaskController:
             return self._view(db, owner, cid)
 
     def current(self, owner):
-        with self.store.connect(write=True) as db:
+        with self.store.connect() as db:
+            db.execute('BEGIN')
             row = db.execute('SELECT id FROM conversations WHERE owner=? AND deleted=0 ORDER BY updated DESC LIMIT 1',
                              (owner,)).fetchone()
-            cid = row['id'] if row else self.store.new(db, owner)
-            return self._view(db, owner, cid)
-
-    def new_conversation(self, owner):
-        with self.store.connect(write=True) as db:
-            return self._view(db, owner, self.store.new(db, owner))
+            return self._view(db, owner, row['id']) if row else empty_conversation()
 
     def list_conversations(self, owner):
         with self.store.connect() as db:
@@ -281,23 +281,29 @@ class TaskController:
         fingerprint = hashlib.sha256(canonical).hexdigest()
         with self.lock:
             with self.store.connect(write=True) as db:
-                row = self.store.owned(db, owner, cid)
+                row = self.store.owned(db, owner, cid) if cid is not None else None
                 previous = db.execute('SELECT receipt, fingerprint FROM tasks WHERE owner=? AND request_id=?',
                                       (owner, request_id)).fetchone()
                 if previous is not None:
                     if previous['fingerprint'] != fingerprint:
                         raise AdmissionError('request_conflict', 'Request ID already used with different input.', 409)
-                    return json.loads(previous['receipt'])
-                if self.store.has_active_task(db, owner, cid):
+                    receipt = json.loads(previous['receipt'])
+                    if row is None:
+                        self.store.owned(db, owner, receipt['conversation_id'])
+                    return receipt
+                if row is not None and self.store.has_active_task(db, owner, cid):
                     raise AdmissionError('conversation_busy', 'This conversation already has an active task.', 409)
                 self._require_available(allow_rotation=True)
+                if cid is None:
+                    cid = self.store.new(db, owner)
+                messages = json.loads(row['messages']) if row is not None else []
                 task_id = uuid.uuid4().hex
                 receipt = {'id': task_id, 'conversation_id': cid, 'status': 'queued', 'prompt': prompt,
                            **snapshot, 'revision': 0, 'trace': [], 'output': None, 'error': None,
                            'created_at': timestamp()}
                 db.execute('INSERT INTO tasks(id, conversation_id, owner, request_id, fingerprint, status, receipt) '
                            'VALUES(?,?,?,?,?,?,?)', (task_id, cid, owner, request_id, fingerprint, 'queued', encode(receipt)))
-                self.store.save_messages(db, cid, [*json.loads(row['messages']), message('user', prompt, task_id, **snapshot)])
+                self.store.save_messages(db, cid, [*messages, message('user', prompt, task_id, **snapshot)])
             self.wakeup.set()
             return receipt
 

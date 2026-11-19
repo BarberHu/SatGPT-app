@@ -4,8 +4,9 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from harness.app.controller import TaskController
+from harness.app.controller import AdmissionError, TaskController
 from harness.app.identity import COOKIE
 from harness.tests.runtime_fixture import SimulatedRuntime, client_for, new_chat, result, task_body, wait_for_task
 
@@ -32,6 +33,58 @@ class ConversationTests(unittest.TestCase):
             self.admitted.set()
             assert self.release.wait(5)
         return result('Offline answer', ctx=ctx, reason='aborted' if stop.is_set() else 'completed')
+
+    def test_draft_reads_and_rejected_first_messages_do_not_write(self):
+        empty = {'conversation_id': None, 'messages': [], 'active_task': None}
+        for _ in range(3):
+            self.assertEqual(self.a.get(API+'/conversation').json(), empty)
+            self.assertEqual(self.a.post(API+'/conversation/new').json(), empty)
+        for body in (task_body(None, '   '), task_body(None, bounds=[1, 0, 0, 1]),
+                     task_body(None, analysis_region={'type': 'Point', 'coordinates': [1, 1]})):
+            self.assertEqual(self.a.post(API+'/tasks', json=body).status_code, 422)
+        with patch.object(self.controller, '_require_available', side_effect=AdmissionError('runtime_unavailable', 'Offline', 503)):
+            self.assertEqual(self.a.post(API+'/tasks', json=task_body(None)).status_code, 503)
+        with patch.object(self.controller.store, 'save_messages', side_effect=ValueError('Simulated write failure')):
+            self.assertEqual(self.a.post(API+'/tasks', json=task_body(None)).status_code, 422)
+        self.assertEqual(self.a.get(API+'/conversations').json(), {'conversations': []})
+        self.assertEqual(self.controller.runtime.opens, [])
+        with self.controller.store.connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM conversations').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT count(*) FROM tasks').fetchone()[0], 0)
+
+    def test_first_message_retry_reuses_conversation_and_deleting_it_leaves_no_draft_record(self):
+        self.controller.execution_slots = 0
+        body = task_body(None, 'First question')
+        del body['conversation_id']
+        response = self.a.post(API+'/tasks', json=body)
+        self.assertEqual(response.status_code, 202)
+        first = response.json()
+        cid = first['conversation_id']
+        path = f'{API}/conversations/{cid}'
+        self.assertEqual(self.a.post(API+'/tasks', json={**body, 'conversation_id': None}).json(), first)
+        conflict = self.a.post(API+'/tasks', json={**body, 'prompt': 'Different input'})
+        self.assertEqual((conflict.status_code, conflict.json()['detail']['code']), (409, 'request_conflict'))
+        self.assertEqual(self.b.get(path).status_code, 404)
+        self.assertEqual(self.a.get(API+'/conversation').json()['conversation_id'], cid)
+        self.assertEqual(self.a.get(API+'/conversations').json()['conversations'][0]['title'], 'First question')
+        with self.controller.store.connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM conversations').fetchone()[0], 1)
+            self.assertEqual(db.execute('SELECT count(*) FROM tasks').fetchone()[0], 1)
+        self.assertEqual([m['content'] for m in self.a.get(path).json()['messages']], ['First question'])
+        self.assertEqual(self.controller.runtime.opens, [])
+
+        self.a.post(f'{API}/tasks/{first["id"]}/cancel').raise_for_status()
+        followup = self.a.post(API+'/tasks', json=task_body(cid, 'Follow-up question'))
+        self.assertEqual(followup.status_code, 202)
+        self.assertEqual(followup.json()['conversation_id'], cid)
+        self.a.post(f'{API}/tasks/{followup.json()["id"]}/cancel').raise_for_status()
+        removed = self.a.delete(path)
+        removed.raise_for_status()
+        self.assertIsNone(removed.json()['conversation']['conversation_id'])
+        self.assertEqual(removed.json()['conversations'], [])
+        self.assertEqual(self.a.post(API+'/tasks', json=body).status_code, 404)
+        with self.controller.store.connect() as db:
+            self.assertEqual([row['deleted'] for row in db.execute('SELECT deleted FROM conversations')], [1])
 
     def test_cookie_owner_is_persistent_and_cannot_be_chosen_by_the_client(self):
         cid = new_chat(self.a)

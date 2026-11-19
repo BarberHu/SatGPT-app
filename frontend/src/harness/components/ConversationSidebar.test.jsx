@@ -4,7 +4,7 @@ import ConversationSidebar from './ConversationSidebar';
 import { useAgentChat } from '../hooks/useAgentChat';
 import { chatApi } from '../chatApi';
 
-vi.mock('../chatApi', () => ({ chatApi: {
+vi.mock('../chatApi', async importOriginal => ({ ...await importOriginal(), chatApi: {
   current: vi.fn(), get: vi.fn(), list: vi.fn(), subscribe: vi.fn(),
 } }));
 

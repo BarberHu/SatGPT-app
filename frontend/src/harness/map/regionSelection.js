@@ -12,6 +12,7 @@ export class RegionSelection {
     this.id = id; this.storage = storage; this.aoi = null; this.confirmed = null;
     this.editing = false; this.draft = null; this.draftAoi = null; this.complete = false;
     this.error = ''; this.persistenceError = ''; this.outlineVisible = true;
+    if (!id) return;
     try {
       const current = storage?.getItem(selectionKey(id));
       if (current != null) {
@@ -39,7 +40,12 @@ export class RegionSelection {
     this.draft = clone(this.draftAoi?.geojson.geometry); this.complete = complete && Boolean(this.draft);
     this.error = complete ? agentRegionError(this.draft) : '';
   }
+  attach(conversationId) {
+    this.id = conversationId;
+    this.persist();
+  }
   persist() {
+    if (!this.id) return;
     try { this.storage?.setItem(selectionKey(this.id), JSON.stringify({ schema_version: 2, aoi: this.aoi, outline_visible: this.outlineVisible })); this.persistenceError = ''; }
     catch { this.persistenceError = 'Selection is available now but could not be saved locally.'; }
   }

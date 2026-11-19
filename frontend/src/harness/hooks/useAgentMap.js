@@ -25,10 +25,15 @@ export function useAgentMap(conversationId, messages) {
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
-    if (!shared.service || !shared.ready || !conversationId) return undefined;
+    if (!shared.service || !shared.ready) return undefined;
+    shared.service.selectConversation(conversationId);
+    if (!conversationId) {
+      focusIntent.current = null;
+      setLayers([]);
+      return undefined;
+    }
     const scope = shared.service.scope(`agent:${conversationId}`);
     current.current = scope;
-    shared.service.selectConversation(conversationId);
     choices.current = { id: conversationId, ...readLayerChoices(conversationId) };
     setLayers(scope.listLayers());
     const unsubscribe = scope.subscribe(setLayers);
@@ -65,7 +70,7 @@ export function useAgentMap(conversationId, messages) {
       focusIntent.current = null;
     }
   }, [shared.service, shared.ready, conversationId, messages]);
-  const prepareConversationChange = () => { focusIntent.current = shared.captureViewIntent('agent', true); };
+  const prepareConversationChange = focus => { focusIntent.current = focus ? shared.captureViewIntent('agent', true) : null; };
   const forgetConversation = id => {
     const scope = shared.service?.scope(`agent:${id}`);
     for (const layer of scope?.listLayers() || []) scope.removeLayer(layer.id);

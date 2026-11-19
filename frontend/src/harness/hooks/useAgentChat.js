@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { chatApi } from '../chatApi';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { chatApi, emptyConversation, rememberConversation } from '../chatApi';
 import { canStopTask, isActiveTask, isTerminalTask } from '../taskStatus';
 import { emptyStream, receiveStream } from '../streamState';
 import { chatViewModel } from '../chatViewModel';
 import { useConversationActivity } from './useConversationActivity';
 
 export function useAgentChat({ visible = true } = {}) {
-  const [conversation, setConversation] = useState({ conversation_id: null, messages: [] });
+  const [conversation, setConversation] = useState(emptyConversation);
+  const draftId = useId();
+  const [draftVersion, setDraftVersion] = useState(0);
+  const draftKey = `${draftId}:${draftVersion}`;
   const [conversations, setConversations] = useState([]);
   const [task, setTask] = useState(null);
   const [answer, setAnswer] = useState(null);
@@ -25,6 +28,7 @@ export function useAgentChat({ visible = true } = {}) {
   const alive = useRef(false);
   const action = useRef(false);
   const listRequest = useRef(0);
+  const viewRequest = useRef(0);
   const deleteRequest = useRef(false);
 
   const refreshList = useCallback(async (signal) => {
@@ -33,13 +37,19 @@ export function useAgentChat({ visible = true } = {}) {
     if (alive.current && !signal?.aborted && version === listRequest.current) setConversations(data.conversations || []);
   }, []);
 
-  const load = useCallback(async (epoch, signal, id) => {
-    const data = id ? await chatApi.get(id, signal) : await chatApi.current(signal);
-    if (!alive.current || epoch !== generation.current || signal?.aborted) return null;
+  const showConversation = useCallback(data => {
     conversationId.current = data.conversation_id;
+    rememberConversation(data.conversation_id);
     setConversation(data);
-    return data;
   }, []);
+
+  const load = useCallback(async (epoch, signal, id) => {
+    const version = ++viewRequest.current;
+    const data = id ? await chatApi.get(id, signal) : await chatApi.current(signal);
+    if (!alive.current || epoch !== generation.current || signal?.aborted || version !== viewRequest.current) return null;
+    showConversation(data);
+    return data;
+  }, [showConversation]);
 
   watch.current = (id) => {
     source.current?.close();
@@ -116,22 +126,22 @@ export function useAgentChat({ visible = true } = {}) {
     source.current?.close();
     source.current = null;
     try {
-      const data = id ? await chatApi.activate(id, controller.signal) : await chatApi.create(controller.signal);
+      const data = id ? await chatApi.activate(id, controller.signal) : emptyConversation;
       if (!alive.current || epoch !== generation.current) return false;
-      conversationId.current = data.conversation_id;
-      setConversation(data);
+      if (!id) setDraftVersion(version => version + 1);
+      showConversation(data);
       setTask(null);
       setAnswer(null);
       setReconnecting(false);
       if (data.active_task) watch.current(data.active_task);
-      await refreshList(controller.signal);
+      if (id) await refreshList(controller.signal);
       return alive.current && epoch === generation.current;
     } catch (cause) {
       if (alive.current && epoch === generation.current && !controller.signal.aborted) {
         setError(cause.message);
         // A failed switch must leave the previous running chat connected.
         try {
-          const data = await load(epoch, controller.signal, previousId);
+          const data = previousId ? await load(epoch, controller.signal, previousId) : null;
           if (data?.active_task) watch.current(data.active_task);
         } catch { /* Keep the original navigation error visible. */ }
       }
@@ -139,7 +149,7 @@ export function useAgentChat({ visible = true } = {}) {
     } finally {
       if (alive.current && epoch === generation.current) setLoading(false);
     }
-  }, [load, loading, refreshList]);
+  }, [load, loading, refreshList, showConversation]);
 
   const deleteConversation = useCallback(async id => {
     if (deleteRequest.current || loading || pending || stopping || action.current) return false;
@@ -159,8 +169,7 @@ export function useAgentChat({ visible = true } = {}) {
         request.current = new AbortController();
         source.current?.close();
         source.current = null;
-        conversationId.current = data.conversation.conversation_id;
-        setConversation(data.conversation);
+        showConversation(data.conversation);
         if (data.conversation.active_task) watch.current(data.conversation.active_task);
         else setTask(null);
         setAnswer(null);
@@ -174,9 +183,9 @@ export function useAgentChat({ visible = true } = {}) {
       deleteRequest.current = false;
       if (alive.current) setDeleting(false);
     }
-  }, [loading, pending, stopping]);
+  }, [loading, pending, stopping, showConversation]);
 
-  const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null) => {
+  const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null, onCreated) => {
     if (deleteRequest.current || action.current || pending || loading || isActiveTask(task?.status)) return false;
     action.current = true;
     setPending(true);
@@ -185,13 +194,25 @@ export function useAgentChat({ visible = true } = {}) {
     const signal = request.current?.signal;
     const id = conversationId.current;
     try {
-      const next = await chatApi.send({ prompt, bounds, analysis_region, ...(analysis_aoi ? { analysis_aoi } : {}), conversation_id: id }, signal);
+      const next = await chatApi.send({ prompt, bounds, analysis_region, ...(analysis_aoi ? { analysis_aoi } : {}), conversation_id: id }, signal, draftKey);
       if (!alive.current || epoch !== generation.current) return false;
+      const nextId = next.conversation_id;
+      if (id === null) {
+        onCreated?.(nextId);
+        showConversation({ ...emptyConversation, conversation_id: nextId });
+        ++listRequest.current;
+        setConversations(rows => [{ id: nextId, title: next.prompt.slice(0, 80), updated_at: next.created_at,
+          message_count: 1, active_task: next.id, task_status: next.status,
+          latest_task: { id: next.id, status: next.status },
+        }, ...rows.filter(row => row.id !== nextId)]);
+      }
       setTask(next);
-      await load(epoch, signal, id);
-      if (!alive.current || epoch !== generation.current) return false;
       watch.current(next.id);
-      return true;
+      try { await load(epoch, signal, nextId); }
+      catch (cause) {
+        if (alive.current && epoch === generation.current && cause.name !== 'AbortError') setError(cause.message);
+      }
+      return alive.current && epoch === generation.current;
     } catch (cause) {
       if (alive.current && epoch === generation.current && cause.name !== 'AbortError') setError(cause.message);
       return false;
@@ -201,7 +222,7 @@ export function useAgentChat({ visible = true } = {}) {
         setPending(false);
       }
     }
-  }, [pending, loading, task?.status, load]);
+  }, [pending, loading, task?.status, load, draftKey, showConversation]);
 
   const stop = useCallback(async () => {
     if (action.current || loading || stopping || !canStopTask(task?.status)) return false;
@@ -257,7 +278,7 @@ export function useAgentChat({ visible = true } = {}) {
     return () => { disposed = true; clearTimeout(timer); };
   }, [hasActiveTasks, refreshList]);
   const conversationsWithActivity = useConversationActivity(sidebarConversations, conversation, visible && !loading, deletedId);
-  return { ...view, conversationId: conversation.conversation_id, messages: conversation.messages,
+  return { ...view, conversationId: conversation.conversation_id, draftKey, messages: conversation.messages,
     conversations: conversationsWithActivity, loading, pending, stopping, deleting, reconnecting, error, clearError: () => setError(''),
     changeConversation, deleteConversation, send, stop };
 }

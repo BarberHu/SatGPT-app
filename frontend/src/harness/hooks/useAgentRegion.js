@@ -11,22 +11,27 @@ const readOnly = {
 };
 
 /** Projection onto the existing engine's isolated Agent extension port. */
-export function useAgentRegion(conversationId, messages, active) {
+export function useAgentRegion(conversationId, messages, active, draftKey) {
   const shared = useSharedMap();
   const [, refresh] = useState(0);
   const update = () => refresh(n => n + 1);
   const draw = useRef(null);
   const mutating = useRef(false);
+  const attached = useRef(null);
   const selection = useMemo(() => {
+    if (conversationId && attached.current?.id === conversationId) return attached.current;
     let storage;
     try { storage = window.localStorage; } catch { /* The live session also works without browser storage. */ }
     return new RegionSelection(conversationId, storage, messages);
-  }, [conversationId]);
+  }, [conversationId, draftKey]);
   const current = useRef(selection); current.current = selection;
   const isActive = useRef(active); isActive.current = active;
   useEffect(() => {
+    if (attached.current === selection) attached.current = null;
+  }, [conversationId, selection]);
+  useEffect(() => {
     const port = shared.agentDrawPort;
-    if (!port || !shared.ready || !conversationId) return undefined;
+    if (!port || !shared.ready) return undefined;
     const control = new MapboxDraw({ displayControlsDefault: false, controls: {}, keybindings: false,
       defaultMode: 'read_only', modes: { ...MapboxDraw.modes, read_only: readOnly } });
     port.addControl(control);
@@ -47,7 +52,7 @@ export function useAgentRegion(conversationId, messages, active) {
       for (const event of ['draw.create', 'draw.update', 'draw.delete', 'draw.modechange']) port.off(event, changed);
       port.removeControl(control); if (draw.current === control) draw.current = null;
     };
-  }, [shared.agentDrawPort, shared.ready, conversationId, selection]);
+  }, [shared.agentDrawPort, shared.ready, selection]);
   useEffect(() => {
     if (!active && selection.editing) { selection.cancel(); draw.current?.restore(); update(); }
   }, [active, selection]);
@@ -70,7 +75,7 @@ export function useAgentRegion(conversationId, messages, active) {
     aoi: selection.aoi, label: selection.aoi?.label, outlineVisible: selection.outlineVisible, persistenceError: selection.persistenceError,
     confirmed: selection.confirmed, editing: selection.editing, error: selection.error,
     canConfirm: selection.editing && selection.complete && !selection.error,
-    ready: shared.ready && Boolean(conversationId && draw.current),
+    ready: shared.ready && Boolean(draw.current),
     begin,
     use: aoi => { if (current.current !== selection || !isActive.current) return; selection.use(aoi); draw.current?.restore(); update(); },
     toggleOutline: () => { selection.toggleOutline(); draw.current?.restore(); update(); },
@@ -79,5 +84,10 @@ export function useAgentRegion(conversationId, messages, active) {
     cancel: () => { selection.cancel(); draw.current?.restore(); update(); },
     clear: () => { selection.clear(); draw.current?.restore(); update(); },
     snapshot: () => selection.snapshot(),
+    attach: id => {
+      if (current.current !== selection || selection.id) return;
+      selection.attach(id);
+      attached.current = selection;
+    },
   };
 }

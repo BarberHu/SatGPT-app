@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.applications import Starlette
 
-from .controller import AdmissionError, TaskController
+from .controller import AdmissionError, TaskController, empty_conversation
 from .identity import owner_for, session_response
 from .model_config import model_key_configured
 from .shared_runtime import RuntimeUnavailable
@@ -46,7 +46,7 @@ class TaskRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     prompt: str = Field(min_length=3, max_length=2000)
     bounds: list[float] = Field(min_length=4, max_length=4)
-    conversation_id: str = Field(max_length=100)
+    conversation_id: str | None = Field(default=None, max_length=100)
     request_id: str = Field(pattern=r'^[A-Za-z0-9_-]{16,80}$')
     analysis_region: dict | None = None
     analysis_aoi: dict | None = None
@@ -88,8 +88,8 @@ def conversation(request: Request, owner: Owner):
 
 
 @router.post('/api/harness/conversation/new')
-def new_conversation(request: Request, owner: Owner):
-    return request.app.state.controller.new_conversation(owner)
+def new_conversation(owner: Owner):
+    return empty_conversation()
 
 
 @router.get('/api/harness/conversations')

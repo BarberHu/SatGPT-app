@@ -39,11 +39,6 @@ test('running chats switch independently; Stop works without SSE and stale repli
     if (!conversations[id]) throw new Error('Conversation not found');
     current = id; return conversations[id];
   };
-  chatApi.create = async () => {
-    current = 'webgis-three';
-    conversations[current] = { conversation_id: current, messages: [], active_task: null };
-    return conversations[current];
-  };
   chatApi.subscribe = id => {
     const source = { id, closed: false, close() { this.closed = true; } };
     sources.push(source); return source;
@@ -133,7 +128,8 @@ test('running chats switch independently; Stop works without SSE and stale repli
     assert.match(chat.error, /Conversation not found/);
     // New chat remains available while another chat is running.
     await React.act(async () => assert.equal(await chat.changeConversation(), true));
-    assert.equal(chat.conversationId, 'webgis-three');
+    assert.equal(chat.conversationId, null);
+    assert.deepEqual(chat.conversations.map(row => row.id), ['webgis-one', 'webgis-two']);
     assert.equal(chat.busy, false);
 
     // A send accepted in another conversation must not take over the new one.
@@ -143,7 +139,7 @@ test('running chats switch independently; Stop works without SSE and stale repli
     await React.act(async () => { send = chat.send('a new question', [100, 10, 101, 11]); });
     assert.equal(chat.pending, true);
     await React.act(async () => chat.changeConversation('webgis-one'));
-    await React.act(async () => pendingSend.resolve({ id: 'late-send', status: 'queued' }));
+    await React.act(async () => pendingSend.resolve({ id: 'late-send', conversation_id: 'webgis-late', status: 'queued' }));
     assert.equal(await send, false);
     assert.equal(chat.conversationId, 'webgis-one');
     assert.equal(chat.busy, false);
