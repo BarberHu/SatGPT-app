@@ -269,7 +269,13 @@ class TaskController:
                 with self.lock:
                     self.reloads.pop(key, None)
 
-    def create(self, owner, prompt, bounds, cid, request_id, analysis_region=None, analysis_aoi=None):
+    def reasoning_options(self):
+        reasoning = self.runtime.reasoning_options()
+        return {'model': reasoning['model'], 'levels': reasoning['levels'],
+                'default_effort': self.runtime.default_reasoning_effort or reasoning['default_effort']}
+
+    def create(self, owner, prompt, bounds, cid, request_id, analysis_region=None, analysis_aoi=None,
+               *, reasoning_effort=None):
         prompt = prompt.strip()
         if not 3 <= len(prompt) <= 2000:
             raise ValueError('The prompt must contain 3–2000 characters')
@@ -277,7 +283,8 @@ class TaskController:
         analysis_aoi = validate_analysis_aoi(analysis_aoi, analysis_region)
         bounds = region_bounds(analysis_region) if analysis_region else validate_bounds(bounds)
         snapshot = {'bounds': bounds, 'analysis_region': analysis_region, 'analysis_aoi': analysis_aoi}
-        canonical = json.dumps([cid, prompt, snapshot], sort_keys=True, allow_nan=False).encode()
+        preference = {'reasoning_effort': reasoning_effort} if reasoning_effort is not None else {}
+        canonical = json.dumps([cid, prompt, {**snapshot, **preference}], sort_keys=True, allow_nan=False).encode()
         fingerprint = hashlib.sha256(canonical).hexdigest()
         with self.lock:
             with self.store.connect(write=True) as db:
@@ -291,6 +298,12 @@ class TaskController:
                     if row is None:
                         self.store.owned(db, owner, receipt['conversation_id'])
                     return receipt
+                if reasoning_effort is not None:
+                    reasoning = self.runtime.reasoning
+                    if reasoning is None:
+                        raise RuntimeUnavailable('Reasoning capabilities are unavailable')
+                    if not any(level['id'] == reasoning_effort for level in reasoning['levels']):
+                        raise AdmissionError('unsupported_reasoning_effort', 'This reasoning level is unavailable.', 422)
                 if row is not None and self.store.has_active_task(db, owner, cid):
                     raise AdmissionError('conversation_busy', 'This conversation already has an active task.', 409)
                 self._require_available(allow_rotation=True)
@@ -299,7 +312,7 @@ class TaskController:
                 messages = json.loads(row['messages']) if row is not None else []
                 task_id = uuid.uuid4().hex
                 receipt = {'id': task_id, 'conversation_id': cid, 'status': 'queued', 'prompt': prompt,
-                           **snapshot, 'revision': 0, 'trace': [], 'output': None, 'error': None,
+                           **snapshot, **preference, 'revision': 0, 'trace': [], 'output': None, 'error': None,
                            'created_at': timestamp()}
                 db.execute('INSERT INTO tasks(id, conversation_id, owner, request_id, fingerprint, status, receipt) '
                            'VALUES(?,?,?,?,?,?,?)', (task_id, cid, owner, request_id, fingerprint, 'queued', encode(receipt)))
@@ -530,6 +543,7 @@ class TaskController:
                     raise InterruptedError()
                 self._update(task, status='running', started_at=timestamp())
             binding = bridge.bind({**snapshot, 'owner_id': task.owner, 'session_id': session_id,
+                                   'reasoning_effort': job.get('reasoning_effort', self.runtime.default_reasoning_effort),
                                    'run_id': task.run_id, **self._artifact_fields(task.owner, cid, job_id)}, task.stream.frame)
             bound = True
             with self.lock:

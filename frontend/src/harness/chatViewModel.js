@@ -2,7 +2,7 @@ import { isActiveTask, isTerminalTask } from './taskStatus.js';
 /** UI domain objects. The array order is the event order, never a type/time sort. */
 import { messageLayerBounds } from './map/viewState';
 
-function presentRun(source, answer, busy, finalText) {
+function presentRun(source, busy, finalText) {
   const ordered = source.timeline || [];
   let timeline = ordered.map(row => ({ ...row,
     status: row.status === 'running' && !busy ? 'unknown' : row.status,
@@ -23,7 +23,7 @@ export function chatViewModel(messages, task, answer) {
     id: message.id, role: message.role,
     analysisRegion: message.analysis_region, analysisAoi: message.analysis_aoi,
     hasScope: Object.hasOwn(message, 'analysis_region'),
-    ...presentRun(message, null, false, message.content || ''),
+    ...presentRun(message, false, message.content || ''),
     failed: message.status === 'failed', streaming: false,
     code: message.code || '',
     attachments: (message.previews || []).map((preview, index) => ({
@@ -37,7 +37,7 @@ export function chatViewModel(messages, task, answer) {
   const settled = messages.some(item => item.role === 'assistant' && item.job_id === task?.id);
   if (task && !settled && (busy || isTerminalTask(task.status))) {
     items.push({ id: `task-${task.id}`, role: 'assistant',
-      ...presentRun(task, answer, busy, task.status === 'failed' ? task.error : task.output?.message || ''),
+      ...presentRun(task, busy, task.status === 'failed' ? task.error : task.output?.message || ''),
       streaming: busy && answer?.status === 'streaming', pending: busy,
       failed: task.status === 'failed', attachments: [], layers: [], code: '' });
   }

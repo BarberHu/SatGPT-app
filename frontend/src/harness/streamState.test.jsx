@@ -58,7 +58,8 @@ test('retry, interruption and task isolation retract temporary answers', () => {
 });
 
 test('refresh and compacted replay restore one snapshot, replayed IDs never duplicate text', () => {
-  const restored = event(40, 'snapshot', { task: { id: 'job', status: 'running', timeline: [] },
+  const geometry = { type: 'Polygon', coordinates: [[[113.6, 34.7], [113.64, 34.7], [113.62, 34.74], [113.6, 34.7]]] };
+  const restored = event(40, 'snapshot', { task: { id: 'job', status: 'running', timeline: [], analysis_region: geometry },
     answer: { attempt_id: 'a', text: 'restored ', status: 'streaming' } });
   let state = receiveStream(emptyStream('job'), restored);
   state = receiveStream(state, event(41, 'answer.delta', { attempt_id: 'a', text: 'tail' }));
@@ -67,6 +68,10 @@ test('refresh and compacted replay restore one snapshot, replayed IDs never dupl
   state = receiveStream(state, event(80, 'snapshot', { task: state.task,
     answer: { attempt_id: 'b', text: 'recovered', status: 'committed' } }));
   expect(state.answer.text).toBe('recovered');
+  state = receiveStream(state, event(81, 'task', { patch: { status: 'completed', output: { message: 'Scoped answer' } } }));
+  expect(state.answer).toBeNull();
+  expect(state.task.analysis_region).toEqual(geometry);
+  expect(state.task.output.message).toBe('Scoped answer');
 });
 
 test('reasoning deltas stream separately, reconnect once, and disappear on retry', () => {

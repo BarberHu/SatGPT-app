@@ -32,7 +32,7 @@ export function mountControl(ctx, runWorker) {
       reply(200, { ready: true });
       return;
     }
-    if (req.method !== 'POST' || !['/cancel', '/reload'].includes(req.url)) {
+    if (req.method !== 'POST' || !['/cancel', '/reload', '/reasoning'].includes(req.url)) {
       res.writeHead(404).end();
       return;
     }
@@ -48,6 +48,12 @@ export function mountControl(ctx, runWorker) {
       // Node enforces the declared Content-Length before this request boundary.
       for await (const chunk of req) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (req.url === '/reasoning') {
+        const { name, reasoning } = await ctx.llm.resolveModelInfo(body.provider, body.model, abort.signal);
+        const levels = reasoning?.efforts.map(({ id, name }) => ({ id, name })) ?? [];
+        reply(200, { model: name, levels, default_effort: reasoning?.defaultEffort ?? null });
+        return;
+      }
       if (req.url === '/cancel') {
         const binding = readBinding(body.session_id);
         if (!binding || binding.run_id !== body.run_id) {

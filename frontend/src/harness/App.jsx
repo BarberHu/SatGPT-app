@@ -3,6 +3,7 @@ import { History, Map as MapIcon, MessageSquare, PanelLeft, PanelLeftClose, X } 
 import { useAgentChat } from './hooks/useAgentChat';
 import { useAgentMap } from './hooks/useAgentMap';
 import { useAgentRegion } from './hooks/useAgentRegion';
+import { chatApi } from './chatApi';
 import AreaControls from '../aoi/AreaControls';
 import { getBoundsFromGeometry } from '../utils/aoi';
 import { regionKey, selectionKey } from './map/regionSelection';
@@ -15,6 +16,13 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dial
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './ui/resizable';
 import './app.css';
 import '../styles/theme.css';
+
+const REASONING_PREFERENCE = 'satgpt:harness:reasoning-effort';
+
+function readReasoningPreference() {
+  try { return localStorage.getItem(REASONING_PREFERENCE) ?? ''; }
+  catch { return ''; }
+}
 
 function useNarrowLayout() {
   const [narrow, setNarrow] = useState(() => window.matchMedia?.('(max-width: 960px)').matches || false);
@@ -35,6 +43,9 @@ export default function HarnessApp({ active = true }) {
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
   const [mobileView, setMobileView] = useState('chat');
   const [prompt, setPrompt] = useState('');
+  const [reasoning, setReasoning] = useState({ status: 'loading' });
+  const [reasoningRequest, setReasoningRequest] = useState(0);
+  const [reasoningPreference, setReasoningPreference] = useState(readReasoningPreference);
   const collapseButton = useRef(null);
   const restoreButton = useRef(null);
   const historyButton = useRef(null);
@@ -46,6 +57,23 @@ export default function HarnessApp({ active = true }) {
   const conversationKey = chat.conversationId ?? chat.draftKey;
   const map = useAgentMap(chat.conversationId, chat.messages);
   const region = useAgentRegion(chat.conversationId, chat.messages, active, chat.draftKey);
+  useEffect(() => {
+    if (!active) return undefined;
+    const request = new AbortController();
+    setReasoning({ status: 'loading' });
+    chatApi.reasoning(request.signal).then(options => {
+      if (!request.signal.aborted) setReasoning({ ...options, status: 'ready' });
+    }).catch(error => {
+      if (!request.signal.aborted) setReasoning({ status: error.status === 404 ? 'missing' : 'failed' });
+    });
+    return () => request.abort();
+  }, [active, reasoningRequest]);
+  const reasoningEffort = reasoning.levels?.some(level => level.id === reasoningPreference) ? reasoningPreference : '';
+  const chooseReasoning = effort => {
+    setReasoningPreference(effort);
+    try { localStorage.setItem(REASONING_PREFERENCE, effort); }
+    catch { /* The preference still applies while the page is open. */ }
+  };
   useEffect(() => {
     const target = focusAfterRender.current?.current;
     if (target?.isConnected) { target.focus(); focusAfterRender.current = null; }
@@ -84,7 +112,7 @@ export default function HarnessApp({ active = true }) {
     const geometry = region.snapshot();
     const area = geometry ? getBoundsFromGeometry(geometry) : null;
     const bounds = area ? [area.west, area.south, area.east, area.north] : map.bounds();
-    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata(), region.attach)) setPrompt('');
+    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata(), region.attach, reasoningEffort)) setPrompt('');
   };
   const editRegion = () => {
     if (region.begin() && narrow) setMobileView('map');
@@ -134,6 +162,8 @@ export default function HarnessApp({ active = true }) {
             {chat.error ? <div className="agent-chat-error" role="alert"><span>{chat.error}</span><Button type="button" variant="ghost" size="icon" aria-label="Dismiss error" onClick={chat.clearError}><X /></Button></div> : null}
             <Composer value={prompt} onChange={setPrompt} onSend={send} onStop={chat.stop}
               region={region} onEditRegion={editRegion}
+              reasoning={reasoning} reasoningEffort={reasoningEffort} onReasoningChange={chooseReasoning}
+              onReasoningRetry={() => setReasoningRequest(request => request + 1)}
               areaControls={<AreaControls hideEditAction current={region.aoi} scopeKey={`${active ? 'agent' : 'inactive'}:${conversationKey}`} disabled={!active || !region.ready || region.editing || chat.loading || chat.pending}
                 onUse={region.use} onEdit={aoi => { if (region.begin(aoi) && narrow) setMobileView('map'); }}
                 onLocate={aoi => focusLayer({ bounds: [aoi.bounds.west,aoi.bounds.south,aoi.bounds.east,aoi.bounds.north] })}

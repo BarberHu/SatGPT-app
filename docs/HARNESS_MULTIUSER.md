@@ -137,6 +137,6 @@ npm --prefix frontend test -- --maxWorkers=2
 npm --prefix frontend run build
 ~~~
 
-旧的 `--seed-history` 验证工具写入未分配历史，只用于保留基线数据。新版前端和 API 使用当前身份生成的会话验证重载。
+验证图层重载时，在临时端口运行 `python -m harness.tests.region_page_server`，再用同一端口运行 `python -m harness.tests.live_analysis_region`。检查会用同一个浏览器身份生成和重载测试图层，并校验保存的配方、历史和瓦片。
 
 浏览器 Cookie 提供应用资源归属。Earth Engine 直接瓦片地址仍按该上游服务的访问规则处理。GEE 工具保留 Python 解释器执行能力，操作系统级隔离、长期磁盘配额以及历史数据迁移不属于本次工作。

@@ -15,6 +15,13 @@ function engine() {
   };
 }
 
+const tile = version => `https://earthengine.googleapis.com/v1/projects/p/maps/v${version}/tiles/{z}/{x}/{y}`;
+const reloadableLayer = (id, version = 0) => {
+  const code = 'result = ee.Image(1)';
+  return { id, name: id, kind: 'gee', url: tile(version), code,
+    generation: { version: 1, code }, reloadable: true, reload_version: version };
+};
+
 describe('map service boundary', () => {
   test('adds a GEE layer, controls visibility, and restores it after style reload', () => {
     const driver = engine();
@@ -48,6 +55,55 @@ describe('map service boundary', () => {
     driver.viewChange();
     expect(listener).toHaveBeenCalledWith({ bounds: [100, 10, 101, 11] });
     unsubscribe();
+    service.dispose();
+  });
+
+  test('replacing a layer retains its code, identity, paint order, and display choices', () => {
+    const driver = engine();
+    const paint = new Map();
+    driver.addLayer.mockImplementation(layer => {
+      paint.delete(layer.id);
+      paint.set(layer.id, layer);
+    });
+    driver.moveLayer = id => {
+      const layer = paint.get(id);
+      paint.delete(id);
+      paint.set(id, layer);
+    };
+    const service = new MapService(driver);
+    service.setMode('agent');
+    service.selectConversation('a');
+    const scope = service.scope('agent:a');
+    const original = scope.addLayer({ ...reloadableLayer('one'), visible: false, opacity: .35 });
+    scope.addLayer(reloadableLayer('two'));
+    const originalOrder = [...paint.keys()];
+    const updated = scope.replaceLayer('one', reloadableLayer('one', 1));
+    expect(updated).toMatchObject({ id: original.id, code: original.code, generation: original.generation,
+      visible: false, opacity: .35, url: tile(1), reloadVersion: 1 });
+    expect([...paint.keys()]).toEqual(originalOrder);
+    expect(driver.setView).not.toHaveBeenCalled();
+    expect(scope.listLayers()).toHaveLength(2);
+    expect(scope.replaceLayer('one', reloadableLayer('one'))).toBe(false);
+    service.dispose();
+  });
+
+  test('late replacements stay in their original scope and cannot restore removed layers', () => {
+    const driver = engine();
+    const service = new MapService(driver);
+    service.setMode('agent');
+    service.selectConversation('a');
+    const first = service.scope('agent:a'), other = service.scope('agent:b');
+    first.addLayer(reloadableLayer('one'));
+    other.addLayer(reloadableLayer('two'));
+    service.selectConversation('b');
+    first.replaceLayer('one', reloadableLayer('one', 1));
+    expect(driver.addLayer).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: service.physical('agent:a', 'one'), visible: false, url: tile(1),
+    }));
+    expect(other.listLayers()[0].url).toBe(tile(0));
+    first.removeLayer('one');
+    expect(first.replaceLayer('one', reloadableLayer('one', 2))).toBe(false);
+    expect(first.listLayers()).toHaveLength(0);
     service.dispose();
   });
 });

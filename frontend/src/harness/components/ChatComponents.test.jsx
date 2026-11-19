@@ -33,6 +33,47 @@ test('composer supports Enter, Shift+Enter, IME composition and running state wi
   expect(stop).toHaveBeenCalledTimes(1);
 });
 
+test('composer explains when a model offers only its default and still allows sending', async () => {
+  const send = vi.fn(), retry = vi.fn();
+  await act(async () => root.render(<Composer value="Use the default" onSend={send} mapReady
+    reasoning={{ model: 'Plain model', levels: [], status: 'ready' }} reasoningEffort="" onReasoningRetry={retry} />));
+  await act(async () => node.querySelector('.agent-reasoning-trigger').click());
+  const panel = node.querySelector('.agent-reasoning-panel');
+  expect(panel.textContent).toBe('This model uses the server default.');
+  expect(panel.querySelector('button')).toBeNull();
+  await act(async () => node.querySelector('button[type=submit]').click());
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(retry).not.toHaveBeenCalled();
+});
+
+test('composer shows the current analysis area and prevents sending during edits', async () => {
+  const send = vi.fn(), edit = vi.fn(), clear = vi.fn(), cancel = vi.fn();
+  const triangle = { type: 'Polygon', coordinates: [[[0, 0], [.01, 0], [0, .01], [0, 0]]] };
+  const render = region => act(async () => root.render(<Composer value="Analyze this area" onChange={() => {}} onSend={send} mapReady
+    region={{ ready: true, clear, cancel, ...region }} onEditRegion={edit} />));
+  const area = () => node.querySelector('[aria-label="Analysis area"]');
+  await render({});
+  expect(area().textContent).toContain('Current map view');
+  await render({ confirmed: triangle });
+  expect(node.querySelectorAll('[aria-label="Analysis area"]')).toHaveLength(1);
+  expect(node.querySelector('textarea').compareDocumentPosition(area()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(area().querySelector('[role="status"]').textContent).toMatch(/^Area 1 ·/);
+  await act(async () => area().querySelector('[aria-label="Edit analysis area"]').click());
+  await act(async () => area().querySelector('[aria-label="Clear analysis area"]').click());
+  expect(edit).toHaveBeenCalledTimes(1);
+  expect(clear).toHaveBeenCalledTimes(1);
+  await render({ editing: true });
+  expect(area().textContent).toContain('Drawing polygon…');
+  expect(area().querySelector('[aria-label="Edit analysis area"]')).toBeNull();
+  expect(node.querySelector('button[type="submit"]').disabled).toBe(true);
+  await act(async () => node.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  expect(send).not.toHaveBeenCalled();
+  await render({ editing: true, canConfirm: true });
+  expect(area().textContent).toContain('Confirm area on map');
+  await act(async () => area().querySelector('[aria-label="Cancel area editing"]').click());
+  expect(cancel).toHaveBeenCalledTimes(1);
+});
+
 test('Streamdown renders partial code fences, lists and GFM tables while streaming', async () => {
   await act(async () => root.render(<Markdown streaming text={'1. first\n2. second\n\n| Data | Value |\n| --- | --- |\n| Rain | 3 |\n\n```python\nresult = ee.Number(1)'} />));
   expect(node.querySelectorAll('ol li')).toHaveLength(2);

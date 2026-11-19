@@ -50,6 +50,7 @@ class TaskRequest(BaseModel):
     request_id: str = Field(pattern=r'^[A-Za-z0-9_-]{16,80}$')
     analysis_region: dict | None = None
     analysis_aoi: dict | None = None
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 @contextmanager
@@ -80,6 +81,12 @@ def health(request: Request):
 @router.get('/api/harness/session')
 def session(request: Request):
     return session_response(request)
+
+
+@router.get('/api/harness/reasoning')
+def reasoning(request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.reasoning_options()
 
 
 @router.get('/api/harness/conversation')
@@ -120,7 +127,8 @@ def reload_layer(conversation_id: str, layer_id: str, request: Request, owner: O
 def create_task(body: TaskRequest, request: Request, owner: Owner):
     with api_errors():
         return request.app.state.controller.create(owner, body.prompt, body.bounds, body.conversation_id,
-                                                   body.request_id, body.analysis_region, body.analysis_aoi)
+                                                   body.request_id, body.analysis_region, body.analysis_aoi,
+                                                   reasoning_effort=body.reasoning_effort)
 
 
 @router.get('/api/harness/tasks/{task_id}')

@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from harness.app.controller import TaskController
+from harness.app.shared_runtime import RuntimeUnavailable, SharedRuntime
 from harness.tests.runtime_fixture import client_for, new_chat, task_body, wait_for_task
 
 
@@ -39,6 +40,18 @@ class NativeCancellationTests(unittest.TestCase):
         arrived = threading.Barrier(3)
         release = threading.Event()
         offered_tools = []
+        wire_effort = {}
+        followups = {'OFF': ('disabled', None), 'LOW': ('enabled', 'low'),
+                     'HIGH': ('enabled', 'high'), 'MAX': ('enabled', 'max'), 'DEFAULT': ('enabled', 'high')}
+        load_reasoning = SharedRuntime._load_reasoning
+        reasoning_attempts = 0
+
+        def load_after_transient_failures(runtime):
+            nonlocal reasoning_attempts
+            reasoning_attempts += 1
+            if reasoning_attempts < 3:
+                raise RuntimeUnavailable('Capability lookup fixture')
+            return load_reasoning(runtime)
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_):
@@ -54,11 +67,13 @@ class NativeCancellationTests(unittest.TestCase):
                 data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 presented = {tool['name'] for tool in data['tools']}
                 offered_tools.append(presented)
-                body = json.dumps(data['messages'])
+                latest = json.dumps(data['messages'][-1])
+                marker = next(key for key in ('NATIVE_HOLD_A', 'NATIVE_HOLD_B', *followups) if key in latest)
+                wire_effort[marker] = (data['thinking']['type'], data.get('output_config', {}).get('effort'))
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/event-stream')
                 self.end_headers()
-                if 'NATIVE_HOLD' in body:
+                if marker.startswith('NATIVE_HOLD'):
                     try:
                         arrived.wait(10)
                         release.wait(10)
@@ -74,15 +89,24 @@ class NativeCancellationTests(unittest.TestCase):
             'DSH_PROVIDER':'deepseek-official', 'DSH_MODEL':'smoke-model',
             'DSH_REASONING_EFFORT':'default', 'DEEPSEEK_API_KEY':'local-fixture-key',
             'DEEPSEEK_BASE_URL':f'http://127.0.0.1:{model.server_port}',
-        }):
+        }), patch.object(SharedRuntime, '_load_reasoning', load_after_transient_failures):
             root = Path(__file__).resolve().parents[1]
             controller = TaskController(root, state=Path(directory))
             try:
                 a, b = (client_for(controller) for _ in range(2))
+                self.assertTrue(controller.healthy)
+                self.assertEqual(a.get('/api/harness/reasoning').status_code, 503)
+                options = a.get('/api/harness/reasoning')
+                options.raise_for_status()
+                self.assertEqual(options.json()['model'], 'smoke-model')
+                self.assertEqual([level['id'] for level in options.json()['levels']], ['off', 'low', 'high', 'max'])
+                self.assertEqual(b.get('/api/harness/reasoning').json(), options.json())
+                self.assertEqual(reasoning_attempts, 3)
                 ca, cb = new_chat(a), new_chat(b)
-                ta = a.post('/api/harness/tasks', json=task_body(ca, 'NATIVE_HOLD_A')).json()['id']
-                tb = b.post('/api/harness/tasks', json=task_body(cb, 'NATIVE_HOLD_B')).json()['id']
+                ta = a.post('/api/harness/tasks', json=task_body(ca, 'NATIVE_HOLD_A', reasoning_effort='off')).json()['id']
+                tb = b.post('/api/harness/tasks', json=task_body(cb, 'NATIVE_HOLD_B', reasoning_effort='max')).json()['id']
                 arrived.wait(10)
+                self.assertEqual(wire_effort, {'NATIVE_HOLD_A': ('disabled', None), 'NATIVE_HOLD_B': ('enabled', 'max')})
                 self.assertEqual(len(offered_tools), 2)
                 self.assertEqual(offered_tools[0], {'gee_check','gee_eval','gee_layer','gee_preview','gee_status','gee_catalog'})
                 self.assertEqual(b.post(f'/api/harness/tasks/{ta}/cancel').status_code, 404)
@@ -92,12 +116,21 @@ class NativeCancellationTests(unittest.TestCase):
                 release.set()
                 self.assertEqual(wait_for_task(b, tb)['status'], 'completed')
                 self.assertIn('offline native runtime result', b.get(f'/api/harness/tasks/{tb}/events').text)
+                for marker, expected in followups.items():
+                    preference = {} if marker == 'DEFAULT' else {'reasoning_effort': marker.lower()}
+                    body = task_body(cb, f'Use effort {marker}', **preference)
+                    response = b.post('/api/harness/tasks', json=body)
+                    response.raise_for_status()
+                    self.assertEqual(wait_for_task(b, response.json()['id'])['status'], 'completed')
+                    self.assertEqual(wire_effort[marker], expected)
                 self.assertEqual(len(controller.runtime.sessions), 2)
             finally:
                 release.set()
                 controller.close()
 
     def test_native_cancel_while_two_worker_calls_are_in_flight(self):
+        followup_efforts = []
+
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_):
                 pass
@@ -111,6 +144,8 @@ class NativeCancellationTests(unittest.TestCase):
             def do_POST(self):
                 data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 last = json.dumps(data['messages'][-1])
+                if 'WORKER_HOLD_B' in json.dumps(data['messages']):
+                    followup_efforts.append(data.get('output_config', {}).get('effort'))
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/event-stream')
                 self.end_headers()
@@ -147,7 +182,8 @@ for line in sys.stdin:
             try:
                 a, b = (client_for(controller) for _ in range(2))
                 ta = a.post('/api/harness/tasks', json=task_body(new_chat(a), 'WORKER_HOLD_A')).json()['id']
-                tb = b.post('/api/harness/tasks', json=task_body(new_chat(b), 'WORKER_HOLD_B')).json()['id']
+                tb = b.post('/api/harness/tasks', json=task_body(new_chat(b), 'WORKER_HOLD_B',
+                                                               reasoning_effort='max')).json()['id']
                 limit = time.monotonic() + 8
                 while time.monotonic() < limit and not all((worker.parent / marker).is_file() for marker in ('a','b')):
                     time.sleep(.02)
@@ -158,6 +194,7 @@ for line in sys.stdin:
                 (worker.parent/'release').touch()
                 result = wait_for_task(b, tb)
                 self.assertEqual(result['status'], 'completed')
+                self.assertEqual(followup_efforts, ['max', 'max'])
                 self.assertTrue(any(row.get('name') == 'gee_check' and row['status'] == 'done'
                                     for row in result['trace']))
                 self.assertIn('worker result verified', b.get(f'/api/harness/tasks/{tb}/events').text)

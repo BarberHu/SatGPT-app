@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { RegionSelection } from '../../frontend/src/harness/map/regionSelection.js';
 import { BasicMapPort } from '../../frontend/src/map/BasicMapPort.js';
-import { emptyStream, receiveStream } from '../../frontend/src/harness/streamState.js';
 
 const geometry = { type: 'Polygon', coordinates: [[[113.6,34.7],[113.64,34.7],[113.62,34.74],[113.6,34.7]]] };
 const feature = { type:'Feature', properties:{}, geometry };
@@ -58,20 +57,4 @@ test('draw events, IDs, listeners and mode visibility are isolated on one engine
   agent.activate(false); basic.activate(true);
   assert.equal(layers.get('satgpt-basic-aux:gl-draw-polygon-fill').layout.visibility, 'visible');
   assert.equal(sources.size,2); assert.equal(basic.map, agent.map);
-});
-
-test('SSE replay does not duplicate text or settle a scoped task twice', () => {
-  let state = receiveStream(emptyStream('job'), {type:'snapshot',task_id:'job',id:4,
-    task:{id:'job',status:'running',analysis_region:structuredClone(geometry)},
-    answer:{attempt_id:'attempt',text:'',status:'streaming'}});
-  const delta = {type:'answer.delta',task_id:'job',id:5,attempt_id:'attempt',text:'Scoped answer'};
-  state = receiveStream(state,delta);
-  assert.equal(receiveStream(state,delta),state);
-  assert.equal(state.answer.text,'Scoped answer');
-  const terminal = {type:'task',task_id:'job',id:6,patch:{status:'completed',output:{message:'Scoped answer'}}};
-  state = receiveStream(state,terminal);
-  assert.equal(receiveStream(state,terminal),state);
-  assert.equal(state.answer,null);
-  assert.deepEqual(state.task.analysis_region,geometry);
-  assert.equal(state.task.output.message,'Scoped answer');
 });

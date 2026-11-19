@@ -44,6 +44,7 @@ test('new chats stay local until a retry succeeds and carry their selected area 
     geojson: { type: 'Feature', properties: {}, geometry } };
   const repository = { list: async () => [area], migrate: async () => ({ invalid: 0 }) };
   const sources = [], sent = [];
+  let reasoningAttempts = 0;
   let messages = [], active = null;
   class Source {
     constructor(url) { this.url = url; sources.push(this); }
@@ -52,6 +53,15 @@ test('new chats stay local until a retry succeeds and carry their selected area 
   const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
   const fetcher = vi.fn(async (url, options) => {
     const path = url.slice('/api/harness'.length);
+    if (path === '/reasoning') {
+      reasoningAttempts += 1;
+      if (reasoningAttempts === 1) return response({ detail: 'Not Found' }, 404);
+      if (reasoningAttempts === 2) return response({ detail: 'Unavailable' }, 503);
+      return response({ levels: [
+        { id: 'off', name: 'Off' }, { id: 'low', name: 'Low' },
+        { id: 'high', name: 'High' }, { id: 'max', name: 'Max' },
+      ], model: 'DeepSeek Flash', default_effort: 'high' });
+    }
     if (path === '/conversation' || path === `/conversations/${oldId}/activate`) {
       return response({ conversation_id: oldId, messages: oldHistory, active_task: null });
     }
@@ -80,9 +90,39 @@ test('new chats stay local until a retry succeeds and carry their selected area 
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
+  const effort = () => node.querySelector('.agent-reasoning-trigger');
+  const options = () => [...node.querySelectorAll('[role="menuitemradio"]')];
+  const retry = () => click('.agent-reasoning-panel button');
+  const status = () => node.querySelector('.agent-reasoning-panel [role="status"]')?.textContent;
+  const key = (item, key) => act(async () => item.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+  const chooseEffort = label => act(async () => options().find(item => item.firstElementChild.textContent === label).click());
   try {
     await render();
     await vi.waitFor(() => expect(node.querySelector('.agent-map-layer')?.textContent).toContain('Old layer'));
+    await act(async () => effort().click());
+    expect(status()).toBe('The connected server does not provide reasoning levels.');
+    expect(node.querySelector('.agent-reasoning-panel button').textContent).toBe('Retry');
+    await retry();
+    expect(status()).toBe('Unable to load reasoning levels. Try again.');
+    await retry();
+    expect(effort().textContent).toContain('DeepSeek Flash');
+    expect(effort().getAttribute('aria-label')).toBe('Reasoning effort · DeepSeek Flash · Server default');
+    expect(options().map(item => item.firstElementChild.textContent)).toEqual(['Server default', 'Off', 'Low', 'High', 'Max']);
+    expect(options()[0].getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(options()[0]);
+    await key(document.activeElement, 'ArrowDown');
+    expect(document.activeElement).toBe(options()[1]);
+    await key(document.activeElement, 'Escape');
+    expect(options()).toHaveLength(0);
+    expect(document.activeElement).toBe(effort());
+    await key(effort(), 'ArrowDown');
+    await act(async () => node.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(options()).toHaveLength(0);
+    await act(async () => effort().click());
+    await key(document.activeElement, 'ArrowDown');
+    await key(document.activeElement, 'ArrowDown');
+    await key(document.activeElement, 'Enter');
+    expect(document.activeElement).toBe(effort());
     fetcher.mockClear();
     await click('[aria-label="New chat"]');
     await click('[aria-label="New chat"]');
@@ -93,7 +133,8 @@ test('new chats stay local until a retry succeeds and carry their selected area 
 
     await act(async () => root.render(null));
     await render();
-    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/harness/conversations']);
+    expect(fetcher.mock.calls.map(([url]) => url).sort()).toEqual(['/api/harness/conversations', '/api/harness/reasoning']);
+    expect(effort().querySelector('.agent-reasoning-current').textContent).toBe('Low');
     const draw = node.querySelector('[aria-label="Draw analysis area"]');
     expect(draw.disabled).toBe(false);
     await act(async () => button('Saved areas').click());
@@ -108,7 +149,7 @@ test('new chats stay local until a retry succeeds and carry their selected area 
 
     await click('[aria-label="Send"]');
     expect(sent[0]).toEqual(sent[1]);
-    expect(sent[1]).toMatchObject({ conversation_id: null, analysis_region: geometry,
+    expect(sent[1]).toMatchObject({ conversation_id: null, analysis_region: geometry, reasoning_effort: 'low',
       analysis_aoi: { id: area.id, revision: 1, label: area.label }, bounds: [100, 10, 101, 11] });
     expect(node.querySelector('[aria-current="page"]').title).toBe('First scoped prompt');
     expect(node.querySelector('textarea').value).toBe('');
@@ -121,9 +162,11 @@ test('new chats stay local until a retry succeeds and carry their selected area 
     await act(async () => sources[0].onmessage({ data: JSON.stringify({ id: 1, task_id: 'job-2', type: 'snapshot',
       task: { id: 'job-2', status: 'completed' }, answer: null }) }));
     expect(node.textContent).toContain('First reply');
+    await act(async () => effort().click());
+    await chooseEffort('Max');
     await enterPrompt('Continue here');
     await click('[aria-label="Send"]');
-    expect(sent[2].conversation_id).toBe(newId);
+    expect(sent[2]).toMatchObject({ conversation_id: newId, reasoning_effort: 'max' });
     await click('button[title="Old chat"]');
     expect(node.querySelector('.agent-map-layer')?.textContent).toContain('Old layer');
     expect(mapVisibility).toHaveBeenLastCalledWith(expect.stringContaining('old-job'), true);
@@ -146,9 +189,9 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     constructor(url) { this.url = url; this.closed = false; sources.push(this); }
     close() { this.closed = true; }
   }
-  const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({
-    conversation_id: 'webgis-test', messages: history, active_task: active,
-  }) }));
+  const fetcher = vi.fn(async url => url === '/api/harness/reasoning'
+    ? { ok: false, status: 503, json: async () => ({ detail: 'Unavailable' }) }
+    : { ok: true, json: async () => ({ conversation_id: 'webgis-test', messages: history, active_task: active }) });
   vi.stubGlobal('fetch', fetcher);
   vi.stubGlobal('EventSource', Source);
   const node = document.createElement('div');
@@ -236,7 +279,9 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     expect(node.querySelector('.harness-preview')).not.toBeNull();
     expect(node.textContent).toContain('result layer');
     expect(restored.closed).toBe(true);
-    expect(fetcher.mock.calls.every(([url]) => ['/api/harness/conversation', '/api/harness/conversations', '/api/harness/conversations/webgis-test'].includes(url))).toBe(true);
+    expect(fetcher.mock.calls.every(([url]) => ['/api/harness/conversation', '/api/harness/conversations', '/api/harness/conversations/webgis-test', '/api/harness/reasoning'].includes(url))).toBe(true);
+    await act(async () => node.querySelector('.agent-reasoning-trigger').click());
+    expect(node.querySelector('.agent-reasoning-panel [role="status"]').textContent).toBe('Unable to load reasoning levels. Try again.');
   } finally {
     await act(async () => root.unmount());
     node.remove();

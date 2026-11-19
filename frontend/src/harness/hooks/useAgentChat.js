@@ -185,7 +185,7 @@ export function useAgentChat({ visible = true } = {}) {
     }
   }, [loading, pending, stopping, showConversation]);
 
-  const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null, onCreated) => {
+  const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null, onCreated, reasoningEffort) => {
     if (deleteRequest.current || action.current || pending || loading || isActiveTask(task?.status)) return false;
     action.current = true;
     setPending(true);
@@ -194,7 +194,11 @@ export function useAgentChat({ visible = true } = {}) {
     const signal = request.current?.signal;
     const id = conversationId.current;
     try {
-      const next = await chatApi.send({ prompt, bounds, analysis_region, ...(analysis_aoi ? { analysis_aoi } : {}), conversation_id: id }, signal, draftKey);
+      const next = await chatApi.send({
+        prompt, bounds, analysis_region, conversation_id: id,
+        ...(analysis_aoi ? { analysis_aoi } : {}),
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      }, signal, draftKey);
       if (!alive.current || epoch !== generation.current) return false;
       const nextId = next.conversation_id;
       if (id === null) {

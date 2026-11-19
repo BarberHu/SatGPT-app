@@ -12,10 +12,15 @@ from fastapi.testclient import TestClient
 from harness.app.identity import COOKIE, PrivateRoutes
 from harness.app.server import router
 from harness.app.session_store import TERMINAL
+from harness.app.shared_runtime import RuntimeUnavailable
 
 
 class SimulatedRuntime:
     provider = 'deepseek-official'
+    default_reasoning_effort = 'high'
+    reasoning = {'model': 'Test model',
+                 'levels': [{'id': effort, 'name': effort.title()} for effort in ('off', 'low', 'high', 'max')],
+                 'default_effort': 'high'}
 
     def __init__(self, root, home, workers, resident_limit, *, run=None, reload=None):
         self.available = threading.Event()
@@ -32,6 +37,11 @@ class SimulatedRuntime:
     def start(self):
         self.starts += 1
         self.available.set()
+
+    def reasoning_options(self):
+        if self.reasoning is None:
+            raise RuntimeUnavailable('Reasoning capabilities are unavailable')
+        return self.reasoning
 
     def close(self):
         self.available.clear()

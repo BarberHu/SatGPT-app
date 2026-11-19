@@ -7,7 +7,7 @@ import { WorkerPool } from './worker-pool.js';
 import { mountControl, readBinding } from './runtime-control.js';
 
 export const name = 'webgis-gee-tools';
-export const inject = ['agents', 'tools'];
+export const inject = ['agents', 'llm', 'tools'];
 
 const root = process.env.WEBGIS_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const project = process.env.GEE_PROJECT_ID;
@@ -70,6 +70,13 @@ export async function runWithContext(payload, exec) {
 }
 
 export function apply(ctx) {
+  ctx.on('agent/request', async ({ agent }, next) => {
+    const request = await next();
+    const binding = readBinding(String(agent.session.id));
+    if (!binding || !Object.hasOwn(binding, 'reasoning_effort')) return request;
+    const { reasoningEffort: inherited, ...config } = request;
+    return binding.reasoning_effort === null ? config : { ...config, reasoningEffort: binding.reasoning_effort };
+  });
   ctx.tools.register({
     name: 'gee_check',
     description: 'Fast local preflight for restricted GEE Python. Run before executing complex code in gee_eval, gee_preview, or gee_layer. If valid is false, fix the reported error and check again before execution. Checks syntax, allowed statements and builtins, and result assignment without an Earth Engine request.',

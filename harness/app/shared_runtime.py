@@ -41,6 +41,8 @@ class SharedRuntime:
         self.drainer = None
         self.port = None
         self.token = None
+        self.reasoning = None
+        self.default_reasoning_effort = None
 
     def start(self):
         with self.lifecycle:
@@ -58,6 +60,8 @@ class SharedRuntime:
             ensure_plugin(self.home)
             options = harness_model_options(self.home)
             self.provider = options['provider']
+            self.model = options['model']
+            self.default_reasoning_effort = options.get('reasoning_effort')
             self.client = DeepSeekHarness(
                 **options, max_tokens=selected_max_tokens(), cwd=str(self.workspace),
                 runtime_cwd=(os.environ.get('SystemDrive', 'C:') + '\\') if os.name == 'nt' else str(self.workspace),
@@ -78,6 +82,11 @@ class SharedRuntime:
                 time.sleep(.025)
             self.port = int(port_file.read_text(encoding='ascii'))
             self.control('/health')
+            try:
+                self._load_reasoning()
+            except RuntimeUnavailable:
+                # Chat can still use the deployment default without a capability response.
+                self.reasoning = None
             self.stop_draining.clear()
             self.available.set()
             self.drainer = threading.Thread(target=self._drain, args=(self.client.client,),
@@ -86,6 +95,21 @@ class SharedRuntime:
         except Exception:
             self.close()
             raise
+
+    def _load_reasoning(self):
+        options = self.control('/reasoning', {'provider': self.provider, 'model': self.model})
+        self.reasoning = {**options, 'model': options.get('model') or self.model}
+        return self.reasoning
+
+    def reasoning_options(self):
+        if self.reasoning is not None:
+            return self.reasoning
+        if not self.available.is_set():
+            raise RuntimeUnavailable('Reasoning capabilities are unavailable')
+        with self.lifecycle:
+            if not self.available.is_set():
+                raise RuntimeUnavailable('Reasoning capabilities are unavailable')
+            return self.reasoning if self.reasoning is not None else self._load_reasoning()
 
     def _drain(self, client):
         # The SDK queues unmatched notifications separately from Session.run subscriptions.
@@ -147,11 +171,11 @@ class SharedRuntime:
                 return result
         except HTTPError as exc:
             with exc:
-                content = json.loads(exc.read(1000) or b'{}')
+                if route == '/reload' and exc.code == 422:
+                    content = json.loads(exc.read(1000) or b'{}')
+                    raise ValueError(content.get('error', 'GEE layer reload failed')) from None
             if route == '/cancel' and exc.code == 404:
                 return {'accepted': False}
-            if route == '/reload' and exc.code == 422:
-                raise ValueError(content.get('error', 'GEE layer reload failed')) from None
             raise RuntimeUnavailable('Harness control channel rejected the request') from None
         except (OSError, URLError, ValueError):
             raise RuntimeUnavailable('Harness control channel is unavailable') from None
@@ -162,6 +186,7 @@ class SharedRuntime:
 
     def _close(self):
         self.available.clear()
+        self.reasoning = None
         self.stop_draining.set()
         try:
             if self.client is not None:

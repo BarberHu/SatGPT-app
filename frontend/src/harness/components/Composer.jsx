@@ -1,10 +1,11 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import { ArrowUp, Loader2, MapPin, Pencil, Pentagon, Square, X } from 'lucide-react';
 import { Button } from '../ui/button';
-import AttachmentList from './AttachmentList';
+import ReasoningMenu from './ReasoningMenu';
 import { regionPresentation } from '../map/regionPresentation';
 
-export default function Composer({ value, onChange, onSend, onStop, busy, pending, stopping, stopDisabled, disabled, mapReady, region, onEditRegion, areaControls }) {
+export default function Composer({ value, onChange, onSend, onStop, busy, pending, stopping, stopDisabled, disabled,
+  mapReady, region, onEditRegion, areaControls, reasoning, reasoningEffort, onReasoningChange, onReasoningRetry }) {
   const input = useRef(null);
   const area = regionPresentation(region, mapReady);
   const sendingDisabled = disabled || region?.editing;
@@ -14,8 +15,7 @@ export default function Composer({ value, onChange, onSend, onStop, busy, pendin
     input.current.style.height = `${Math.min(input.current.scrollHeight, 160)}px`;
   }, [value]);
   return <div className="agent-composer-wrap">
-    <form className="agent-composer harness-compose" onSubmit={event => { event.preventDefault(); if (value.trim() && !sendingDisabled) onSend(); }}>
-      <AttachmentList items={[]} />
+    <form className="agent-composer" onSubmit={event => { event.preventDefault(); if (value.trim() && !sendingDisabled) onSend(); }}>
       <textarea ref={input} aria-label="Message" value={value} rows={1}
         onChange={event => onChange(event.target.value)}
         placeholder="Ask about the map, explore data, or start an analysis…"
@@ -45,12 +45,16 @@ export default function Composer({ value, onChange, onSend, onStop, busy, pendin
           {areaControls}
           {area.hint ? <p className="agent-region-hint" role={region?.error ? 'alert' : undefined}>{area.hint}</p> : null}
         </div>
-        {busy ? <Button type="button" size="icon" className="agent-send" onClick={onStop}
-          disabled={stopping || stopDisabled} aria-label={stopping ? 'Stopping' : 'Stop response'} title="Stop response">
-          {stopping ? <Loader2 className="agent-spin" /> : <Square size={16} fill="currentColor" />}
-        </Button> : <Button type="submit" size="icon" className="agent-send" disabled={sendingDisabled || !value.trim()} aria-label={pending ? 'Sending' : 'Send'}>
-          {pending ? <Loader2 className="agent-spin" /> : <ArrowUp />}
-        </Button>}
+        <div className="agent-composer-actions">
+          {reasoning ? <ReasoningMenu options={reasoning} value={reasoningEffort}
+            onChange={onReasoningChange} onRetry={onReasoningRetry} /> : null}
+          {busy ? <Button type="button" size="icon" className="agent-send" onClick={onStop}
+            disabled={stopping || stopDisabled} aria-label={stopping ? 'Stopping' : 'Stop response'} title="Stop response">
+            {stopping ? <Loader2 className="agent-spin" /> : <Square size={16} fill="currentColor" />}
+          </Button> : <Button type="submit" size="icon" className="agent-send" disabled={sendingDisabled || !value.trim()} aria-label={pending ? 'Sending' : 'Send'}>
+            {pending ? <Loader2 className="agent-spin" /> : <ArrowUp />}
+          </Button>}
+        </div>
       </div>
     </form>
     <p className="agent-composer-note">SatGPT can make mistakes. Check observation dates and data sources.</p>

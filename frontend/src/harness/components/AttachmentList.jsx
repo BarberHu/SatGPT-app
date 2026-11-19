@@ -2,7 +2,6 @@ import React from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '../ui/dialog';
 
-/** Shared attachment surface; composer stays empty until uploads are supported. */
 export default function AttachmentList({ items = [] }) {
   if (!items.length) return null;
   return <div className="agent-attachments" aria-label="Attachments and previews">

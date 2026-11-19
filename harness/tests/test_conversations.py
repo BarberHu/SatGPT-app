@@ -86,6 +86,30 @@ class ConversationTests(unittest.TestCase):
         with self.controller.store.connect() as db:
             self.assertEqual([row['deleted'] for row in db.execute('SELECT deleted FROM conversations')], [1])
 
+    def test_reasoning_options_validate_and_snapshot_each_submission(self):
+        self.controller.execution_slots = 0
+        options = self.a.get(API+'/reasoning').json()
+        self.assertEqual([item['id'] for item in options['levels']], ['off', 'low', 'high', 'max'])
+        self.assertEqual(options['default_effort'], 'high')
+        invalid = self.a.post(API+'/tasks', json=task_body(None, reasoning_effort='medium'))
+        self.assertEqual((invalid.status_code, invalid.json()['detail']['code']), (422, 'unsupported_reasoning_effort'))
+        self.assertEqual(self.a.get(API+'/conversations').json(), {'conversations': []})
+        body = task_body(None, reasoning_effort='low')
+        first = self.a.post(API+'/tasks', json=body)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(first.json()['reasoning_effort'], 'low')
+        self.assertEqual(self.a.post(API+'/tasks', json=body).json(), first.json())
+        conflict = self.a.post(API+'/tasks', json={**body, 'reasoning_effort': 'max'})
+        self.assertEqual((conflict.status_code, conflict.json()['detail']['code']), (409, 'request_conflict'))
+        with patch.object(self.controller.runtime, 'reasoning', None):
+            self.assertEqual(self.a.get(API+'/reasoning').status_code, 503)
+            default = self.a.post(API+'/tasks', json=task_body(None))
+            self.assertEqual(default.status_code, 202)
+            self.assertNotIn('reasoning_effort', default.json())
+        with self.controller.store.connect() as db:
+            receipt = json.loads(self.controller.store.next_queued(db)['receipt'])
+        self.assertEqual(receipt['reasoning_effort'], 'low')
+
     def test_cookie_owner_is_persistent_and_cannot_be_chosen_by_the_client(self):
         cid = new_chat(self.a)
         self.assertEqual(self.b.get(f'{API}/conversations/{cid}').status_code, 404)

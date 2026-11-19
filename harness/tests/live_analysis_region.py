@@ -4,12 +4,53 @@ Run with AGENT_PORT set to the isolated server's port. Never prints answers,
 credentials, tool payloads or layer URLs. Writes only a compact safe report.
 """
 import json
+import math
 import re
 import time
 from pathlib import Path
+from urllib.request import urlopen
+
 from satgpt_config import load_project_env, integer
 from harness.tests.test_analysis_region import TRIANGLE
 from harness.tests.live_http import BrowserHttp
+
+
+def verify_layer_reload(browser, conversation_id, task_id):
+    path = f'/api/harness/conversations/{conversation_id}'
+    before = browser.request('GET', path)['messages']
+    original = next(message for message in before if message['job_id'] == task_id and message.get('layers'))
+    original_layer = original['layers'][0]
+    assert original_layer['reloadable'] and original_layer['code'], 'The test layer has no saved recipe'
+    reloaded = browser.request('POST', f'{path}/layers/{task_id}-0/reload')['layer']
+    assert all(reloaded[field] == original_layer[field] for field in ('code', 'generation', 'bounds', 'visualization'))
+    assert reloaded['reload_version'] == original_layer.get('reload_version', 0) + 1
+
+    after = browser.request('GET', path)['messages']
+    assert [message['id'] for message in before] == [message['id'] for message in after]
+    saved = next(message for message in after if message['id'] == original['id'])
+    assert saved['layers'][0] == reloaded
+    assert saved['layers'][1:] == original['layers'][1:]
+
+    west, south, east, north = reloaded['bounds']
+    zoom = 13
+    tiles = 2 ** zoom
+    x = int(((west + east) / 2 + 180) / 360 * tiles)
+    latitude = math.radians((south + north) / 2)
+    y = int((1 - math.asinh(math.tan(latitude)) / math.pi) / 2 * tiles)
+    tile = reloaded['url'].replace('{z}', str(zoom)).replace('{x}', str(x)).replace('{y}', str(y))
+    try:
+        with urlopen(tile, timeout=30) as response:
+            media = response.headers.get_content_type()
+            header = response.read(12)
+    except OSError:
+        raise RuntimeError('Could not read the reloaded Earth Engine tile') from None
+    is_image = (
+        (media == 'image/png' and header.startswith(b'\x89PNG\r\n\x1a\n'))
+        or (media == 'image/jpeg' and header.startswith(b'\xff\xd8\xff'))
+        or (media == 'image/webp' and header.startswith(b'RIFF') and header[8:] == b'WEBP')
+    )
+    assert is_image, 'Reloaded tile was not a supported image'
+    return {'reload_version': reloaded['reload_version'], 'tile_media_type': media}
 
 
 def main():
@@ -96,6 +137,7 @@ def main():
     report['real_layer_and_exact_polygon_result'] = True
     report['polygon_area_sq_m'] = statistics['area_sq_m']
     report['mean_elevation_m'] = statistics['mean_elevation_m']
+    report['layer_reload'] = verify_layer_reload(browser, cid, result['id'])
     conflict, _ = run('obvious_place_conflict_asks_before_tools',
                      'Calculate the mean elevation of Tokyo, Japan.', False)
     scope_choice = r'[?？]|\bplease\s+(?:choose|confirm|specify)\b'

@@ -26,7 +26,10 @@ function requestId() {
 async function request(path, { signal, ...options } = {}) {
   await ensureBrowserSession();
   const response = await fetch('/api/harness' + path, { signal, credentials: 'same-origin', ...options });
-  const data = await response.json();
+  const data = await response.json().catch(error => {
+    if (response.ok) throw error;
+    return {};
+  });
   if (!response.ok) {
     const error = new Error(data.detail?.message || (typeof data.detail === 'string' ? data.detail : null)
       || data.error || 'HTTP ' + response.status);
@@ -51,6 +54,14 @@ export const chatApi = {
   },
   get: (id, signal) => request(conversationPath(id), { signal }),
   list: signal => request('/conversations', { signal }),
+  async reasoning(signal) {
+    const options = await request('/reasoning', { signal });
+    if (!Array.isArray(options?.levels) || options.levels.some(level =>
+      typeof level?.id !== 'string' || !level.id || typeof level.name !== 'string')) {
+      throw new Error('Invalid reasoning options.');
+    }
+    return options;
+  },
   remove: (id, signal) => request(conversationPath(id), { method: 'DELETE', signal }),
   activate: (id, signal) => request(conversationPath(id) + '/activate', { method: 'POST', signal }),
   async send(body, signal, draftKey) {

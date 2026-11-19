@@ -5,7 +5,7 @@ import { messageLayerPresentation } from '../../map/layerPresentation';
 import { chatApi } from '../chatApi';
 
 const choicesKey = id => `satgpt:harness:layers:${id}`;
-export function readLayerChoices(id) {
+function readLayerChoices(id) {
   try {
     const saved = JSON.parse(localStorage.getItem(choicesKey(id)));
     return { visibility: saved?.visibility || {}, removed: new Set(saved?.removed || []) };
@@ -16,7 +16,7 @@ export function readLayerChoices(id) {
 export function useAgentMap(conversationId, messages) {
   const shared = useSharedMap();
   const current = useRef(null);
-  const choices = useRef({ id: null, ...readLayerChoices(null) });
+  const choices = useRef({ id: null, visibility: {}, removed: new Set() });
   const focusIntent = useRef(null);
   const [layers, setLayers] = useState([]);
   const [error, setError] = useState('');
