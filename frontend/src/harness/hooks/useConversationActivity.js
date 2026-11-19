@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 const STORAGE_KEY = 'satgpt:harness:conversation-activity';
-const terminal = status => ['completed', 'failed', 'cancelled'].includes(status);
-const active = status => ['queued', 'running'].includes(status);
+import { isActiveTask as active, isTerminalTask as terminal } from '../taskStatus';
 
 function readActivity() {
   try {

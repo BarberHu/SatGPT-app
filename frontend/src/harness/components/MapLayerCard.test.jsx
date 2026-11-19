@@ -86,3 +86,10 @@ test('normal reload lives in details while unavailable and running layers keep a
     expect(node.querySelectorAll('[aria-label="Reload 地形高程"]')).toHaveLength(1);
   } finally { await act(async () => root.unmount()); node.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT; }
 });
+
+test('preserves a server-issued conversation and task scoped thumbnail path', () => {
+  const id = 'a'.repeat(32);
+  const url = '/api/previews/webgis-' + id + '/' + id + '/' + id + '.png';
+  expect(layerPresentation({ thumbnail: { url } }).thumbnail).toEqual({ url });
+  expect(layerPresentation({ thumbnail: { url: '/api/previews/../unsafe.png' } }).thumbnail).toBeNull();
+});

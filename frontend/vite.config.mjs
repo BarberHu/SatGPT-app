@@ -17,7 +17,14 @@ export function createProxyConfig(env) {
   const target = `http://${serviceHost}:${getPort(env, 'AGENT_PORT', 8000)}`;
 
   return {
-    '/api': { target, changeOrigin: true },
+    '/api': {
+      target,
+      changeOrigin: false,
+      configure: proxy => proxy.on('proxyReq', (proxyRequest, request) => {
+        proxyRequest.removeHeader('x-forwarded-for');
+        proxyRequest.setHeader('x-forwarded-proto', request.socket.encrypted ? 'https' : 'http');
+      }),
+    },
     '/health': { target, changeOrigin: true },
     '/readyz': { target, changeOrigin: true },
   };

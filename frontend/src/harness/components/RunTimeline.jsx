@@ -65,11 +65,13 @@ export default function RunTimeline({ rows = [], run = {}, pending = false, reco
   const started = Date.parse(run.startedAt);
   const ended = pending ? now : Date.parse(run.finishedAt);
   const seconds = Number.isFinite(started) && Number.isFinite(ended) ? Math.max(0, Math.floor((ended - started) / 1000)) : null;
-  const title = reconnecting ? 'Reconnecting…' : pending ? (run.status === 'queued' ? 'Queued' : 'Running')
-    : run.status === 'cancelled' ? 'Stopped' : run.status === 'failed' ? 'Interrupted' : 'Completed';
+  const status = { queued: 'Queued', starting: 'Starting', running: 'Running', cancelling: 'Stopping',
+    cleaning: 'Finishing', cancelled: 'Stopped', failed: 'Interrupted', interrupted: 'Interrupted', completed: 'Completed' };
+  const title = reconnecting ? 'Reconnecting…' : status[run.status] || (pending ? 'Running' : 'Completed');
+  const failed = ['failed', 'interrupted'].includes(run.status);
   const phases = timelinePhases(rows);
   return <Fold pending={pending} className="agent-run-timeline" ariaLabel="Run timeline"
-    label={<>{pending ? <Loader2 className="agent-spin" size={14} /> : run.status === 'cancelled' ? <Square size={14} /> : run.status === 'failed' ? <CircleAlert size={14} /> : <Check size={14} />}
+    label={<>{pending ? <Loader2 className="agent-spin" size={14} /> : run.status === 'cancelled' ? <Square size={14} /> : failed ? <CircleAlert size={14} /> : <Check size={14} />}
       <span>{title}{seconds !== null ? ` · ${seconds}s` : ''}</span></>}>
     <div className="agent-run-phases">{phases.map((phase, index) => {
       const live = pending && index === phases.length - 1;
@@ -82,6 +84,7 @@ export default function RunTimeline({ rows = [], run = {}, pending = false, reco
         {phase.rows.map(row => <TimelineRow key={row.id} row={row} />)}
       </Fold>;
     })}
-    {!rows.length && pending ? <p className="agent-run-waiting">Waiting for agent events…</p> : null}</div>
+    {!rows.length && pending ? <p className="agent-run-waiting">{run.status === 'queued'
+      ? 'Waiting for an execution slot…' : 'Waiting for agent events…'}</p> : null}</div>
   </Fold>;
 }

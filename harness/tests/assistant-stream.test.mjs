@@ -19,12 +19,13 @@ test('live plugin forwards ordered reasoning and text deltas before settlement a
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const oldEnv = { ...process.env };
   const listeners = new Map();
-  const session = { id: 'root' };
+  const session = { id: 'satgpt-' + 'a'.repeat(32) };
   const agent = { session };
-  const binding = path.join(folder, 'binding.json');
-  await fs.writeFile(binding, JSON.stringify({ session_id: 'root', run_id: 'run-1' }));
+  const binding = path.join(folder, session.id + '.json');
+  const timingLog = path.join(folder, 'timing.jsonl');
+  await fs.writeFile(binding, JSON.stringify({ session_id: session.id, run_id: 'run-1' }));
   Object.assign(process.env, { SATGPT_STREAM_ENDPOINT: `http://127.0.0.1:${server.address().port}/frames`,
-    SATGPT_STREAM_TOKEN: 'test-token', SATGPT_STREAM_BINDING: binding });
+    SATGPT_STREAM_TOKEN: 'test-token', SATGPT_RUN_BINDINGS: folder, SATGPT_HARNESS_TIMING_LOG: timingLog });
   const emit = frame => listeners.get('agent/assistant-stream')({ agent, frame });
   try {
     apply({ on: (name, callback) => listeners.set(name, callback) });
@@ -56,18 +57,31 @@ test('live plugin forwards ordered reasoning and text deltas before settlement a
     assert.equal(batches[7].attempt_id, 'root:2');
     assert.deepEqual(batches.map(x => x.event_sequence), batches.map((_, i) => i + 1));
     assert.equal(batches[3].outcome.eventType, 'assistant/attempt');
-    assert.ok(batches.every(x => x.session_id === 'root' && x.run_id === 'run-1'));
+    assert.ok(batches.every(x => x.session_id === session.id && x.run_id === 'run-1'));
     assert.doesNotMatch(JSON.stringify(batches), /ARGS/);
+    const sessionEvent = listeners.get('session/event');
+    sessionEvent({ id: 'timing-only' }, { type: 'llm/retry', time: 1000,
+      data: { step: 1, retry: 1, failure: { code: 'TRANSPORT', message: 'UNFILTERED_MESSAGE' } } });
+    sessionEvent({ id: 'timing-only' }, { type: 'llm/retry-started', time: 1500,
+      data: { step: 1, retry: 1 } });
+    const raw = await fs.readFile(timingLog, 'utf8');
+    const events = raw.trim().split('\n').map(JSON.parse);
+    assert.deepEqual(events.map(event => [event.event, event.at_ms]), [
+      ['llm/retry', 1000], ['llm/retry-started', 1500],
+    ]);
+    assert.equal(events[0].code, 'TRANSPORT');
+    assert.doesNotMatch(raw, /UNFILTERED_MESSAGE/);
     listeners.get('agent/assistant-stream')({ agent: { session: { id: 'other' } },
       frame: { type: 'start', attemptId: 'other:1', revision: 1 } });
   } finally {
     listeners.get('dispose')?.();
-    for (const key of ['SATGPT_STREAM_ENDPOINT', 'SATGPT_STREAM_TOKEN', 'SATGPT_STREAM_BINDING']) {
+    for (const key of ['SATGPT_STREAM_ENDPOINT', 'SATGPT_STREAM_TOKEN', 'SATGPT_RUN_BINDINGS', 'SATGPT_HARNESS_TIMING_LOG']) {
       if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
     }
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     await fs.unlink(binding);
+    await fs.rm(timingLog, { force: true });
     await fs.rmdir(folder);
   }
 });

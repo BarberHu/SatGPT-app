@@ -1,3 +1,5 @@
+vi.mock('./browserSession.js', () => ({ ensureBrowserSession: async () => {} }));
+beforeEach(() => sessionStorage.clear());
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import ModeRoot from '../ModeRoot';

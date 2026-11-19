@@ -2,22 +2,50 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WorkerClient } from '../integrations/gee-tools/worker-client.js';
+import { WorkerPool } from '../integrations/gee-tools/worker-pool.js';
 
-test('queued calls share a resident Python worker and keep replies paired', async () => {
-  const directory = path.dirname(fileURLToPath(import.meta.url));
-  const client = new WorkerClient({ python: process.env.PYTHON || 'python',
-    worker: path.join(directory, 'fake_worker.py'), cwd: directory });
+const directory = path.dirname(fileURLToPath(import.meta.url));
+const options = { python: process.env.PYTHON || 'python', worker: path.join(directory, 'fake_worker.py'), cwd: directory };
+const deadline = { timeout: 5000 };
+
+test('fixed worker pool executes calls in different workers and reuses them', async () => {
+  const pool = new WorkerPool(options, 2);
   try {
-    const [first, second] = await Promise.all([
-      client.run({ value: 'a' }, { timeout: 5000 }),
-      client.run({ value: 'b' }, { timeout: 5000 }),
+    const [a, b] = await Promise.all([
+      pool.run('a', { value: 'a', delay: .1 }, deadline),
+      pool.run('b', { value: 'b', delay: .1 }, deadline),
     ]);
-    assert.deepEqual([first.value, second.value], ['a', 'b']);
-    assert.deepEqual([first.count, second.count], [1, 2]);
-    assert.equal(first.pid, second.pid);
-    assert.notEqual(first.pid, process.pid);
+    assert.notEqual(a.pid, b.pid);
+    const c = await pool.run('c', { value: 'c' }, deadline);
+    assert.ok([a.pid, b.pid].includes(c.pid));
+    assert.deepEqual([a.value, b.value, c.value], ['a', 'b', 'c']);
+    assert.equal(c.count, 2);
   } finally {
-    client.child?.kill();
+    await pool.close();
+  }
+});
+
+test('cancel removes a queued request and replaces only the running request’s worker', async () => {
+  const pool = new WorkerPool(options, 2);
+  try {
+    const [a, b] = await Promise.all([pool.run('a', { value:'a' }, deadline), pool.run('b', { value:'b' }, deadline)]);
+    const active = new AbortController();
+    const waiting = new AbortController();
+    const one = pool.run('a', { value:'cancelled', delay:5 }, { ...deadline, signal:active.signal });
+    const two = pool.run('b', { value:'continues', delay:.15 }, deadline);
+    const pending = pool.run('c', { value:'queued' }, { ...deadline, signal:waiting.signal });
+    const cancelled = assert.rejects(one, /cancelled/);
+    const removed = assert.rejects(pending, /cancelled/);
+    waiting.abort();
+    active.abort();
+    await Promise.all([cancelled, removed]);
+    const recovered = await pool.run('d', { value:'recovered' }, deadline);
+    const continued = await two;
+    assert.equal(continued.value, 'continues');
+    assert.ok([a.pid,b.pid].includes(continued.pid));
+    assert.ok(![a.pid,b.pid].includes(recovered.pid));
+    assert.equal(recovered.count, 1);
+  } finally {
+    await pool.close();
   }
 });

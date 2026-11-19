@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 
 export const name = 'satgpt-assistant-stream';
 
@@ -7,8 +8,8 @@ export const name = 'satgpt-assistant-stream';
 export function apply(ctx) {
   const endpoint = process.env.SATGPT_STREAM_ENDPOINT;
   const token = process.env.SATGPT_STREAM_TOKEN;
-  const bindingFile = process.env.SATGPT_STREAM_BINDING;
-  if (!endpoint || !token || !bindingFile) return;
+  const bindingDirectory = process.env.SATGPT_RUN_BINDINGS;
+  if (!endpoint || !token || !bindingDirectory) return;
   const target = new URL(endpoint);
   if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1') throw new Error('Stream bridge must use loopback');
   const transport = new http.Agent({ keepAlive: true, maxSockets: 1 });
@@ -16,12 +17,19 @@ export function apply(ctx) {
   const runs = new Map();
   let queue = Promise.resolve();
   let pending = [];
+  let queued = 0;
   let timer;
   let disposed = false;
+  const timingLog = process.env.SATGPT_HARNESS_TIMING_LOG;
+  let timingWriteFailed = false;
   const getRun = sessionId => {
     let binding;
-    try { binding = JSON.parse(readFileSync(bindingFile, 'utf8')); } catch { return null; }
-    if (binding.session_id !== sessionId) return null;
+    if (!/^satgpt-[a-f0-9]{32}$/.test(sessionId)) return null;
+    try {
+      const value = JSON.parse(readFileSync(path.join(bindingDirectory, sessionId + '.json'), 'utf8'));
+      if (value.session_id !== sessionId) return null;
+      binding = { session_id: sessionId, run_id: value.run_id };
+    } catch { return null; }
     let run = runs.get(sessionId);
     if (run?.binding.run_id !== binding.run_id) {
       run = { binding, order: 0, sequence: 0 };
@@ -35,6 +43,8 @@ export function apply(ctx) {
     if (!pending.length) return;
     const batch = pending;
     pending = [];
+    if (queued >= 64) return;
+    queued++;
     queue = queue.then(() => new Promise(resolve => {
       if (disposed) return resolve();
       const body = JSON.stringify(batch);
@@ -46,7 +56,7 @@ export function apply(ctx) {
       request.on('error', resolve);
       request.on('timeout', () => request.destroy());
       request.end(body);
-    })).catch(() => {});
+    })).catch(() => {}).finally(() => { queued--; });
   };
   const send = (attempt, event) => {
     const run = attempt.run || attempt;
@@ -85,10 +95,23 @@ export function apply(ctx) {
   });
   ctx.on('session/event', (session, event) => {
     const sessionId = String(session.id);
-    const run = getRun(sessionId);
+    if (timingLog && !timingWriteFailed && ['llm/retry', 'llm/retry-started'].includes(event.type)) {
+      const data = event.data;
+      const code = data.failure?.code;
+      try {
+        appendFileSync(timingLog, JSON.stringify({ component: 'model', event: event.type,
+          at_ms: event.time, session_id: sessionId, step: data.step, retry: data.retry,
+          ...(/^[A-Z0-9_]{1,60}$/.test(code || '') && { code }) }) + '\n', { mode: 0o600 });
+      } catch {
+        timingWriteFailed = true;
+        process.stderr.write('SatGPT could not write model retry timing events.\n');
+      }
+    }
+    const run = runs.get(sessionId) || getRun(sessionId);
     if (!run) return;
     if (['turn/start', 'step/start', 'tool/call', 'tool/result', 'llm/retry', 'step/end'].includes(event.type)) {
-      send(run, { type: 'session', event, attempt_id: run.lastAttemptId });
+      const data = event.type === 'tool/result' ? { ...event.data, meta: undefined } : event.data;
+      send(run, { type: 'session', event: { ...event, data }, attempt_id: run.lastAttemptId });
     }
     if (event.type === 'turn/end') {
       send(run, { type: 'drained' }); flush(); runs.delete(sessionId);

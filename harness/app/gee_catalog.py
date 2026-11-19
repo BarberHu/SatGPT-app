@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.request import urlopen
@@ -69,9 +70,12 @@ def search(query: str = "", limit: int = 20, dataset_type: str | None = None,
     if rebuilt:
         index = _build_index()
         cache_dir.mkdir(parents=True, exist_ok=True)
-        temporary = cache_file.with_suffix(".tmp")
-        temporary.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(cache_file)
+        temporary = cache_dir / f"stac-index-{uuid.uuid4().hex}.tmp"
+        try:
+            temporary.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(cache_file)
+        finally:
+            temporary.unlink(missing_ok=True)
     terms = [term for term in str(query).lower().replace(",", " ").split() if term]
     scored = []
     for item in index["items"]:

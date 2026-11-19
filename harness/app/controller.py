@@ -1,23 +1,32 @@
-"""Serialized agent execution with independent, switchable conversation histories."""
+"""Browser-owned conversations and a durable queue for the shared Harness runtime."""
 
 from __future__ import annotations
 
 import ast
+import copy
+import hashlib
 import json
 import os
 import threading
+import time
 import uuid
 import re
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from weakref import WeakValueDictionary
 
-from .agent import HarnessAgent, conversation_prompt
-from .model_config import model_key_configured, selected_provider
-from .trace import add_harness_event, remove_final_answer
+from satgpt_config import integer
+from .agent import conversation_prompt, describe_run_failure
+from .identity import BrowserIdentity
+from .session_store import ACTIVE, SessionStore, encode, message, timestamp
+from .shared_runtime import RuntimeUnavailable, SharedRuntime
+from .trace import add_harness_event, clean_text, remove_final_answer
 from .task_stream import TaskStream
 from .analysis_region import validate_analysis_region, region_bounds, validate_analysis_aoi
-from .layer_generation import LayerWorkerRunner, generation_recipe, replay_payload, restore_generation_recipes
+from .layer_generation import generation_recipe, replay_payload
 
 
 def validate_bounds(value) -> list[float]:
@@ -80,456 +89,494 @@ CATALOG = [
 ]
 
 
+
+class AdmissionError(RuntimeError):
+    def __init__(self, code, message, status=429):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
+@dataclass
+class ActiveTask:
+    owner: str
+    native_id: str
+    run_id: str
+    deadline: float
+    receipt: dict
+    stream: TaskStream
+    admitted: threading.Event = field(default_factory=threading.Event)
+    stop_requested: float | None = None
+    cancel_sent: bool = False
+
+
 class TaskController:
-    def __init__(self, root: Path, agent_factory=HarnessAgent):
-        self.root = root
-        self.agent_factory = agent_factory
-        self.home = root / "state" / "dsh-home"
-        self.chat_file = root / "state" / "chat-history.json"
-        self.archive_dir = root / "state" / "conversations"
-        self.tool_events_file = root / "state" / "gee-tool-events.jsonl"
-        self.trace_dir = root / "state" / "traces"
-        self._agent = None
-        self._closed = False
-        self._agent_conversation_id = None
-        self._job_agents = {}
-        self.jobs: dict[str, dict] = {}
-        self.streams: dict[str, TaskStream] = {}
+    def __init__(self, root: Path, *, state=None, runtime_factory=SharedRuntime):
+        self.root = root.resolve()
+        self.state = Path(state or os.getenv('SATGPT_HARNESS_STATE_DIR') or root / 'state' / 'multiuser').resolve()
+        self.state.mkdir(parents=True, exist_ok=True)
+        self.identity = BrowserIdentity(self.state)
+        self.store = SessionStore(self.state / 'sessions.sqlite3')
+        self.execution_slots = integer('SATGPT_AGENT_TASKS')
+        self.timeout = integer('SATGPT_AGENT_DEADLINE_SECONDS')
+        self.gee_workers = integer('SATGPT_GEE_WORKERS')
+        self.trace_secrets = tuple(key for name in ('AIHUBMIX_API_KEY', 'DEEPSEEK_API_KEY')
+                                   if len(key := os.getenv(name, '')) >= 8)
+        self.runtime = runtime_factory(self.root, self.state / 'dsh-home', self.gee_workers,
+                                       integer('SATGPT_AGENT_RESIDENT_SESSIONS'))
+        self.runtime.start()
+        self.pool = ThreadPoolExecutor(self.execution_slots, thread_name_prefix='satgpt-run')
         self.lock = threading.RLock()
-        self.changed = threading.Condition(self.lock)
-        self.conversation_lock = threading.RLock()
-        self.conversation_id = "webgis-main"
-        self.messages = self._load_messages()
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gee-agent")
-        self.trace_secrets = self._trace_secrets()
-        self.layer_worker = LayerWorkerRunner(root)
-        self._layer_reloads = set()
+        self.closed = threading.Event()
+        self.wakeup = threading.Event()
+        self.rotating = False
+        self.active = {}
+        # Queued work lives in SQLite. Retain an event stream only while a client uses it.
+        self.queued_streams = WeakValueDictionary()
+        self.reloads = {}
+        self.monitor = threading.Thread(target=self._monitor, name='satgpt-runtime-monitor', daemon=True)
+        self.monitor.start()
 
-    @staticmethod
-    def _trace_secrets() -> tuple[str, ...]:
-        secrets = [os.getenv("AIHUBMIX_API_KEY", ""), os.getenv("DEEPSEEK_API_KEY", "")]
-        credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        if credentials:
-            try:
-                key = json.loads(Path(credentials).read_text(encoding="utf-8")).get("private_key", "")
-                if isinstance(key, str) and key:
-                    secrets.extend((key, json.dumps(key)[1:-1]))
-            except (OSError, ValueError, TypeError):
-                pass
-        return tuple(secret for secret in secrets if len(secret) >= 8)
+    @property
+    def healthy(self):
+        return not self.closed.is_set() and self.runtime.available.is_set()
 
-    def _save_trace(self, job_id: str, trace: list[dict]) -> None:
-        self.trace_dir.mkdir(parents=True, exist_ok=True)
-        target = self.trace_dir / f"{job_id}.json"
-        temporary = target.with_suffix(".tmp")
-        temporary.write_text(json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(target)
+    def _require_available(self, *, allow_rotation=False):
+        if allow_rotation and self.rotating and not self.closed.is_set():
+            return
+        if not self.healthy:
+            raise AdmissionError('runtime_unavailable', 'Harness is unavailable. Try again later.', 503)
+        if self.rotating:
+            raise AdmissionError('runtime_rotating', 'Harness is rotating idle sessions. Try again shortly.')
 
-    def _load_messages(self) -> list[dict]:
-        if not self.chat_file.is_file():
-            return []
-        data = json.loads(self.chat_file.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            conversation_id = data.get("conversation_id")
-            if not isinstance(conversation_id, str) or not conversation_id.startswith("webgis-"):
-                raise ValueError("Invalid conversation session ID")
-            self.conversation_id = conversation_id
-            data = data.get("messages")
-        if not isinstance(data, list):
-            raise ValueError("Invalid conversation history format")
-        return data[-100:]
+    def _view(self, db, owner, cid):
+        row = self.store.owned(db, owner, cid)
+        latest = self.store.latest(db, owner, cid)
+        return {'conversation_id': cid, 'messages': json.loads(row['messages']),
+                'active_task': latest['id'] if latest and latest['status'] in ACTIVE else None}
 
-    def _save_messages(self) -> None:
-        self.chat_file.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.chat_file.with_suffix(".tmp")
-        state = {"conversation_id": self.conversation_id, "messages": self.messages[-100:]}
-        temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(self.chat_file)
+    def conversation(self, owner, cid):
+        with self.store.connect() as db:
+            return self._view(db, owner, cid)
 
-    def conversation(self, conversation_id=None) -> dict:
-        with self.conversation_lock, self.lock:
-            cid = conversation_id or self.conversation_id
-            messages = self._conversation_messages(cid)
-            active = next((job["id"] for job in reversed(list(self.jobs.values()))
-                           if job["status"] in {"queued", "running"}
-                           and job['conversation_id'] == cid), None)
-            return {"conversation_id": cid,
-                    "messages": json.loads(json.dumps(messages, ensure_ascii=False)), "active_task": active}
+    def current(self, owner):
+        with self.store.connect(write=True) as db:
+            row = db.execute('SELECT id FROM conversations WHERE owner=? AND deleted=0 ORDER BY updated DESC LIMIT 1',
+                             (owner,)).fetchone()
+            cid = row['id'] if row else self.store.new(db, owner)
+            return self._view(db, owner, cid)
 
-    def _conversation_messages(self, cid):
-        if not re.fullmatch(r'webgis-[A-Za-z0-9_-]{1,80}', cid):
-            raise ValueError('Invalid conversation ID')
-        if cid == self.conversation_id:
-            return restore_generation_recipes(self.messages, cid)
-        target = self.archive_dir / f'{cid}.json'
-        if not target.is_file():
-            raise FileNotFoundError('Conversation not found')
-        record = json.loads(target.read_text(encoding='utf-8'))
-        if record.get('conversation_id') != cid or not isinstance(record.get('messages'), list):
-            raise ValueError('Invalid conversation history format')
-        return restore_generation_recipes(record['messages'][-100:], cid)
+    def new_conversation(self, owner):
+        with self.store.connect(write=True) as db:
+            return self._view(db, owner, self.store.new(db, owner))
 
-    @staticmethod
-    def _find_layer(messages, layer_id):
-        for message in messages:
-            if message.get('role') != 'assistant':
-                continue
-            for index, layer in enumerate(message.get('layers') or []):
-                if f"{message.get('job_id')}-{index}" == layer_id:
-                    return message, index, layer
-        raise FileNotFoundError('Layer not found in this conversation.')
-
-    def reload_layer(self, conversation_id, layer_id):
-        key = (conversation_id, layer_id)
-        with self.conversation_lock, self.lock:
-            if self._closed:
-                raise RuntimeError('Task controller is shutting down.')
-            messages = self._conversation_messages(conversation_id)
-            _, _, layer = self._find_layer(messages, layer_id)
-            if key in self._layer_reloads:
-                raise RuntimeError('This layer is already reloading.')
-            recipe = json.loads(json.dumps(layer.get('generation')))
-            payload = replay_payload(recipe)
-            self._layer_reloads.add(key)
-        try:
-            fresh = self.layer_worker.run(payload)
-            with self.conversation_lock, self.lock:
-                if self._closed:
-                    raise RuntimeError('Task controller is shutting down.')
-                messages = self._conversation_messages(conversation_id)
-                message, index, previous = self._find_layer(messages, layer_id)
-                # Keep layer identity and original provenance. Only replace the
-                # expiring service result, including its preview and timestamps.
-                metadata = {**(previous.get('metadata') or {}), **(fresh.get('metadata') or {})}
-                if previous.get('metadata', {}).get('created_at'):
-                    metadata['created_at'] = previous['metadata']['created_at']
-                layer = {**previous, **fresh, 'generation': recipe, 'code': recipe['code'], 'metadata': metadata,
-                         'bounds': recipe.get('bounds'), 'reloadable': True,
-                         'reload_version': int(previous.get('reload_version') or 0) + 1,
-                         'reloaded_at': datetime.now(timezone.utc).isoformat()}
-                # A failed optional thumbnail must not leave the old preview
-                # masquerading as the newly generated result.
-                if not fresh.get('thumbnail'):
-                    layer.pop('thumbnail', None)
-                message['layers'][index] = layer
-                self._save_conversation(conversation_id, messages)
-                return {'conversation_id': conversation_id, 'layer_id': layer_id, 'layer': layer}
-        finally:
-            with self.lock:
-                self._layer_reloads.discard(key)
-
-    def _save_conversation(self, cid, messages):
-        if cid == self.conversation_id:
-            self.messages = messages[-100:]
-            self._save_messages()
-        else:
-            self.archive_dir.mkdir(parents=True, exist_ok=True)
-            target = self.archive_dir / f'{cid}.json'
-            temporary = target.with_suffix('.tmp')
-            temporary.write_text(json.dumps({'conversation_id': cid, 'messages': messages[-100:]},
-                                            ensure_ascii=False), encoding='utf-8')
-            temporary.replace(target)
-
-    def _archive_current(self):
-        self.archive_dir.mkdir(parents=True, exist_ok=True)
-        target = self.archive_dir / f'{self.conversation_id}.json'
-        temporary = target.with_suffix('.tmp')
-        temporary.write_text(json.dumps({'conversation_id': self.conversation_id, 'messages': self.messages},
-                                        ensure_ascii=False, indent=2), encoding='utf-8')
-        temporary.replace(target)
-
-    def list_conversations(self):
-        with self.conversation_lock, self.lock:
-            records = {}
-            for file in self.archive_dir.glob('webgis-*.json'):
-                try:
-                    record = json.loads(file.read_text(encoding='utf-8'))
-                    if record.get('conversation_id') == file.stem and isinstance(record.get('messages'), list):
-                        records[file.stem] = record['messages']
-                except (OSError, ValueError, AttributeError):
-                    continue
-            records[self.conversation_id] = self.messages
-            active_tasks = {job['conversation_id']: job for job in self.jobs.values()
-                            if job['status'] in {'queued', 'running'}}
-            latest_tasks = {job['conversation_id']: job for job in self.jobs.values()}
+    def list_conversations(self, owner):
+        with self.store.connect() as db:
+            records = db.execute('SELECT id, messages, updated FROM conversations WHERE owner=? AND deleted=0 '
+                                 'ORDER BY updated DESC', (owner,)).fetchall()
             result = []
-            for cid, messages in records.items():
-                active = active_tasks.get(cid)
-                latest = latest_tasks.get(cid)
-                title = next((m.get('content', '') for m in messages if m.get('role') == 'user'), 'New chat')
-                result.append({'id': cid, 'title': title[:80], 'current': cid == self.conversation_id,
-                               'updated_at': messages[-1].get('created_at', '') if messages else '',
-                               'message_count': len(messages),
+            for row in records:
+                cid = row['id']
+                messages = json.loads(row['messages'])
+                title = next((m['content'] for m in messages if m['role'] == 'user'), 'New chat')
+                latest = self.store.latest(db, owner, cid)
+                active = latest if latest and latest['status'] in ACTIVE else None
+                result.append({'id': cid, 'title': title[:80], 'updated_at': row['updated'], 'message_count': len(messages),
                                'active_task': active['id'] if active else None,
                                'task_status': active['status'] if active else None,
                                'latest_task': {'id': latest['id'], 'status': latest['status']} if latest else None})
-            return sorted(result, key=lambda item: (item['updated_at'], item['current']), reverse=True)
+            return result
 
-    def delete_conversation(self, conversation_id):
-        with self.conversation_lock, self.lock:
-            self._conversation_messages(conversation_id)  # Validate ID and existence before touching files.
-            if (any(job['conversation_id'] == conversation_id and job['status'] in {'queued', 'running'}
-                    for job in self.jobs.values())
-                    or any(cid == conversation_id for cid, _ in self._layer_reloads)):
-                raise RuntimeError('This conversation is busy. Wait for its task or layer reload to finish before deleting it.')
-            target = self.archive_dir / f'{conversation_id}.json'
-            if conversation_id == self.conversation_id:
-                # Persist a fresh current session without archiving the deleted one.
-                previous_id, previous_messages = self.conversation_id, self.messages
-                self.conversation_id = f"webgis-{uuid.uuid4().hex[:16]}"
-                self.messages = []
-                try:
-                    self._save_messages()
-                    target.unlink(missing_ok=True)
-                except OSError:
-                    self.conversation_id, self.messages = previous_id, previous_messages
-                    self._save_messages()
-                    raise
-            else:
-                target.unlink()
-            return {'deleted_id': conversation_id, 'conversation': self.conversation(),
-                    'conversations': self.list_conversations()}
+    def delete_conversation(self, owner, cid):
+        with self.lock, self.store.connect(write=True) as db:
+            self.store.owned(db, owner, cid)
+            if (self.store.has_active_task(db, owner, cid)
+                    or any(conversation == cid for conversation, _ in self.reloads)):
+                raise AdmissionError('conversation_busy', 'This conversation is busy.', 409)
+            db.execute('UPDATE conversations SET deleted=1 WHERE id=?', (cid,))
+        # Keep native logs and artifacts intact while their Agent may still be resident.
+        replacement = self.current(owner)
+        return {'deleted_id': cid, 'conversation': replacement, 'conversations': self.list_conversations(owner)}
 
-    def activate_conversation(self, conversation_id):
-        if not re.fullmatch(r'webgis-[A-Za-z0-9_-]{1,80}', conversation_id):
-            raise ValueError('Invalid conversation ID')
-        with self.conversation_lock:
-            with self.lock:
-                if conversation_id == self.conversation_id:
-                    return {'conversation_id': self.conversation_id, 'messages': json.loads(json.dumps(self.messages)),
-                            'active_task': next((j['id'] for j in self.jobs.values() if j['conversation_id'] == self.conversation_id
-                                                 and j['status'] in {'queued', 'running'}), None)}
-                target = self.archive_dir / f'{conversation_id}.json'
-                if not target.is_file():
-                    raise FileNotFoundError('Conversation not found')
-                record = json.loads(target.read_text(encoding='utf-8'))
-                if record.get('conversation_id') != conversation_id or not isinstance(record.get('messages'), list):
-                    raise ValueError('Invalid conversation history format')
-                self._archive_current()
-            with self.lock:
-                self.conversation_id = conversation_id
-                self.messages = record['messages'][-100:]
-                self._save_messages()
-            return self.conversation()
+    def _artifact_fields(self, owner, cid, task_id):
+        return {'artifact_dir': str(self.state / 'artifacts' / owner / cid / task_id),
+                'artifact_url': f'/api/previews/{cid}/{task_id}'}
 
-    def new_conversation(self) -> dict:
-        with self.conversation_lock:
-            with self.lock:
-                self._archive_current()
-            with self.lock:
-                self.conversation_id = f"webgis-{uuid.uuid4().hex[:16]}"
-                self.messages = []
-                self._save_messages()
-            return self.conversation()
+    def artifact(self, owner, cid, task_id, filename):
+        if not re.fullmatch(r'[0-9a-f]{32}\.png', filename):
+            raise FileNotFoundError('Preview not found')
+        with self.store.connect() as db:
+            self.store.owned(db, owner, cid)
+            task = self.store.read_task(db, owner, task_id)
+            if task['conversation_id'] != cid or task['status'] != 'completed':
+                raise FileNotFoundError('Preview not found')
+        path = Path(self._artifact_fields(owner, cid, task_id)['artifact_dir']) / filename
+        if not path.is_file():
+            raise FileNotFoundError('Preview not found')
+        return path
 
-    def _append_message(self, role: str, content: str, job_id: str, **extra) -> None:
-        message = {
-            "id": uuid.uuid4().hex[:12], "role": role, "content": content,
-            "job_id": job_id, "created_at": datetime.now(timezone.utc).isoformat(),
-            **extra,
-        }
-        with self.conversation_lock, self.lock:
-            cid = self.jobs[job_id]['conversation_id']
-            messages = self._conversation_messages(cid)
-            self._save_conversation(cid, [*messages, message])
+    @staticmethod
+    def _find_layer(messages, layer_id):
+        for item in messages:
+            if item.get('role') != 'assistant':
+                continue
+            for index, layer in enumerate(item.get('layers') or []):
+                if f"{item.get('job_id')}-{index}" == layer_id:
+                    return item, index, layer
+        raise FileNotFoundError('Layer not found')
 
-    def create(self, prompt: str, bounds, conversation_id=None, analysis_region=None, analysis_aoi=None) -> dict:
-        if not isinstance(prompt, str) or not (3 <= len(prompt.strip()) <= 2000):
-            raise ValueError("The prompt must contain 3–2000 characters")
+    def reload_layer(self, owner, cid, layer_id):
+        key = (cid, layer_id)
+        with self.lock, self.store.connect() as db:
+            row = self.store.owned(db, owner, cid)
+            item, _, layer = self._find_layer(json.loads(row['messages']), layer_id)
+            payload = replay_payload(layer.get('generation'))
+            self._require_available()
+            if key in self.reloads:
+                raise AdmissionError('layer_busy', 'This layer is already reloading.', 409)
+            if len(self.reloads) >= self.gee_workers * 2 or sum(value == owner for value in self.reloads.values()) >= 2:
+                raise AdmissionError('reload_capacity', 'Layer reload capacity reached. Try again shortly.')
+            payload.update(self._artifact_fields(owner, cid, item['job_id']))
+            self.reloads[key] = owner
+        settled = False
+        try:
+            fresh = self.runtime.control('/reload', {'owner_id': owner, 'payload': payload}, timeout=160)['layer']
+            settled = True
+            with self.store.connect(write=True) as db:
+                row = self.store.owned(db, owner, cid)
+                messages = json.loads(row['messages'])
+                item, index, previous = self._find_layer(messages, layer_id)
+                metadata = {**(previous.get('metadata') or {}), **(fresh.get('metadata') or {})}
+                if previous.get('metadata', {}).get('created_at'):
+                    metadata['created_at'] = previous['metadata']['created_at']
+                updated = {**previous, **fresh, 'metadata': metadata, 'reloadable': True,
+                           'reload_version': int(previous.get('reload_version') or 0) + 1,
+                           'reloaded_at': timestamp()}
+                if not fresh.get('thumbnail'):
+                    updated.pop('thumbnail', None)
+                item['layers'][index] = updated
+                self.store.save_messages(db, cid, messages)
+            return {'conversation_id': cid, 'layer_id': layer_id, 'layer': updated}
+        except RuntimeUnavailable:
+            self.runtime.available.clear()
+            raise
+        except ValueError as exc:
+            settled = True
+            detail = re.sub(r'https?://\S+', '[service URL]', clean_text(str(exc), self.trace_secrets, 700))
+            raise ValueError(detail) from None
+        finally:
+            if settled:
+                with self.lock:
+                    self.reloads.pop(key, None)
+
+    def create(self, owner, prompt, bounds, cid, request_id, analysis_region=None, analysis_aoi=None):
+        prompt = prompt.strip()
+        if not 3 <= len(prompt) <= 2000:
+            raise ValueError('The prompt must contain 3–2000 characters')
         analysis_region = validate_analysis_region(analysis_region)
         analysis_aoi = validate_analysis_aoi(analysis_aoi, analysis_region)
-        bounds = region_bounds(analysis_region) if analysis_region is not None else validate_bounds(bounds)
-        with self.conversation_lock:
-            if self._closed:
-                raise RuntimeError('Task controller is shutting down.')
-            if conversation_id and conversation_id != self.conversation_id:
-                raise RuntimeError('The active conversation has changed. Refresh and try again.')
-            with self.lock:
-                if any(job['conversation_id'] == self.conversation_id and job['status'] in {'queued', 'running'}
-                       for job in self.jobs.values()):
-                    raise RuntimeError('This conversation already has an active task. Stop it before sending another message.')
-            job_id = uuid.uuid4().hex[:12]
-            job = {
-                "id": job_id, "conversation_id": self.conversation_id,
-                "status": "queued", "prompt": prompt.strip(),
-                "bounds": bounds, "analysis_region": analysis_region, "analysis_aoi": analysis_aoi, "revision": 0,
-                "output": None, "error": None, "trace": [],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            with self.lock:
-                self.jobs[job_id] = job
-                self.streams[job_id] = TaskStream(job, secrets=self.trace_secrets)
-            self._append_message("user", prompt.strip(), job_id, bounds=bounds, analysis_region=analysis_region, **({"analysis_aoi": analysis_aoi} if analysis_aoi else {}))
-            self.pool.submit(self._run, job_id)
-            return self.get(job_id)
-
-    def get(self, job_id: str) -> dict | None:
+        bounds = region_bounds(analysis_region) if analysis_region else validate_bounds(bounds)
+        snapshot = {'bounds': bounds, 'analysis_region': analysis_region, 'analysis_aoi': analysis_aoi}
+        canonical = json.dumps([cid, prompt, snapshot], sort_keys=True, allow_nan=False).encode()
+        fingerprint = hashlib.sha256(canonical).hexdigest()
         with self.lock:
-            job = self.jobs.get(job_id)
-            return json.loads(json.dumps(job, ensure_ascii=False)) if job else None
+            with self.store.connect(write=True) as db:
+                row = self.store.owned(db, owner, cid)
+                previous = db.execute('SELECT receipt, fingerprint FROM tasks WHERE owner=? AND request_id=?',
+                                      (owner, request_id)).fetchone()
+                if previous is not None:
+                    if previous['fingerprint'] != fingerprint:
+                        raise AdmissionError('request_conflict', 'Request ID already used with different input.', 409)
+                    return json.loads(previous['receipt'])
+                if self.store.has_active_task(db, owner, cid):
+                    raise AdmissionError('conversation_busy', 'This conversation already has an active task.', 409)
+                self._require_available(allow_rotation=True)
+                task_id = uuid.uuid4().hex
+                receipt = {'id': task_id, 'conversation_id': cid, 'status': 'queued', 'prompt': prompt,
+                           **snapshot, 'revision': 0, 'trace': [], 'output': None, 'error': None,
+                           'created_at': timestamp()}
+                db.execute('INSERT INTO tasks(id, conversation_id, owner, request_id, fingerprint, status, receipt) '
+                           'VALUES(?,?,?,?,?,?,?)', (task_id, cid, owner, request_id, fingerprint, 'queued', encode(receipt)))
+                self.store.save_messages(db, cid, [*json.loads(row['messages']), message('user', prompt, task_id, **snapshot)])
+            self.wakeup.set()
+            return receipt
 
-    def wait_for_job(self, job_id: str, after_revision: int, timeout: float = 15) -> dict | None:
-        with self.changed:
-            self.changed.wait_for(
-                lambda: job_id not in self.jobs
-                or self.jobs[job_id]["revision"] > after_revision
-                or self.jobs[job_id]["status"] in {"completed", "failed", "cancelled"},
-                timeout=timeout,
-            )
-            job = self.jobs.get(job_id)
-            return json.loads(json.dumps(job, ensure_ascii=False)) if job else None
+    def get(self, owner, task_id):
+        with self.lock:
+            task = self.active.get(task_id)
+            if task and task.owner == owner:
+                return copy.deepcopy(task.receipt)
+        with self.store.connect() as db:
+            return self.store.read_task(db, owner, task_id)
 
-    def _update(self, job_id: str, **values) -> None:
-        with self.changed:
-            if self.jobs[job_id]['status'] in {'completed', 'failed', 'cancelled'}:
-                return
-            self.jobs[job_id].update(values)
-            self.jobs[job_id]["revision"] += 1
-            self.changed.notify_all()
-            self.streams[job_id].update(**values)
+    def stream(self, owner, task_id):
+        with self.lock:
+            task = self.active.get(task_id)
+            if task is not None and task.owner == owner:
+                return task.stream
+            with self.store.connect() as db:
+                receipt = self.store.read_task(db, owner, task_id)
+            if receipt['status'] == 'queued':
+                stream = self.queued_streams.get(task_id)
+                if stream is None:
+                    stream = TaskStream(receipt, secrets=self.trace_secrets)
+                    self.queued_streams[task_id] = stream
+                return stream
+            return TaskStream(receipt, secrets=self.trace_secrets)
 
-    def _finish(self, job_id, status, message, **extra):
-        # Persist history and publish the terminal event under one lock so that
-        # Stop racing completion cannot produce two assistant messages.
-        with self.conversation_lock, self.changed:
-            job = self.jobs[job_id]
-            if job['status'] in {'completed', 'failed', 'cancelled'}:
-                return False
-            finished_at = datetime.now(timezone.utc).isoformat()
-            timeline = self.streams[job_id].finish_timeline(message if status == 'completed' else '')
-            self._append_message('assistant', message, job_id, status=status,
-                                 trace=job.get('trace', []), timeline=timeline,
-                                 started_at=job.get('started_at'), finished_at=finished_at, **extra)
-            output = {'message': message, 'layers': extra.get('layers', []), 'previews': extra.get('previews', [])}
-            self._update(job_id, status=status, output=output if status != 'failed' else None,
-                         error=message if status == 'failed' else None, finished_at=finished_at)
-            return True
+    def _update(self, task, **changes):
+        receipt = {**task.receipt, **changes, 'revision': task.receipt['revision'] + 1}
+        with self.store.connect(write=True) as db:
+            self.store.save_task(db, receipt)
+        task.receipt = receipt
+        task.stream.update(**changes, revision=receipt['revision'])
 
-    def cancel(self, job_id):
-        with self.conversation_lock, self.lock:
-            if job_id not in self.jobs:
-                raise FileNotFoundError('Task not found')
-            agent = self._job_agents.get(job_id)
-            cancelled = self._finish(job_id, 'cancelled', 'Stopped by user.')
-        if cancelled and agent is not None:
-            agent.cancel()
-        return self.get(job_id)
+    def _request_stop(self, task, reason):
+        if task.receipt['status'] in {'starting', 'running'}:
+            task.stop_requested = time.monotonic()
+            self._update(task, status='cancelling', stop_reason=reason, cancellation='requested')
 
-    def _event(self, job_id: str, notice) -> None:
-        if getattr(notice, "method", None) == "session.event":
-            if getattr(notice, 'payload', {}).get('sessionId') != self.jobs[job_id]['conversation_id']:
-                return
-            event = getattr(notice, "payload", {}).get("event") or {}
-            with self.changed:
-                if self.jobs[job_id]['status'] in {'completed', 'failed', 'cancelled'}:
+    def cancel(self, owner, task_id):
+        with self.lock:
+            task = self.active.get(task_id)
+            if task is not None and task.owner == owner:
+                self._request_stop(task, 'user')
+                self.wakeup.set()
+                return copy.deepcopy(task.receipt)
+            with self.store.connect() as db:
+                receipt = self.store.read_task(db, owner, task_id)
+            if receipt['status'] != 'queued':
+                return receipt
+            stream = self.queued_streams.get(task_id) or TaskStream(receipt, secrets=self.trace_secrets)
+            settled = self._settle(owner, {**receipt, 'stop_reason': 'user'}, stream,
+                                   'cancelled', 'Stopped by user.', [], {})
+            self.queued_streams.pop(task_id, None)
+            return settled
+
+    def _dispatch_queued(self):
+        # The controller lock serializes queue claims, cancellation and shutdown.
+        with self.lock:
+            while self.healthy and not self.rotating and len(self.active) < self.execution_slots:
+                with self.store.connect() as db:
+                    entry = self.store.next_queued(db)
+                if entry is None:
                     return
-                trace = self.jobs[job_id]["trace"]
-                changed = add_harness_event(trace, event, self.trace_secrets)
-                snapshot = json.loads(json.dumps(trace, ensure_ascii=False)) if changed else None
-                if changed:
-                    self.jobs[job_id]["revision"] += 1
-                    self.changed.notify_all()
-            if snapshot is not None:
-                self._save_trace(job_id, snapshot)
-                self.streams[job_id].update(trace=snapshot)
+                native_id = entry['native_id']
+                if self.runtime.full_for(native_id):
+                    self.rotating = True
+                    self.wakeup.set()
+                    return
+                receipt = json.loads(entry['receipt'])
+                task_id = receipt['id']
+                stream = self.queued_streams.get(task_id) or TaskStream(receipt, secrets=self.trace_secrets)
+                task = ActiveTask(entry['owner'], native_id, uuid.uuid4().hex, time.monotonic() + self.timeout,
+                                  receipt, stream)
+                dispatched_at = timestamp()
+                wait_ms = (datetime.fromisoformat(dispatched_at) - datetime.fromisoformat(receipt['created_at']))
+                self.runtime.reserve(native_id)
+                self._update(task, status='starting', dispatched_at=dispatched_at,
+                             queue_wait_ms=max(0, round(wait_ms.total_seconds() * 1000)))
+                self.queued_streams.pop(task_id, None)
+                self.active[task_id] = task
+                self.pool.submit(self._run, task)
 
-    def _tool_events(self, offset: int) -> list[dict]:
-        if not self.tool_events_file.is_file():
-            return []
-        with self.tool_events_file.open("r", encoding="utf-8") as stream:
-            stream.seek(offset)
-            lines = stream.readlines()
-        events = []
-        for line in lines:
+    def _monitor(self):
+        while not self.closed.is_set():
+            self.wakeup.wait(.1)
+            self.wakeup.clear()
+            if self.closed.is_set():
+                break
+            with self.lock:
+                tasks = list(self.active.values())
+                rotate = self.rotating and not tasks and not self.reloads and self.healthy
+            if rotate:
+                try:
+                    self.runtime.close()
+                    if not self.closed.is_set():
+                        self.runtime.start()
+                except Exception:
+                    self.runtime.available.clear()
+                finally:
+                    with self.lock:
+                        self.rotating = False
+            now = time.monotonic()
+            for task in tasks:
+                try:
+                    self._check_task(task, now)
+                except sqlite3.Error:
+                    self.runtime.available.clear()
             try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if ((isinstance(event.get("layer"), dict) and event["layer"].get("url"))
-                    or (isinstance(event.get("preview"), dict) and event["preview"].get("url"))):
-                events.append(event)
-        return events
+                self._dispatch_queued()
+            except (sqlite3.Error, RuntimeUnavailable):
+                self.runtime.available.clear()
 
-    def close(self) -> None:
-        with self.conversation_lock, self.lock:
-            self._closed = True
-            active = [job['id'] for job in self.jobs.values() if job['status'] in {'queued', 'running'}]
-        self.layer_worker.close()
-        # Stop transports before joining the executor so in-flight SDK calls unblock.
-        for job_id in active:
-            self.cancel(job_id)
-        self.pool.shutdown(wait=True, cancel_futures=True)
-        if self._agent is not None:
-            self._agent.__exit__(None, None, None)
-            self._agent = None
+    def _check_task(self, task, now):
+        with self.lock:
+            job = task.receipt
+            if job['id'] not in self.active:
+                return
+            if now >= task.deadline:
+                self._request_stop(task, 'deadline')
+            requested = task.stop_requested
+            if requested is None:
+                return
+            if now - requested > 15 and self.healthy and job['status'] == 'cancelling':
+                self.runtime.available.clear()
+                self._update(task, error='Harness has not confirmed stop and cleanup. New tasks are paused.')
+            send = not task.cancel_sent and task.admitted.is_set() and task.receipt['status'] == 'cancelling'
+        if send:
+            try:
+                accepted = self.runtime.control('/cancel', {'session_id': task.native_id, 'run_id': task.run_id})['accepted']
+            except RuntimeUnavailable:
+                self.runtime.available.clear()
+                return
+            with self.lock:
+                if accepted and task.receipt['status'] == 'cancelling':
+                    task.cancel_sent = True
+                    self._update(task, cancellation='accepted', cancel_accepted_at=timestamp())
 
-    def _run(self, job_id: str) -> None:
-        job = self.get(job_id)
-        assert job is not None
-        if job['status'] == 'cancelled':
+    def _notify(self, task, notice, trace):
+        payload = notice.payload
+        if notice.method != 'session.event' or payload.get('sessionId') != task.native_id:
             return
-        workspace = self.root / "state" / "agent-workspace"
-        try:
-            workspace.mkdir(parents=True, exist_ok=True)
-            started_at = datetime.now(timezone.utc).isoformat()
-            self._update(job_id, status="running", started_at=started_at)
-            if not model_key_configured():
-                key_name = "AIHUBMIX_API_KEY" if selected_provider() == "aihubmix" else "DEEPSEEK_API_KEY"
-                raise RuntimeError(f"Missing {key_name}. Set the model API key in the project root .env.")
-            if self._agent is not None and self._agent_conversation_id != job['conversation_id']:
-                self._agent.__exit__(None, None, None)
-                self._agent = None
-            if self._agent is None:
-                candidate = self.agent_factory(workspace, self.home, job["conversation_id"])
-                with self.conversation_lock, self.lock:
-                    if self.jobs[job_id]['status'] == 'cancelled':
-                        return
-                    candidate.require_resume = any(m.get('role') == 'assistant' and m.get('status') not in {'failed', 'cancelled'}
-                                                   for m in self._conversation_messages(job['conversation_id']))
-                    self._job_agents[job_id] = candidate
-                self._agent = candidate.__enter__()
-                self._agent_conversation_id = job['conversation_id']
-            with self.lock:
-                if self.jobs[job_id]['status'] == 'cancelled':
-                    return
-                self._job_agents[job_id] = self._agent
-            prompt = conversation_prompt(job["prompt"], job["bounds"], CATALOG, job.get('analysis_region'))
-            if hasattr(self._agent, 'set_analysis_context'):
-                self._agent.set_analysis_context(job)
-            offset = self.tool_events_file.stat().st_size if self.tool_events_file.is_file() else 0
-            answer = self._agent.run(prompt, session_id=job["conversation_id"],
-                                     on_event=lambda notice: self._event(job_id, notice),
-                                     on_stream=self.streams[job_id].frame)
-            with self.lock:
-                trace = self.jobs[job_id]["trace"]
-                remove_final_answer(trace, str(answer or ""))
-                trace_snapshot = json.loads(json.dumps(trace, ensure_ascii=False))
-            self._save_trace(job_id, trace_snapshot)
-            events = self._tool_events(offset)
-            layers = []
-            for event in events:
-                if 'layer' not in event:
-                    continue
-                layer = {**event['layer'], 'bounds': layer_focus_bounds(event)}
-                context = {'task_id': job_id, 'conversation_id': job['conversation_id'],
-                           'bounds': job['bounds'], 'analysis_region': job.get('analysis_region'), 'analysis_aoi': job.get('analysis_aoi')}
-                layer['generation'] = generation_recipe(event.get('code'), layer, context)
-                layer['code'] = event.get('code') or ''
-                layer['reloadable'] = layer['generation'] is not None
+        task.admitted.set()  # Session.run delivers its native inbox receipt first.
+        event = payload.get('event') or {}
+        if add_harness_event(trace, event, self.trace_secrets):
+            del trace[:-250]
+            # The live timeline has deltas; only the terminal snapshot carries the full trace.
+
+    def _project(self, task, events, snapshot):
+        seen = set()
+        layers, previews, codes = [], [], []
+        for event in events:
+            if event.get('type') != 'tool/result':
+                continue
+            data = event.get('data', {})
+            value = data.get('meta')
+            if not isinstance(value, dict) or value.get('task_id') != task.receipt['id'] or value.get('run_id') != task.run_id:
+                continue
+            call_id = data.get('message', {}).get('toolCallId') or event.get('seq')
+            if call_id in seen:
+                continue
+            seen.add(call_id)
+            code = value.get('code') or ''
+            if 'layer' in value:
+                layer = {**value['layer'], 'bounds': layer_focus_bounds(value)}
+                layer['generation'] = generation_recipe(code, layer, snapshot)
+                layer.update(code=code, reloadable=layer['generation'] is not None)
                 layers.append(layer)
-            previews = [event["preview"] for event in events if "preview" in event]
-            codes = [event["code"] for event in events if isinstance(event.get("code"), str) and event["code"]]
-            message = str(answer or "").strip()
-            self._finish(job_id, 'completed', message, layers=layers, previews=previews, code="\n\n".join(codes))
-        except Exception as exc:
-            error = str(exc)[:2500]
-            self._finish(job_id, 'failed', error)
-        finally:
+            if 'preview' in value:
+                previews.append(value['preview'])
+            if code:
+                codes.append(code)
+        return {'layers': layers, 'previews': previews, 'code': '\n\n'.join(codes)}
+
+    def _settle(self, owner, job, stream, status, text, trace, output):
+        trace = copy.deepcopy(trace)
+        timeline = stream.finish_timeline(text if status == 'completed' else '')
+        receipt = {**job, 'status': status, 'revision': job['revision'] + 1,
+                   'event_cursor': stream.sequence + 1,
+                   'trace': trace, 'timeline': timeline, 'finished_at': timestamp(),
+                   'error': text if status == 'failed' else None,
+                   'output': {'message': text, **output} if status != 'failed' else None}
+        if status == 'cancelled':
+            receipt['cancellation'] = 'settled'
+        with self.store.connect(write=True) as db:
+            row = self.store.owned(db, owner, job['conversation_id'])
+            messages = json.loads(row['messages'])
+            self.store.save_messages(db, row['id'], [*messages, message('assistant', text, job['id'],
+                status=status, trace=trace, timeline=timeline, started_at=job.get('started_at'),
+                finished_at=receipt['finished_at'], **output)])
+            self.store.save_task(db, receipt)
+        stream.update(**receipt)
+        return receipt
+
+    def _finish(self, task, status, text, trace, output):
+        with self.lock:
+            task.receipt = self._settle(task.owner, task.receipt, task.stream, status, text, trace, output)
+            del self.active[task.receipt['id']]
+            self.wakeup.set()
+
+    def _run(self, task):
+        from deepseek_harness.errors import TransportClosedError
+
+        job = task.receipt
+        cid, job_id = job['conversation_id'], job['id']
+        session_id = task.native_id
+        bridge = self.runtime.bridge
+        bound = entered_run = quiescent = False
+        status, text, trace, output = 'failed', 'Analysis failed.', [], {}
+        scope = {key: job[key] for key in ('bounds', 'analysis_region', 'analysis_aoi')}
+        snapshot = {'task_id': job_id, 'conversation_id': cid, **scope}
+        try:
+            if task.stop_requested is not None:
+                raise InterruptedError()
+            with self.store.connect(write=True) as db:
+                row = self.store.owned(db, task.owner, cid)
+                resume = row['native_state'] != 'new'
+                if not resume:
+                    db.execute("UPDATE conversations SET native_state='opening' WHERE id=?", (cid,))
+            native = self.runtime.open(session_id, resume=resume)
+            with self.store.connect(write=True) as db:
+                db.execute("UPDATE conversations SET native_state='open' WHERE id=?", (cid,))
             with self.lock:
-                agent = self._job_agents.pop(job_id, None)
-                cancelled = self.jobs[job_id]['status'] == 'cancelled'
-            if cancelled and agent is not None:
-                agent.__exit__(None, None, None)
-                if self._agent is agent:
-                    self._agent = None
-                    self._agent_conversation_id = None
+                if task.stop_requested is not None:
+                    raise InterruptedError()
+                self._update(task, status='running', started_at=timestamp())
+            binding = bridge.bind({**snapshot, 'owner_id': task.owner, 'session_id': session_id,
+                                   'run_id': task.run_id, **self._artifact_fields(task.owner, cid, job_id)}, task.stream.frame)
+            bound = True
+            with self.lock:
+                if task.stop_requested is not None:
+                    raise InterruptedError()
+            prompt = conversation_prompt(job['prompt'], job['bounds'], CATALOG, job.get('analysis_region'),
+                                         created_at=job['created_at'])
+            entered_run = True
+            result = native.run(prompt, on_notification=lambda notice: self._notify(task, notice, trace))
+            quiescent = True
+            binding.drained.wait(2)
+            task.stream.reconcile(result.events)
+            if result.finish_reason == 'aborted' and task.stop_requested is not None:
+                raise InterruptedError()
+            if result.finish_reason != 'completed':
+                raise RuntimeError(describe_run_failure(result, self.runtime.provider))
+            text = clean_text(result.final_response.strip(), self.trace_secrets, 200_000)
+            remove_final_answer(trace, text)
+            output = self._project(task, result.events, snapshot)
+            status = 'completed'
+        except InterruptedError:
+            status = 'cancelled'
+            text = 'Analysis timed out.' if task.receipt.get('stop_reason') == 'deadline' else 'Stopped by user.'
+        except (TransportClosedError, TimeoutError, RuntimeUnavailable):
+            self.runtime.available.clear()
+            text = 'Harness runtime is unavailable. Analysis could not finish.'
+        except Exception as exc:
+            text = re.sub(r'https?://\S+', '[service URL]', clean_text(str(exc), self.trace_secrets, 700))
+        try:
+            with self.lock:
+                self._update(task, status='cleaning')
+            if entered_run and not quiescent:
+                self.runtime.available.clear()
+                raise RuntimeUnavailable('Unable to verify native task quiescence')
+            if bound:
+                bridge.unbind(session_id, task.run_id)
+            self._finish(task, status, text, trace, output)
+        except Exception:
+            with self.lock:
+                try:
+                    self._update(task, status='cleaning', error='Cleanup could not be confirmed. This analysis retains its slot.')
+                except (OSError, sqlite3.Error):
+                    pass
+
+    def close(self):
+        with self.lock:
+            self.closed.set()
+            self.wakeup.set()
+            tasks = list(self.active.values())
+            for task in tasks:
+                self._request_stop(task, 'shutdown')
+        for task in tasks:
+            self._check_task(task, time.monotonic())
+        self.monitor.join(timeout=3)
+        self.runtime.close()
+        self.pool.shutdown(wait=True, cancel_futures=False)

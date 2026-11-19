@@ -2,7 +2,7 @@ FROM python:3.12.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
-RUN addgroup --system satgpt && adduser --system --ingroup satgpt satgpt
+RUN addgroup --system satgpt && adduser --system --home /home/satgpt --ingroup satgpt satgpt
 COPY requirements.txt /app/
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r /app/requirements.txt \

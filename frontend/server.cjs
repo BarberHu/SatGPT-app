@@ -48,13 +48,10 @@ function setSecurityHeaders(res) {
 }
 
 function proxyRequest(req, res, target) {
-  const forwardedFor = [req.headers['x-forwarded-for'], req.socket.remoteAddress]
-    .filter(Boolean)
-    .join(', ');
   const headers = {
     ...req.headers,
-    host: target.host,
-    'x-forwarded-for': forwardedFor,
+    host: req.headers.host || target.host,
+    'x-forwarded-for': req.socket.remoteAddress,
     'x-forwarded-host': req.headers.host || '',
     'x-forwarded-proto': req.socket.encrypted ? 'https' : 'http',
   };

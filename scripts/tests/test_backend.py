@@ -26,37 +26,24 @@ from basic import server as basic
 from harness.app import server as harness
 from harness.app.controller import TaskController
 from satgpt_config import load_project_env, validate_config
+from harness.tests.runtime_fixture import SimulatedRuntime, result, task_body, wait_for_task
 
 
-class HoldingAgent:
+class HoldingSession:
     arrived = threading.Event()
-    released = threading.Event()
 
-    def __init__(self, *_):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        self.released.set()
-
-    def run(self, *_, on_stream=None, **__):
-        self.arrived.set()
-        self.released.wait(5)
-        return 'Offline answer'
-
-    def cancel(self):
-        self.released.set()
+    @classmethod
+    def run(cls, stop, **_):
+        cls.arrived.set()
+        assert stop.wait(5)
+        return result(reason='aborted')
 
 
 class UnifiedBackendTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        HoldingAgent.arrived.clear()
-        HoldingAgent.released.clear()
-        self.addCleanup(HoldingAgent.released.set)
+        HoldingSession.arrived.clear()
         self.patches = [
             patch.object(basic, 'validate_config'),
             patch.object(harness, 'validate_config'),
@@ -64,14 +51,14 @@ class UnifiedBackendTests(unittest.TestCase):
                          side_effect=lambda: setattr(basic.gee_service, 'initialized', True)),
             patch.object(harness, 'ROOT', Path(self.temp.name)),
             patch.object(harness, 'TaskController',
-                         side_effect=lambda root: TaskController(root, agent_factory=HoldingAgent)),
+                         side_effect=lambda root: TaskController(root, runtime_factory=lambda *a: SimulatedRuntime(*a, run=HoldingSession.run))),
             patch.dict(os.environ, {'OPENAI_API_KEY': 'offline-basic', 'DEEPSEEK_API_KEY': 'offline-agent',
                                     'DSH_PROVIDER': 'deepseek-official'}),
         ]
         for p in self.patches:
             p.start()
             self.addCleanup(p.stop)
-        self.client = TestClient(backend.app)
+        self.client = TestClient(backend.app, headers={'Origin':'http://testserver'})
 
     def test_lifecycle_health_and_readiness_are_distinct_from_authentication(self):
         self.assertEqual(self.client.get('/readyz').status_code, 503)
@@ -103,6 +90,7 @@ class UnifiedBackendTests(unittest.TestCase):
                 response = client.post('/api/chat', json={'message': message})
                 self.assertEqual(response.json(), {'message': json.dumps(result)})
             self.assertEqual([c.args for c in chat.call_args_list], [('first',), ('second',)])
+            self.assertEqual(client.get('/api/harness/session').status_code, 200)
             self.assertEqual(client.get('/api/harness/conversation').json()['messages'], [])
             self.assertEqual(client.post('/api/chat', json={}).status_code, 422)
             chat.return_value = None
@@ -122,24 +110,36 @@ class UnifiedBackendTests(unittest.TestCase):
                 self.assertEqual(client.post(path, json=payload).status_code, 503)
                 basic.gee_service.initialized = True
 
+    def test_business_layers_are_bound_to_the_authenticated_cookie(self):
+        from harness.tests.runtime_fixture import client_for
+
+        with self.client as client:
+            client.get('/api/harness/session').raise_for_status()
+            other = client_for(backend.app.state.controller, app=backend.app)
+            path = '/api/business-layers'
+            payload = {'store_key': 'shared-name', 'layers': [{'id': 'layer', 'label': 'private'}]}
+            self.assertEqual(client.post(path+'/upsert', json=payload).status_code, 200)
+            self.assertEqual(other.get(path+'/layer?store_key=shared-name').status_code, 404)
+            self.assertEqual(other.post(path+'/batch-resolve', json={'store_key':'shared-name','layer_ids':['layer']}).status_code, 404)
+            self.assertEqual(client.get(path+'/layer?store_key=shared-name').json()['data']['label'], 'private')
+
     def test_task_concurrency_cancellation_and_sse(self):
         with self.client as client, patch.object(basic, 'get_chatgpt_response', return_value='offline'):
+            client.get('/api/harness/session')
             conversation = client.get('/api/harness/conversation').json()
-            response = client.post('/api/harness/tasks', json={
-                'prompt': 'Hold task', 'bounds': [100, 10, 101, 11],
-                'conversation_id': conversation['conversation_id'],
-            })
+            response = client.post('/api/harness/tasks', json=task_body(conversation['conversation_id'], 'Hold task'))
             self.assertEqual(response.status_code, 202)
             job = response.json()['id']
-            self.assertTrue(HoldingAgent.arrived.wait(2))
+            self.assertTrue(HoldingSession.arrived.wait(2))
             started = time.perf_counter()
             self.assertEqual(client.post('/api/chat', json={'message': 'hello'}).json(), {'message': 'offline'})
             self.assertEqual(client.get('/readyz').status_code, 200)
             self.assertLess(time.perf_counter() - started, 1)
             self.assertEqual(client.get(f'/api/harness/tasks/{job}').json()['status'], 'running')
-            conflict = client.post('/api/harness/tasks', json={'prompt': 'Another', 'bounds': [100, 10, 101, 11]})
+            conflict = client.post('/api/harness/tasks', json=task_body(conversation['conversation_id'], 'Another'))
             self.assertEqual(conflict.status_code, 409)
-            self.assertEqual(client.post(f'/api/harness/tasks/{job}/cancel').json()['status'], 'cancelled')
+            self.assertEqual(client.post(f'/api/harness/tasks/{job}/cancel').json()['status'], 'cancelling')
+            self.assertEqual(wait_for_task(client, job)['status'], 'cancelled')
             events = client.get(f'/api/harness/tasks/{job}/events', headers={'Last-Event-ID': '0'})
             self.assertIn('text/event-stream', events.headers['content-type'])
             self.assertIn('cancelled', events.text)
@@ -155,9 +155,12 @@ class UnifiedBackendTests(unittest.TestCase):
     def test_shutdown_cancels_running_task_and_joins_threads(self):
         with self.client as client:
             controller = backend.app.state.controller
-            job = client.post('/api/harness/tasks', json={'prompt': 'Hold on shutdown', 'bounds': [0, 0, 1, 1]}).json()
-            self.assertTrue(HoldingAgent.arrived.wait(2))
-        self.assertEqual(controller.get(job['id'])['status'], 'cancelled')
+            client.get('/api/harness/session')
+            cid = client.get('/api/harness/conversation').json()['conversation_id']
+            owner = controller.identity.verify(client.cookies.get('satgpt_browser'))
+            job = client.post('/api/harness/tasks', json=task_body(cid, 'Hold on shutdown')).json()
+            self.assertTrue(HoldingSession.arrived.wait(2))
+        self.assertEqual(controller.get(owner, job['id'])['status'], 'cancelled')
         self.assertTrue(all(not thread.is_alive() for thread in controller.pool._threads))
 
     def test_failed_harness_startup_unwinds_basic(self):
@@ -297,7 +300,7 @@ class EnvironmentTests(unittest.TestCase):
             with patch.dict(os.environ, {}, clear=True):
                 service = GEETileService(root)
                 self.assertEqual(service.project_id, '${literal-project}')
-                self.assertEqual(service.credentials_path, str(root / 'relative.json'))
+                self.assertEqual(service.credentials_path, str((root / 'relative.json').resolve()))
             with patch.dict(os.environ, {'GEE_PROJECT_ID': ''}, clear=True):
                 service = GEETileService(root)
                 self.assertIsNone(service.project_id, 'An explicit empty process value must not be overwritten')
@@ -323,7 +326,8 @@ class EnvironmentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'AGENT_WORKERS'):
                 validate_config('backend')
         with patch.dict(os.environ, {'HARNESS_PORT': 'ignored', 'AGENT_WORKERS': '1'}):
-            validate_config('frontend')
+            with patch.dict(os.environ, {'REACT_APP_MAPBOX_ACCESS_TOKEN': 'pk.validation'}):
+                validate_config('frontend')
 
 
 if __name__ == '__main__':

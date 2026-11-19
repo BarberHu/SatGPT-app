@@ -3,7 +3,6 @@
 Run from root: harness/.venv/Scripts/python -m harness.tests.live_stream_smoke
 Uses the project's configured model/GEE credentials; never prints keys or answers.
 """
-import http.client
 import json
 import os
 import shutil
@@ -20,6 +19,7 @@ os.environ.setdefault('DSH_REASONING_EFFORT', 'low')
 
 import uvicorn
 from harness.app import server as api
+from harness.tests.live_http import BrowserHttp
 from satgpt_backend import app as unified_app
 
 
@@ -33,30 +33,19 @@ def main():
     service = uvicorn.Server(uvicorn.Config(unified_app, log_level='warning'))
     thread = threading.Thread(target=lambda: service.run(sockets=[sock]), daemon=True)
     thread.start()
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + 45
     while not service.started:
         if time.monotonic() > deadline:
             raise TimeoutError('API did not start')
         time.sleep(.05)
 
-    def request(method, path, body=None):
-        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=180)
-        connection.request(method, path, json.dumps(body) if body else None,
-                           {'Content-Type': 'application/json'})
-        response = connection.getresponse()
-        data = json.loads(response.read())
-        connection.close()
-        assert response.status < 300, data
-        return data
-
+    browser = BrowserHttp(port)
+    request = browser.request
     connections = []
+
     def stream(job, cursor=None):
-        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=180)
+        connection, response = browser.stream(job, cursor)
         connections.append(connection)
-        connection.request('GET', f'/api/harness/tasks/{job}/events',
-                           headers={'Last-Event-ID': str(cursor)} if cursor is not None else {})
-        response = connection.getresponse()
-        assert response.status == 200
         return connection, response
 
     def read(response):

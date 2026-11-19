@@ -11,7 +11,8 @@ export function legendColor(value) {
 }
 const text = (value, limit = 200) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
 const finite = value => typeof value === 'number' && Number.isFinite(value);
-export const previewUrl = value => typeof value === 'string' && /^\/api\/previews\/[\w-]+\.png$/.test(value) ? value : null;
+const PREVIEW_PATH = /^\/api\/previews\/(?:webgis-[a-f0-9]{32}\/[a-f0-9]{32}\/[a-f0-9]{32}|[\w-]+)\.png$/;
+export const previewUrl = value => typeof value === 'string' && PREVIEW_PATH.test(value) ? value : null;
 
 export function layerLegend(visualization = {}, declared = {}) {
   const raw = Array.isArray(visualization.palette) ? visualization.palette.slice(0, 256) : [];

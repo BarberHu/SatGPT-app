@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from basic import server as basic
 from harness.app import server as harness
+from harness.app.identity import PrivateRoutes
 
 
 @asynccontextmanager
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SatGPT API", version="1.0.0", lifespan=lifespan)
+app.add_middleware(PrivateRoutes)
 app.include_router(basic.router)
 app.include_router(harness.router)
 
@@ -26,14 +28,14 @@ def component_status(request: Request) -> dict:
     return {
         "basic": bool(getattr(request.app.state, "basic_initialized", False)),
         "harness": bool(getattr(request.app.state, "harness_initialized", False)
-                        and getattr(request.app.state, "controller", None) is not None),
+                        and getattr(getattr(request.app.state, "controller", None), "healthy", False)),
     }
 
 
 @app.get("/health")
 async def health(request: Request):
     # Preserve the legacy Basic fields and the unique Harness fields.
-    basic_health, harness_health = await basic.health(), harness.health()
+    basic_health, harness_health = await basic.health(), harness.health(request)
     modules = component_status(request)
     return {
         **harness_health, **basic_health,

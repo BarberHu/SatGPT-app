@@ -2,14 +2,9 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from harness.app.server import router
 from harness.app.controller import TaskController
 from harness.app.analysis_region import validate_analysis_aoi
-from harness.tests.test_boundary import FakeAgent
+from harness.tests.runtime_fixture import SimulatedRuntime, client_for, new_chat, result, task_body, wait_for_task
 
 
 class AoiMetadataTests(unittest.TestCase):
@@ -26,21 +21,21 @@ class AoiMetadataTests(unittest.TestCase):
                                                    [[100.2,10.2],[100.4,10.2],[100.4,10.4],[100.2,10.2]]]}
         submitted = copy.deepcopy(geometry)
         metadata = {'label':'Original basin','id':'saved-basin','revision':1}
-        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {
-            'DSH_PROVIDER':'deepseek-official','DEEPSEEK_API_KEY':'test-only-key',
-        }):
-            controller = TaskController(Path(folder), agent_factory=FakeAgent)
-            app = FastAPI(); app.include_router(router); app.state.controller = controller
+        def run(ctx, **_):
+            return result(ctx=ctx, artifacts=[{'code': 'result = ee.Image(1)',
+                                               'layer': {'name':'Elevation', 'url':'/test-layer'}}])
+        with tempfile.TemporaryDirectory() as folder:
+            controller = TaskController(Path(folder), runtime_factory=lambda *a: SimulatedRuntime(*a, run=run))
             try:
-                client = TestClient(app)
-                response = client.post('/api/harness/tasks',json={'prompt':'Analyze this area','bounds':[0,0,1,1],
-                                                               'analysis_region':geometry,'analysis_aoi':metadata})
-                self.assertEqual(response.status_code,202,response.text)
-                job = response.json(); metadata['label']='Changed later'; geometry['coordinates'][0][0][0]=0
-                while job['status'] not in {'completed','failed'}:
-                    job = controller.wait_for_job(job['id'],job['revision'],timeout=5)
-                self.assertEqual(job['status'],'completed')
-                message = controller.conversation()['messages'][0]
+                client = client_for(controller)
+                cid = new_chat(client)
+                response = client.post('/api/harness/tasks', json=task_body(cid, analysis_region=geometry, analysis_aoi=metadata))
+                self.assertEqual(response.status_code, 202)
+                metadata['label'] = 'Changed later'
+                geometry['coordinates'][0][0][0] = 0
+                job = wait_for_task(client, response.json()['id'])
+                self.assertEqual(job['status'], 'completed')
+                message = client.get(f'/api/harness/conversations/{cid}').json()['messages'][0]
                 self.assertEqual(message['analysis_region'],submitted)
                 self.assertEqual(message['analysis_aoi'],{'label':'Original basin','id':'saved-basin','revision':1})
                 context = job['output']['layers'][0]['generation']['analysis_context']

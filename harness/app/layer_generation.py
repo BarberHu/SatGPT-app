@@ -1,15 +1,9 @@
-"""Per-layer replay recipes and bounded calls to the existing GEE worker."""
+"""Per-layer replay recipes and validation for the shared GEE worker pool."""
 from __future__ import annotations
 
 import ast
 import copy
 import json
-import os
-import subprocess
-import sys
-import threading
-import uuid
-from pathlib import Path
 
 from .gee_worker import checked_code
 
@@ -88,62 +82,3 @@ def restore_generation_recipes(messages, conversation_id):
                 layer['reloadable'] = False
                 layer['reload_unavailable_reason'] = str(exc)
     return messages
-
-
-class LayerWorkerRunner:
-    """Independent requests use the same worker protocol/restrictions as DSH.
-
-    No model run is needed to regenerate a map ID. Process isolation also keeps
-    replay geometry independent from an ongoing chat's persistent worker.
-    """
-    def __init__(self, root: Path):
-        self.root = root
-        self.lock = threading.Lock()
-        self.processes = set()
-        self.closed = False
-
-    def run(self, payload):
-        worker = self.root / 'app' / 'gee_worker.py'
-        if not worker.is_file():
-            worker = Path(__file__).with_name('gee_worker.py')
-        with self.lock:
-            if self.closed:
-                raise RuntimeError('Layer worker is shutting down.')
-            if len(self.processes) >= 2:
-                raise RuntimeError('Two layers are already reloading. Please wait and try again.')
-            process = subprocess.Popen([sys.executable, '-X', 'utf8', '-I', str(worker)],
-                                       cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                       stderr=subprocess.DEVNULL, text=True, encoding='utf-8',
-                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-            self.processes.add(process)
-        request_id = uuid.uuid4().hex
-        try:
-            request = {'id': request_id, 'payload': {**payload, 'project': os.getenv('GEE_PROJECT_ID')}}
-            try:
-                stdout, _ = process.communicate(json.dumps(request) + '\n', timeout=150)
-            except subprocess.TimeoutExpired as exc:
-                process.kill(); process.communicate()
-                raise TimeoutError('GEE layer reload timed out. Please try again.') from exc
-            try:
-                result = json.loads(stdout)
-            except ValueError as exc:
-                raise ValueError('The GEE worker returned an invalid response.') from exc
-            if not isinstance(result, dict):
-                raise ValueError('The GEE worker returned an invalid response.')
-            if result.get('id') != request_id or not result.get('ok'):
-                raise ValueError(result.get('error') or 'GEE could not reload this layer.')
-            if not isinstance(result.get('data', {}).get('layer'), dict):
-                raise ValueError('The GEE worker did not return a layer.')
-            return result['data']['layer']
-        finally:
-            with self.lock:
-                self.processes.discard(process)
-            if process.poll() is None:
-                process.kill(); process.communicate()
-
-    def close(self):
-        with self.lock:
-            self.closed = True
-            for process in self.processes:
-                if process.poll() is None:
-                    process.kill()

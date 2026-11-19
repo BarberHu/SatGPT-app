@@ -21,6 +21,7 @@ from .gee_service import gee_service, get_flood_images
 from .gee_code_generator import generate_flood_gee_code
 from .flood_dataset_service import build_confirmation_context, get_default_flood_layer_catalog, renderer
 from .flood_aoi import search_location_candidates
+from harness.app.identity import owner_for
 from .business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
 from .water_assets.tile_service import TileProxyServer
 from .flood_api_services import (
@@ -766,8 +767,9 @@ async def search_location(request: LocationSearchRequest):
 
 
 @router.post("/api/business-layers/upsert")
-async def upsert_business_layer_records(request: BusinessLayerUpsertRequest):
+async def upsert_business_layer_records(request: BusinessLayerUpsertRequest, http_request: Request):
     saved_layers = upsert_business_layers(
+        owner_id=owner_for(http_request),
         store_namespace=request.store_namespace,
         store_key=request.store_key,
         layers=[layer.model_dump() for layer in request.layers],
@@ -777,11 +779,13 @@ async def upsert_business_layer_records(request: BusinessLayerUpsertRequest):
 
 @router.get("/api/business-layers/{layer_id}")
 async def get_business_layer_record(
+    http_request: Request,
     layer_id: str,
     store_key: str,
     store_namespace: str = "business_layer_store",
 ):
     layer = get_business_layer(
+        owner_id=owner_for(http_request),
         layer_id=layer_id,
         store_namespace=store_namespace,
         store_key=store_key,
@@ -792,12 +796,15 @@ async def get_business_layer_record(
 
 
 @router.post("/api/business-layers/batch-resolve")
-async def batch_resolve_business_layers(request: BusinessLayerResolveRequest):
+async def batch_resolve_business_layers(request: BusinessLayerResolveRequest, http_request: Request):
     layers = resolve_business_layers(
+        owner_id=owner_for(http_request),
         layer_ids=request.layer_ids,
         store_namespace=request.store_namespace,
         store_key=request.store_key,
     )
+    if len(layers) != len(request.layer_ids):
+        raise HTTPException(status_code=404, detail="Business layer not found.")
     return {"success": True, "data": layers}
 
 

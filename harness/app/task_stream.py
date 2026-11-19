@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import threading
 from collections import deque
 from .timeline import Timeline
 from .trace import clean_text
+from .session_store import TERMINAL
 
 
 class TaskStream:
     def __init__(self, task: dict, capacity=2048, secrets=()):
         self.condition = threading.Condition()
         self.events = deque(maxlen=capacity)
-        self.sequence = 0
+        self.sequence = task.get('event_cursor', 0)
         self.task = copy.deepcopy(task)
         self.answer = None
         self.attempt = None
         self.last_revision = -1
         self.timeline = Timeline(secrets)
+        self.timeline.rows = copy.deepcopy(task.get('timeline') or [])
         self.last_transport_sequence = 0
         self.secrets = secrets
+        self.waiters = set()
 
     def _emit(self, kind, **payload):
         self.sequence += 1
@@ -31,13 +35,17 @@ class TaskStream:
             event['timeline_ops'] = operations
         self.events.append(event)
         self.condition.notify_all()
+        waiters, self.waiters = self.waiters, set()
+        for loop, future in waiters:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(self._wake, future)
 
     def update(self, **patch):
         with self.condition:
-            if self.task['status'] in {'completed', 'failed', 'cancelled'}:
+            if self.task['status'] in TERMINAL:
                 return
             self.task.update(copy.deepcopy(patch))
-            if patch.get('status') in {'completed', 'failed', 'cancelled'}:
+            if patch.get('status') in TERMINAL:
                 self.timeline.finish((patch.get('output') or {}).get('message', ''))
                 self.task['timeline'] = self.timeline.committed()
                 patch['timeline'] = self.task['timeline']
@@ -128,19 +136,69 @@ class TaskStream:
     def read(self, after=None, timeout=15):
         """Replay retained events, otherwise return an atomic current snapshot."""
         with self.condition:
-            if after is not None and after == self.sequence and self.task['status'] not in {'completed', 'failed', 'cancelled'}:
+            if after is not None and after == self.sequence and self.task['status'] not in TERMINAL:
                 self.condition.wait_for(lambda: self.sequence > after, timeout)
-            if after is None or after < 0 or after > self.sequence or (self.events and after < self.events[0]['id'] - 1):
+            if after is None or after < 0 or after > self.sequence or (
+                    self.events and after < self.events[0]['id'] - 1) or (not self.events and after < self.sequence):
                 return [{'id': self.sequence, 'type': 'snapshot', 'task_id': self.task['id'],
                          'conversation_id': self.task['conversation_id'],
                          'task': {**copy.deepcopy(self.task), 'timeline': copy.deepcopy(self.timeline.rows)},
                          'answer': copy.deepcopy(self.answer)}]
             return copy.deepcopy([event for event in self.events if event['id'] > after])
 
+    @staticmethod
+    def _wake(future):
+        if not future.done():
+            future.set_result(None)
+
+    async def wait(self, after, timeout):
+        """Wait for an event without occupying a Python thread per subscriber."""
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        entry = (loop, future)
+        with self.condition:
+            if after != self.sequence or self.task['status'] in TERMINAL:
+                return
+            if len(self.waiters) >= 32:
+                raise RuntimeError('SSE subscribers are at capacity')
+            self.waiters.add(entry)
+        try:
+            await asyncio.wait_for(future, timeout)
+        except TimeoutError:
+            pass
+        finally:
+            with self.condition:
+                self.waiters.discard(entry)
+
+    def reconcile(self, events):
+        """Use native committed events to restore any missed presentation frames."""
+        with self.condition:
+            known = {(row.get('session_seq'), row.get('kind')) for row in self.timeline.rows}
+            results = {row.get('result_session_seq') for row in self.timeline.rows}
+            for event in events:
+                seq = event.get('seq')
+                kind = event.get('type')
+                if ((kind == 'tool/call' and (seq, 'tool') not in known)
+                        or (kind == 'tool/result' and seq not in results)):
+                    self.timeline.session(event)
+                if kind == 'assistant/message' and not event.get('data', {}).get('interrupted'):
+                    data = event.get('data', {})
+                    for block in (data.get('message') or {}).get('content', []):
+                        block_kind = block.get('type')
+                        if block_kind in {'text', 'reasoning'} and (seq, block_kind) not in known:
+                            self.timeline.turn, self.timeline.step = data.get('turn'), data.get('step')
+                            self.timeline.add(block_kind, text=clean_text(block.get('text', ''), self.secrets),
+                                              session_seq=seq, attempt_id=f'committed:{seq}')
+            self.timeline.rows.sort(key=lambda row: (row.get('session_seq') or 0, row['seq']))
+            for index, row in enumerate(self.timeline.rows, 1):
+                row['seq'] = index
+            # The final task patch publishes this reconciled timeline atomically.
+            self.timeline.drain()
+
     @property
     def terminal(self):
         with self.condition:
-            return self.task['status'] in {'completed', 'failed', 'cancelled'}
+            return self.task['status'] in TERMINAL
 
     def finish_timeline(self, final=''):
         with self.condition:

@@ -13,6 +13,7 @@ describe('Vite proxy configuration', () => {
     expect(proxy['/health'].target).toBe('http://services.internal:8100');
     expect(proxy['/readyz'].target).toBe('http://services.internal:8100');
     expect(Object.keys(proxy)).toEqual(['/api', '/health', '/readyz']);
-    expect(Object.values(proxy).every((entry) => entry.changeOrigin)).toBe(true);
+    expect(proxy['/api'].changeOrigin).toBe(false);
+    expect(proxy['/health'].changeOrigin).toBe(true);
   });
 });

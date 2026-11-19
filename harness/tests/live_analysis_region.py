@@ -3,26 +3,19 @@
 Run with AGENT_PORT set to the isolated server's port. Never prints answers,
 credentials, tool payloads or layer URLs. Writes only a compact safe report.
 """
-import http.client
 import json
 import time
 from pathlib import Path
 from satgpt_config import load_project_env, integer
 from harness.tests.test_analysis_region import TRIANGLE
+from harness.tests.live_http import BrowserHttp
 
 
 def main():
     load_project_env()
     port = integer('AGENT_PORT')
-    def request(method, path, data=None, expected=200):
-        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=180)
-        try:
-            connection.request(method, path, json.dumps(data) if data is not None else None,
-                               {'Content-Type':'application/json'})
-            response = connection.getresponse(); value = json.loads(response.read())
-            assert response.status == expected, f'Unexpected HTTP status {response.status}'
-            return value
-        finally: connection.close()
+    browser = BrowserHttp(port)
+    request = browser.request
 
     cid = request('POST', '/api/harness/conversation/new')['conversation_id']
     report = {'conversation_isolated':True, 'cases':[]}
@@ -35,12 +28,8 @@ def main():
                 'conversation_id':cid}, expected=409)
         events, cursor, reconnected = [], None, False
         while True:
-            connection = http.client.HTTPConnection('127.0.0.1', port, timeout=180)
+            connection, response = browser.stream(job['id'], cursor)
             try:
-                connection.request('GET', f"/api/harness/tasks/{job['id']}/events",
-                                   headers={'Last-Event-ID':str(cursor)} if cursor else {})
-                response = connection.getresponse()
-                assert response.status == 200
                 terminal = False
                 while True:
                     line = response.readline().decode().strip()

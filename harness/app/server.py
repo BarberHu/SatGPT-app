@@ -1,33 +1,32 @@
-"""Harness API router and lifecycle hooks; the application lives in satgpt_backend."""
+"""HTTP routes for browser-owned Harness sessions and artifacts."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import re
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.applications import Starlette
 
-from .controller import TaskController
+from .controller import AdmissionError, TaskController
+from .identity import owner_for, session_response
 from .model_config import model_key_configured
-from .trace import clean_text
+from .shared_runtime import RuntimeUnavailable
 from satgpt_config import load_project_env, validate_config
 
-
 ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = ROOT.parent
 load_project_env()
 
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
-    validate_config("harness")
+    validate_config('harness')
     app.state.harness_initialized = False
     app.state.controller = await asyncio.to_thread(TaskController, ROOT)
     app.state.harness_initialized = True
@@ -40,163 +39,134 @@ async def lifespan(app: Starlette):
 
 
 router = APIRouter()
+Owner = Annotated[str, Depends(owner_for)]
 
 
 class TaskRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     prompt: str = Field(min_length=3, max_length=2000)
     bounds: list[float] = Field(min_length=4, max_length=4)
-    conversation_id: str | None = None
+    conversation_id: str = Field(max_length=100)
+    request_id: str = Field(pattern=r'^[A-Za-z0-9_-]{16,80}$')
     analysis_region: dict | None = None
     analysis_aoi: dict | None = None
 
 
-@router.get("/api/harness/health")
-def health():
-    return {"status": "ok", "engine": "deepseek-harness",
-            "gee_project_configured": bool(os.getenv("GEE_PROJECT_ID")),
-            "model_key_configured": model_key_configured(),
-            "gee_authentication": "not_checked", "model_authentication": "not_checked"}
-
-
-@router.get("/api/harness/conversation")
-def conversation(request: Request):
-    return request.app.state.controller.conversation()
-
-
-@router.post("/api/harness/conversation/new")
-def new_conversation(request: Request):
+@contextmanager
+def api_errors():
     try:
-        return request.app.state.controller.new_conversation()
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
+        yield
+    except FileNotFoundError:
+        raise HTTPException(404, 'Resource not found') from None
+    except AdmissionError as exc:
+        headers = {'Retry-After': '2'} if exc.status in {429, 503} else None
+        raise HTTPException(exc.status, {'code': exc.code, 'message': str(exc)}, headers=headers) from None
+    except RuntimeUnavailable:
+        raise HTTPException(503, {'code': 'runtime_unavailable', 'message': 'Harness is unavailable.'},
+                            headers={'Retry-After': '2'}) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@router.get('/api/harness/health')
+def health(request: Request):
+    controller = getattr(request.app.state, 'controller', None)
+    return {'status': 'ok' if controller is not None and controller.healthy else 'degraded',
+            'engine': 'deepseek-harness', 'gee_project_configured': bool(os.getenv('GEE_PROJECT_ID')),
+            'model_key_configured': model_key_configured(),
+            'gee_authentication': 'not_checked', 'model_authentication': 'not_checked'}
+
+
+@router.get('/api/harness/session')
+def session(request: Request):
+    return session_response(request)
+
+
+@router.get('/api/harness/conversation')
+def conversation(request: Request, owner: Owner):
+    return request.app.state.controller.current(owner)
+
+
+@router.post('/api/harness/conversation/new')
+def new_conversation(request: Request, owner: Owner):
+    return request.app.state.controller.new_conversation(owner)
 
 
 @router.get('/api/harness/conversations')
-def list_conversations(request: Request):
-    return {'conversations': request.app.state.controller.list_conversations()}
+def list_conversations(request: Request, owner: Owner):
+    return {'conversations': request.app.state.controller.list_conversations(owner)}
 
 
 @router.delete('/api/harness/conversations/{conversation_id}')
-def delete_conversation(conversation_id: str, request: Request):
-    try:
-        return request.app.state.controller.delete_conversation(conversation_id)
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except OSError as exc:
-        raise HTTPException(500, 'Unable to delete the conversation. Please try again.') from exc
+def delete_conversation(conversation_id: str, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.delete_conversation(owner, conversation_id)
 
 
 @router.post('/api/harness/conversations/{conversation_id}/activate')
-def activate_conversation(conversation_id: str, request: Request):
-    try:
-        return request.app.state.controller.activate_conversation(conversation_id)
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
 @router.get('/api/harness/conversations/{conversation_id}')
-def get_conversation(conversation_id: str, request: Request):
-    try:
-        return request.app.state.controller.conversation(conversation_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+def get_conversation(conversation_id: str, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.conversation(owner, conversation_id)
 
 
 @router.post('/api/harness/conversations/{conversation_id}/layers/{layer_id}/reload')
-def reload_layer(conversation_id: str, layer_id: str, request: Request):
-    controller = request.app.state.controller
-    try:
-        return controller.reload_layer(conversation_id, layer_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except TimeoutError as exc:
-        raise HTTPException(504, str(exc)) from exc
-    except ValueError as exc:
-        detail = re.sub(r'https?://\S+', '[service URL]', clean_text(str(exc), controller.trace_secrets, 800))
-        raise HTTPException(422, detail) from exc
-    except OSError as exc:
-        raise HTTPException(503, 'Unable to start the GEE worker. Please try again.') from exc
+def reload_layer(conversation_id: str, layer_id: str, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.reload_layer(owner, conversation_id, layer_id)
 
 
-@router.post("/api/harness/tasks", status_code=202)
-def create_task(request: TaskRequest, http_request: Request):
-    try:
-        return http_request.app.state.controller.create(request.prompt, request.bounds, request.conversation_id,
-                                                        analysis_region=request.analysis_region, analysis_aoi=request.analysis_aoi)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
+@router.post('/api/harness/tasks', status_code=202)
+def create_task(body: TaskRequest, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.create(owner, body.prompt, body.bounds, body.conversation_id,
+                                                   body.request_id, body.analysis_region, body.analysis_aoi)
 
 
-@router.get("/api/harness/tasks/{task_id}")
-def get_task(task_id: str, request: Request):
-    task = request.app.state.controller.get(task_id)
-    if task is None:
-        raise HTTPException(404, "Task not found")
-    return task
+@router.get('/api/harness/tasks/{task_id}')
+def get_task(task_id: str, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.get(owner, task_id)
 
 
 @router.post('/api/harness/tasks/{task_id}/cancel')
-def cancel_task(task_id: str, request: Request):
-    try:
-        return request.app.state.controller.cancel(task_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
+def cancel_task(task_id: str, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.cancel(owner, task_id)
 
 
-@router.get("/api/harness/tasks/{task_id}/events")
-async def task_events(task_id: str, request: Request):
-    if request.app.state.controller.get(task_id) is None:
-        raise HTTPException(404, "Task not found")
+@router.get('/api/harness/tasks/{task_id}/events')
+async def task_events(task_id: str, request: Request, owner: Owner):
+    with api_errors():
+        feed = await asyncio.to_thread(request.app.state.controller.stream, owner, task_id)
 
     async def events():
-        feed = request.app.state.controller.streams[task_id]
         cursor = request.headers.get('last-event-id', request.query_params.get('after'))
         try:
             cursor = int(cursor) if cursor is not None else None
         except ValueError:
             cursor = None
-        while True:
-            if await request.is_disconnected():
+        while not await request.is_disconnected():
+            batch = feed.read(cursor, 0)
+            if not batch and not feed.terminal:
+                try:
+                    await feed.wait(cursor, 10)
+                except RuntimeError:
+                    break
+                batch = feed.read(cursor, 0)
+            for event in batch:
+                cursor = event['id']
+                yield f"id: {cursor}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if feed.terminal and not feed.read(cursor, 0):
                 break
-            batch = await asyncio.to_thread(feed.read, cursor, 10)
-            if batch:
-                for event in batch:
-                    cursor = event['id']
-                    yield f"id: {cursor}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-            else:
-                yield ": keep-alive\n\n"
-            if feed.terminal:
-                # Completion can race a read; drain its final patch first.
-                final = feed.read(cursor, 0)
-                for event in final:
-                    cursor = event['id']
-                    yield f"id: {cursor}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                break
+            if not batch:
+                yield ': keep-alive\n\n'
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
-    })
+    return StreamingResponse(events(), media_type='text/event-stream', headers={'X-Accel-Buffering': 'no'})
 
 
-@router.get("/api/previews/{filename}")
-def preview(filename: str):
-    if not re.fullmatch(r"[0-9a-f]{32}\.png", filename):
-        raise HTTPException(404, "Preview not found")
-    target = ROOT / "state" / "previews" / filename
-    if not target.is_file():
-        raise HTTPException(404, "Preview not found")
-    return FileResponse(target, media_type="image/png")
+@router.get('/api/previews/{conversation_id}/{task_id}/{filename}')
+def preview(conversation_id: str, task_id: str, filename: str, request: Request, owner: Owner):
+    with api_errors():
+        path = request.app.state.controller.artifact(owner, conversation_id, task_id, filename)
+    return FileResponse(path, media_type='image/png', headers={'X-Content-Type-Options': 'nosniff'})

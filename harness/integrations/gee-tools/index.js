@@ -1,21 +1,48 @@
 /** GEE tools for the SDK profile, adapted from cdllI/dsh-gee (MIT). */
-import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WorkerClient } from './worker-client.js';
+import { WorkerPool } from './worker-pool.js';
+import { mountControl, readBinding } from './runtime-control.js';
 
 export const name = 'webgis-gee-tools';
-export const inject = ['tools'];
+export const inject = ['agents', 'tools'];
 
 const root = process.env.WEBGIS_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const eventFile = path.join(root, 'state', 'gee-tool-events.jsonl');
 const project = process.env.GEE_PROJECT_ID;
-const workerClient = new WorkerClient({
+const pool = new WorkerPool({
   python: process.env.SATGPT_HARNESS_PYTHON || 'python',
   worker: path.join(root, 'app', 'gee_worker.py'),
   cwd: root,
-});
-export function stopWorker() { workerClient.close(); }
+}, Number(process.env.SATGPT_GEE_WORKERS || 16), Number(process.env.SATGPT_GEE_QUEUE_LIMIT || 128));
+const timingLog = process.env.SATGPT_HARNESS_TIMING_LOG;
+let timingWriteFailed = false;
+
+const TOOL_NAMES = ['gee_check', 'gee_status', 'gee_catalog', 'gee_eval', 'gee_preview', 'gee_layer'];
+const CODE_PARAMETER = {
+  type: 'string',
+  description: 'Restricted Python script. Write result = expression (e.g. result = {"count": collection.size()}). A bare final expression or dictionary does not return a value. Use preloaded ee and analysis_region. No import, print, or def.',
+};
+const PYTHON_RULES = 'ee and the exact task geometry analysis_region (ee.Geometry) / analysis_region_geojson are preloaded. Assign the output to result. No import, print, def, file access, or private attributes. For a simple .map() callback use an inline lambda. Run gee_check before executing complex code.';
+
+function execute(owner, payload, signal) {
+  const operation = payload.operation || 'layer';
+  const taskId = payload.analysis_context?.task_id;
+  const callId = timingLog ? randomUUID() : null;
+  const observe = timingLog && (point => {
+    if (timingWriteFailed) return;
+    try {
+      appendFileSync(timingLog, JSON.stringify({ component: 'gee', operation, task_id: taskId,
+        call_id: callId, ...point }) + '\n', { mode: 0o600 });
+    } catch {
+      timingWriteFailed = true;
+      process.stderr.write('SatGPT could not write GEE timing events.\n');
+    }
+  });
+  return pool.run(owner, { ...payload, project, catalog_dir: process.env.SATGPT_CATALOG_CACHE }, { signal,
+    timeout: operation === 'catalog' ? 240000 : 150000, observe });
+}
 
 function focusBounds(value) {
   if (value === undefined) return undefined;
@@ -29,25 +56,24 @@ function focusBounds(value) {
   return value;
 }
 
-function runWorker(payload, signal) {
-  return runWithContext(payload, signal);
-}
-
-export async function runWithContext(payload, signal) {
-  // Runtime-private file is atomically replaced before session.run. Capture now,
-  // not after the worker queue advances; no shared process environment mutation.
-  const context = process.env.SATGPT_ANALYSIS_CONTEXT
-    ? JSON.parse(await fs.readFile(process.env.SATGPT_ANALYSIS_CONTEXT, 'utf8')) : undefined;
-  return workerClient.run({ ...payload, project, analysis_context: context }, {
-    signal, timeout: payload.operation === 'catalog' ? 240000 : 150000,
-  });
+export async function runWithContext(payload, exec) {
+  const id = exec?.agent?.session?.id;
+  const binding = id && readBinding(String(id));
+  if (!binding) throw new Error('No active SatGPT run is registered for this session');
+  const { owner_id, conversation_id, task_id, run_id, bounds, analysis_region, analysis_aoi, artifact_dir } = binding;
+  const result = await execute(owner_id, { ...payload, artifact_dir,
+    artifact_url: '/api/previews/' + conversation_id + '/' + task_id,
+    analysis_context: { task_id, conversation_id, bounds, analysis_region, ...(analysis_aoi && { analysis_aoi }) },
+  }, exec.signal);
+  if (result.layer || result.preview) return { ...result, reference: { task_id, run_id } };
+  return result;
 }
 
 export function apply(ctx) {
   ctx.tools.register({
     name: 'gee_check',
-    description: 'Fast local preflight for this restricted GEE Python runner. Checks Python syntax, allowed statements/builtins, and result assignment without credentials or any Earth Engine request. Use when code is complex or a local error is suspected; ordinary short code can go directly to gee_eval, gee_preview, or gee_layer, which also preflight automatically. Warnings are advisory.',
-    parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false },
+    description: 'Fast local preflight for restricted GEE Python. Run before executing complex code in gee_eval, gee_preview, or gee_layer. If valid is false, fix the reported error and check again before execution. Checks syntax, allowed statements and builtins, and result assignment without an Earth Engine request.',
+    parameters: { type: 'object', properties: { code: CODE_PARAMETER }, required: ['code'], additionalProperties: false },
     output: {
       schema: { type: 'object', properties: {
         valid: { type: 'boolean' }, errors: { type: 'array', items: { type: 'string' } },
@@ -55,7 +81,7 @@ export function apply(ctx) {
       }, required: ['valid', 'errors', 'warnings'], additionalProperties: false },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
-    async execute(args, exec) { return runWorker({ operation: 'check', code: args.code }, exec.signal); },
+    async execute(args, exec) { return runWithContext({ operation: 'check', code: args.code }, exec); },
   });
 
   ctx.tools.register({
@@ -66,7 +92,7 @@ export function apply(ctx) {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
-    async execute(_args, exec) { return runWorker({ operation: 'status' }, exec.signal); },
+    async execute(_args, exec) { return runWithContext({ operation: 'status' }, exec); },
   });
 
   ctx.tools.register({
@@ -87,31 +113,31 @@ export function apply(ctx) {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
     async execute(args, exec) {
-      return runWorker({ operation: 'catalog', query: args.query || '', limit: args.limit || 20,
-        type: args.type, refresh: Boolean(args.refresh) }, exec.signal);
+      return runWithContext({ operation: 'catalog', query: args.query || '', limit: args.limit || 20,
+        type: args.type, refresh: Boolean(args.refresh) }, exec);
     },
   });
 
   ctx.tools.register({
     name: 'gee_eval',
-    description: 'Evaluate read-only Google Earth Engine Python code for catalog queries or statistics. ee and task-local analysis_region (ee.Geometry) / analysis_region_geojson are available. Use analysis_region for filterBounds, clip and reduceRegion geometry; never substitute its bounding rectangle. Assign the final value to result. Imports, print, definitions and private attributes are unavailable. Use gee_layer for map layers.',
-    parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false },
+    description: `Evaluate read-only Earth Engine Python. ${PYTHON_RULES} Use analysis_region for filterBounds, clip and reduceRegion. Query image dates using lightweight collection metadata. Run any requested large-area pixel statistics separately at an appropriate scale. Use gee_layer for map layers.`,
+    parameters: { type: 'object', properties: { code: CODE_PARAMETER }, required: ['code'], additionalProperties: false },
     output: {
       schema: { type: 'object', properties: { result: {} }, required: ['result'], additionalProperties: false },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value.result) }],
     },
     async execute(args, exec) {
-      return runWorker({ operation: 'eval', code: args.code }, exec.signal);
+      return runWithContext({ operation: 'eval', code: args.code }, exec);
     },
   });
 
   ctx.tools.register({
     name: 'gee_preview',
-    description: 'Render an ee.Image as a PNG preview and show it in the WebGIS conversation. ee is already available; assign an ee.Image to result. The restricted runner does not allow import, print, def/class/try, or underscore-prefixed attributes. Use gee_layer for an interactive map.',
+    description: `Render a PNG preview in the WebGIS conversation. ${PYTHON_RULES} The result must be an ee.Image. Use gee_layer for an interactive map.`,
     parameters: {
       type: 'object',
       properties: {
-        code: { type: 'string' }, name: { type: 'string' },
+        code: CODE_PARAMETER, name: { type: 'string' },
         bands: { type: 'array', items: { type: 'string' } },
         min: { type: 'number' }, max: { type: 'number' },
         palette: { type: 'array', items: { type: 'string' } },
@@ -121,26 +147,26 @@ export function apply(ctx) {
       required: ['code'], additionalProperties: false,
     },
     output: {
-      schema: { type: 'object', properties: { preview: { type: 'object', additionalProperties: true } }, required: ['preview'], additionalProperties: false },
+      schema: { type: 'object', properties: { preview: { type: 'object', additionalProperties: true }, reference: { type: 'object' } }, required: ['preview', 'reference'], additionalProperties: false },
       render: (_args, value) => [{ type: 'text', text: `Preview ${value.preview.width}x${value.preview.height} PNG saved and shown in WebGIS.` }],
+      presentationMeta: (args, value) => ({ ...value.reference, preview: value.preview, code: args.code }),
     },
     async execute(args, exec) {
       const visualization = {};
       for (const key of ['bands', 'min', 'max', 'palette']) if (args[key] !== undefined) visualization[key] = args[key];
-      const value = await runWorker({ operation: 'preview', code: args.code, name: args.name,
-        visualization, region: args.region, dimensions: args.dimensions }, exec.signal);
-      await fs.appendFile(eventFile, JSON.stringify({ preview: value.preview, code: args.code, created_at: Date.now() }) + '\n');
+      const value = await runWithContext({ operation: 'preview', code: args.code, name: args.name,
+        visualization, region: args.region, dimensions: args.dimensions }, exec);
       return value;
     },
   });
 
   ctx.tools.register({
     name: 'gee_layer',
-    description: 'Create an interactive Earth Engine layer and a static thumbnail from read-only Python code. Assign an ee.Image to result. Set bounds to the actual layer area [west,south,east,north]. Supply known source, dataset_id, observed_at (observation date/range), unit and description in metadata; omit unknown facts. Palette/min/max generate the numeric legend. For consecutive integer classes only, provide legend.type=categorical and labels in palette order. The runner disallows imports, file access, definitions, and private attributes.',
+    description: `Create an interactive Earth Engine layer and a static thumbnail. ${PYTHON_RULES} The result must be an ee.Image. Set bounds to the actual layer area [west,south,east,north]. Supply verified source, dataset_id, observed_at (observation date/range), unit and description in metadata. Palette/min/max generate the numeric legend. For consecutive integer classes only, provide legend.type=categorical and labels in palette order.`,
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string' }, code: { type: 'string' },
+        name: { type: 'string' }, code: CODE_PARAMETER,
         bounds: { type: 'array', items: { type: 'number' }, description: '[west, south, east, north] of the layer area' },
         bands: { type: 'array', items: { type: 'string' } },
         min: { type: 'number' }, max: { type: 'number' },
@@ -159,17 +185,27 @@ export function apply(ctx) {
     output: {
       schema: { type: 'object', properties: { layer: { type: 'object', additionalProperties: true } }, required: ['layer'], additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: `Map layer ${value.layer.name} created and sent to WebGIS.` }],
+      presentationMeta: (args, value) => ({ ...value.reference, layer: value.layer, code: args.code }),
     },
     async execute(args, exec) {
       const bounds = focusBounds(args.bounds);
       const visualization = { name: args.name };
       for (const key of ['bands', 'min', 'max', 'palette']) if (args[key] !== undefined) visualization[key] = args[key];
-      const value = await runWorker({ layer_code: args.code, visualization, bounds,
-        metadata: args.metadata, legend: args.legend }, exec.signal);
+      const value = await runWithContext({ layer_code: args.code, visualization, bounds,
+        metadata: args.metadata, legend: args.legend }, exec);
       if (bounds) value.layer.bounds = bounds;
-      await fs.appendFile(eventFile, JSON.stringify({ layer: value.layer, code: args.code,
-        created_at: Date.now() }) + '\n');
       return value;
     },
   });
+  ctx.on('agent/created', ({ agent }) => {
+    agent.ctx.tools.restrict({ allow: TOOL_NAMES });
+  });
+  ctx.tools.guard(exec => {
+    const id = exec.agent?.session?.id;
+    if (!TOOL_NAMES.includes(exec.name) || !id || !readBinding(String(id))) {
+      return 'This tool is unavailable in this SatGPT session';
+    }
+  });
+  mountControl(ctx, execute);
+  ctx.on('dispose', () => pool.close());
 }

@@ -19,6 +19,9 @@ DEFAULTS = {
     'FRONTEND_HOST': '127.0.0.1', 'FRONTEND_PORT': '3000',
     'SATGPT_SERVICE_HOST': '127.0.0.1', 'SATGPT_ALLOW_REMOTE_HARNESS': 'false',
     'FORWARDED_ALLOW_IPS': '127.0.0.1',
+    'SATGPT_AGENT_TASKS': '128',
+    'SATGPT_AGENT_RESIDENT_SESSIONS': '128', 'SATGPT_AGENT_DEADLINE_SECONDS': '7200',
+    'SATGPT_GEE_WORKERS': '16', 'SATGPT_GEE_QUEUE_LIMIT': '128', 'SATGPT_COOKIE_SECURE': 'false',
     'SATGPT_HEAVY_CONCURRENCY': '5', 'SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS': '30',
     'PROXY_TIMEOUT_MS': '300000', 'PROXY_MAX_SOCKETS': '256', 'GENERATE_SOURCEMAP': 'false',
 }
@@ -104,6 +107,17 @@ def validate_config(component='all'):
         integer('SATGPT_HEAVY_CONCURRENCY', 1, 1024)
         integer('SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS', 1, 3600)
     if component in {'all', 'backend', 'harness'}:
+        execution_slots = integer('SATGPT_AGENT_TASKS', 1, 128)
+        integer('SATGPT_AGENT_RESIDENT_SESSIONS', execution_slots, 4096)
+        integer('SATGPT_AGENT_DEADLINE_SECONDS', 1, 7200)
+        integer('SATGPT_GEE_WORKERS', 1, 32)
+        integer('SATGPT_GEE_QUEUE_LIMIT', 1, 65535)
+        if required_env('SATGPT_COOKIE_SECURE') not in {'true', 'false'}:
+            invalid('SATGPT_COOKIE_SECURE', 'must be true or false')
+        if os.getenv('SATGPT_PUBLIC_ORIGIN'):
+            validate_url('SATGPT_PUBLIC_ORIGIN')
+            if urlsplit(os.environ['SATGPT_PUBLIC_ORIGIN']).path:
+                invalid('SATGPT_PUBLIC_ORIGIN', 'must be an origin without a path or trailing slash')
         provider = required_env('DSH_PROVIDER')
         if provider not in {'deepseek-official', 'aihubmix'}:
             invalid('DSH_PROVIDER', 'must be deepseek-official or aihubmix')

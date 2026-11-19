@@ -1,92 +1,99 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-/** One queued JSON-lines channel keeps GEE initialized across tool calls. */
+const MAX_RESPONSE = 20_000_000;
+
+/** A resident JSON-lines worker. A slot is reusable only once its old child exits. */
 export class WorkerClient {
   constructor({ python, worker, cwd }) {
     Object.assign(this, { python, worker, cwd });
     this.child = null;
-    this.pending = new Map();
+    this.pending = null;
     this.buffer = '';
-    this.queue = Promise.resolve();
   }
 
   start() {
-    if (this.child) return;
+    if (this.child) return this.child;
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|LANG|LC_.*|HTTPS?_PROXY|NO_PROXY|SSL_CERT_FILE|REQUESTS_CA_BUNDLE|GOOGLE_APPLICATION_CREDENTIALS)$/i.test(key)));
     const child = spawn(this.python, ['-X', 'utf8', '-I', this.worker], {
-      cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
-      env: process.env,
+      cwd: this.cwd, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env,
     });
     this.child = child;
+    this.exited = new Promise(resolve => {
+      child.on('close', code => {
+        this.child = null;
+        this.buffer = '';
+        this.pending?.reject(new Error('GEE worker exited (' + code + ')'));
+        resolve();
+      });
+    });
+    child.on('error', () => this.terminate(child, new Error('Unable to start GEE worker')));
+    child.stdin.on('error', () => this.terminate(child, new Error('GEE worker input is unavailable')));
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => {
+      if (child !== this.child) return;
       this.buffer += chunk;
-      if (this.buffer.length > 20_000_000) return child.kill();
-      let end;
-      while ((end = this.buffer.indexOf('\n')) >= 0) {
-        const line = this.buffer.slice(0, end);
+      if (this.buffer.length > MAX_RESPONSE) {
+        this.terminate(child, new Error('GEE worker output exceeds the response limit'));
+        return;
+      }
+      const end = this.buffer.indexOf('\n');
+      if (end < 0) return;
+      try {
+        const result = JSON.parse(this.buffer.slice(0, end));
         this.buffer = this.buffer.slice(end + 1);
-        try {
-          const result = JSON.parse(line);
-          const pending = this.pending.get(result.id);
-          if (!pending) continue;
-          this.pending.delete(result.id);
-          result.ok ? pending.resolve(result.data) : pending.reject(new Error(result.error || 'GEE worker failed'));
-        } catch (error) {
-          this.fail(error);
-          child.kill();
-        }
+        if (result.id !== this.pending?.id || this.buffer) throw new Error('Mismatched GEE worker response');
+        if (result.ok) this.pending.resolve(result.data);
+        else this.pending.reject(new Error(result.error || 'GEE worker failed'));
+      } catch (error) {
+        this.terminate(child, error);
       }
     });
-    child.stderr.on('data', () => {});
-    child.on('error', error => this.fail(error));
-    child.on('close', code => {
-      this.fail(new Error(`GEE worker exited (${code})`));
-      if (this.child === child) this.child = null;
-      this.buffer = '';
-    });
+    return child;
   }
 
-  fail(error) {
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
+  terminate(child, error) {
+    if (child !== this.child) return this.exited;
+    const pending = this.pending;
+    child.kill('SIGKILL');
+    return this.exited.then(() => pending?.reject(error));
   }
 
   close() {
-    this.child?.kill();
-    this.child = null;
+    if (!this.child) return Promise.resolve();
+    return this.terminate(this.child, new Error('GEE worker is closing'));
   }
 
   run(payload, { signal, timeout }) {
-    const queued = this.queue.then(() => this.call(payload, signal, timeout));
-    this.queue = queued.catch(() => {});
-    return queued;
-  }
-
-  call(payload, signal, timeout) {
+    if (this.pending) return Promise.reject(new Error('GEE worker slot is occupied'));
     if (signal?.aborted) return Promise.reject(new Error('Tool call cancelled'));
-    this.start();
+    const child = this.start();
     const id = randomUUID();
+    const line = JSON.stringify({ id, payload }) + '\n';
     return new Promise((resolve, reject) => {
-      const child = this.child;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        child.kill();
-        reject(new Error('GEE worker timed out'));
-      }, timeout);
-      const abort = () => {
-        this.pending.delete(id);
-        child.kill();
-        reject(new Error('Tool call cancelled'));
+      let stopping = false;
+      const stop = message => {
+        if (stopping) return;
+        stopping = true;
+        this.terminate(child, new Error(message)).then(() => finish(reject)(new Error(message)));
       };
-      const finish = fn => value => {
+      const abort = () => stop('Tool call cancelled');
+      const timer = setTimeout(() => stop('GEE worker timed out'), timeout);
+      const finish = callback => value => {
+        if (this.pending?.id !== id) return;
         clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
-        fn(value);
+        this.pending = null;
+        callback(value);
       };
-      this.pending.set(id, { resolve: finish(resolve), reject: finish(reject) });
+      this.pending = {
+        id,
+        resolve: value => { if (!stopping) finish(resolve)(value); },
+        reject: error => { if (!stopping) finish(reject)(error); },
+      };
       signal?.addEventListener('abort', abort, { once: true });
-      child.stdin.write(JSON.stringify({ id, payload }) + '\n');
+      child.stdin.write(line);
     });
   }
 }

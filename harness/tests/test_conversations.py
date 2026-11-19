@@ -1,267 +1,204 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from harness.app.controller import TaskController
-from harness.app.server import router
+from harness.app.identity import COOKIE
+from harness.tests.runtime_fixture import SimulatedRuntime, client_for, new_chat, result, task_body, wait_for_task
 
-
-class ConversationDeletionTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.controller = TaskController(Path(self.temp.name))
-        self.addCleanup(self.controller.close)
-        app = FastAPI()
-        app.include_router(router)
-        app.state.controller = self.controller
-        self.client = TestClient(app)
-
-    def delete(self, cid):
-        return self.client.delete(f'/api/harness/conversations/{cid}')
-
-    def seed(self, text):
-        self.controller.messages = [{'role': 'user', 'content': text}]
-        self.controller._save_messages()
-        return self.controller.conversation_id
-
-    def test_delete_archived_history_preserves_current_and_survives_restart(self):
-        old = self.seed('Old conversation')
-        current = self.controller.new_conversation()
-        result = self.delete(old)
-        self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.json()['deleted_id'], old)
-        self.assertEqual(result.json()['conversation'], current)
-        self.assertEqual([row['id'] for row in result.json()['conversations']], [current['conversation_id']])
-        self.assertEqual(self.delete(old).status_code, 404)
-        self.assertEqual(self.client.post(f'/api/harness/conversations/{old}/activate').status_code, 404)
-        restarted = TaskController(Path(self.temp.name))
-        try:
-            self.assertEqual(restarted.conversation(), current)
-            self.assertNotIn(old, [row['id'] for row in restarted.list_conversations()])
-        finally:
-            restarted.close()
-
-    def test_delete_current_removes_its_archive_without_rearchiving_it(self):
-        old = self.seed('Delete current')
-        other = self.controller.new_conversation()['conversation_id']
-        self.controller.activate_conversation(old)
-        result = self.delete(old)
-        self.assertEqual(result.status_code, 200)
-        fresh = result.json()['conversation']
-        self.assertNotIn(fresh['conversation_id'], [old, other])
-        self.assertEqual(fresh['messages'], [])
-        self.assertIsNone(fresh['active_task'])
-        self.assertFalse((self.controller.archive_dir / f'{old}.json').exists())
-        self.assertEqual({row['id'] for row in result.json()['conversations']}, {other, fresh['conversation_id']})
-        restarted = TaskController(Path(self.temp.name))
-        try:
-            self.assertEqual(restarted.conversation(), fresh)
-            self.assertNotIn(old, [row['id'] for row in restarted.list_conversations()])
-            with self.assertRaises(FileNotFoundError): restarted.activate_conversation(old)
-        finally:
-            restarted.close()
-
-    def test_reject_invalid_missing_running_and_queued_without_changing_history(self):
-        cid = self.seed('Keep me')
-        before = self.controller.conversation()
-        self.assertEqual(self.delete('invalid-id').status_code, 400)
-        self.assertEqual(self.delete('webgis-missing').status_code, 404)
-        for status in ['queued', 'running']:
-            with self.subTest(status=status):
-                self.controller.jobs['job'] = {'id': 'job', 'conversation_id': cid, 'status': status}
-                self.assertEqual(self.delete(cid).status_code, 409)
-        self.controller.jobs.clear()
-        self.assertEqual(self.controller.conversation(), before)
-
-    def test_disk_failure_leaves_current_conversation_intact(self):
-        cid = self.seed('Keep on failure')
-        self.controller._archive_current()
-        before = self.controller.conversation()
-        with patch.object(Path, 'unlink', side_effect=PermissionError('test-only')):
-            result = self.delete(cid)
-        self.assertEqual(result.status_code, 500)
-        self.assertEqual(self.controller.conversation(), before)
-        self.assertEqual(json.loads(self.controller.chat_file.read_text(encoding='utf-8'))['conversation_id'], cid)
+API = '/api/harness'
 
 
 class ConversationTests(unittest.TestCase):
-    def wait(self, controller, job):
-        current = job
-        while current['status'] not in {'completed', 'failed'}:
-            current = controller.wait_for_job(current['id'], current['revision'], 3)
-        self.assertEqual(current['status'], 'completed', current['error'])
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        self.release = threading.Event()
+        self.admitted = threading.Event()
+        self.controller = self.make_controller()
+        self.a, self.b = (client_for(self.controller) for _ in range(2))
 
-    def test_archive_restore_continue_and_restart_keep_session_identity(self):
-        calls, opened, closed = [], [], []
-        class Agent:
-            def __init__(self, workspace, home, session_id): self.id = session_id
-            def __enter__(self): opened.append(self.id); return self
-            def __exit__(self, *_): closed.append(self.id)
-            def run(self, prompt, session_id, **_):
-                if self.id != session_id: raise AssertionError('wrong DSH session')
-                calls.append(session_id)
-                return f'reply {calls.count(session_id)}'
+    def make_controller(self):
+        controller = TaskController(self.root, runtime_factory=lambda *args: SimulatedRuntime(*args, run=self.run_task))
+        self.addCleanup(controller.close)
+        return controller
 
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder, patch.dict('os.environ', {
-            'DSH_PROVIDER': 'deepseek-official', 'DEEPSEEK_API_KEY': 'test-only-key',
-        }):
-            root = Path(folder)
-            controller = TaskController(root, agent_factory=Agent)
-            try:
-                first = controller.conversation()['conversation_id']
-                self.wait(controller, controller.create('first conversation', [100, 10, 101, 11], first))
-                second = controller.new_conversation()['conversation_id']
-                self.wait(controller, controller.create('second conversation', [100, 10, 101, 11], second))
-                items = controller.list_conversations()
-                self.assertEqual({item['id'] for item in items}, {first, second})
-                self.assertEqual(next(item['title'] for item in items if item['id'] == first), 'first conversation')
-                restored = controller.activate_conversation(first)
-                self.assertEqual(restored['conversation_id'], first)
-                self.assertEqual(restored['messages'][0]['content'], 'first conversation')
-                with self.assertRaises(RuntimeError):
-                    controller.create('stale send', [100, 10, 101, 11], second)
-                self.wait(controller, controller.create('continue first', [100, 10, 101, 11], first))
-                self.assertEqual(controller.conversation()['messages'][-1]['content'], 'reply 2')
-                self.assertEqual(opened, [first, second, first])
-                self.assertEqual(closed, [first, second])
-                with self.assertRaises(ValueError): controller.activate_conversation('../secret')
-                with self.assertRaises(FileNotFoundError): controller.activate_conversation('webgis-missing')
-            finally:
-                controller.close()
-            restarted = TaskController(root, agent_factory=Agent)
-            try:
-                self.assertEqual(restarted.conversation()['conversation_id'], first)
-                self.assertEqual(restarted.conversation()['messages'][-1]['content'], 'reply 2')
-                restored = restarted.activate_conversation(second)
-                self.assertEqual(restored['messages'][0]['content'], 'second conversation')
-                self.assertEqual(restored['messages'][-1]['content'], 'reply 1')
-            finally:
-                restarted.close()
+    def run_task(self, prompt, ctx, stop, **_):
+        if 'HOLD' in prompt:
+            self.admitted.set()
+            assert self.release.wait(5)
+        return result('Offline answer', ctx=ctx, reason='aborted' if stop.is_set() else 'completed')
 
-    def test_switching_during_task_keeps_results_in_the_original_conversation(self):
-        arrived, release = threading.Event(), threading.Event()
-        class Agent:
-            def __init__(self, *_): pass
-            def __enter__(self): return self
-            def __exit__(self, *_): pass
-            def run(self, *_, **__): arrived.set(); release.wait(3); return 'done'
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder, patch.dict('os.environ', {
-            'DSH_PROVIDER': 'deepseek-official', 'DEEPSEEK_API_KEY': 'test-only-key',
-        }):
-            controller = TaskController(Path(folder), agent_factory=Agent)
-            try:
-                first = controller.conversation()['conversation_id']
-                job = controller.create('running check', [100, 10, 101, 11])
-                self.assertTrue(arrived.wait(2))
-                second = controller.new_conversation()['conversation_id']
-                listed = {item['id']: item for item in controller.list_conversations()}
-                self.assertEqual(listed[first]['active_task'], job['id'])
-                self.assertEqual(listed[first]['task_status'], 'running')
-                self.assertEqual(listed[first]['latest_task'], {'id': job['id'], 'status': 'running'})
-                self.assertIsNone(listed[second]['task_status'])
-                self.assertNotEqual(first, second)
-                self.assertEqual(controller.conversation()['messages'], [])
-                self.assertEqual(controller.activate_conversation(first)['active_task'], job['id'])
-                controller.activate_conversation(second)
-                release.set()
-                self.wait(controller, controller.get(job['id']))
-                self.assertEqual(controller.conversation()['messages'], [])
-                saved = controller.conversation(first)
-                self.assertIsNone(saved['active_task'])
-                self.assertTrue(all(item['task_status'] is None for item in controller.list_conversations()))
-                self.assertEqual(next(item['latest_task'] for item in controller.list_conversations() if item['id'] == first),
-                                 {'id': job['id'], 'status': 'completed'})
-                self.assertEqual([m['content'] for m in saved['messages']], ['running check', 'done'])
-                self.assertEqual(controller.activate_conversation(first)['messages'], saved['messages'])
-            finally:
-                release.set()
-                controller.close()
+    def test_cookie_owner_is_persistent_and_cannot_be_chosen_by_the_client(self):
+        cid = new_chat(self.a)
+        self.assertEqual(self.b.get(f'{API}/conversations/{cid}').status_code, 404)
+        self.assertEqual(self.b.post(f'{API}/conversations/{cid}/activate').status_code, 404)
+        self.assertEqual(self.b.delete(f'{API}/conversations/{cid}').status_code, 404)
+        self.assertEqual(self.b.post(f'{API}/tasks', json=task_body(cid)).status_code, 404)
+        self.assertEqual(self.a.post(f'{API}/tasks', json=task_body(cid, owner_id='spoofed')).status_code, 422)
+        token = self.a.cookies.get(COOKIE)
+        self.a.cookies.set(COOKIE, token[:-1] + ('0' if token[-1] != '0' else '1'), domain='testserver.local', path='/')
+        self.assertEqual(self.a.get(f'{API}/conversations/{cid}').status_code, 404)
+        self.a.cookies.set(COOKIE, token, domain='testserver.local', path='/')
+        self.assertEqual(self.a.get(f'{API}/conversations/{cid}').status_code, 200)
 
-    def test_stop_running_and_queued_tasks_is_idempotent_and_allows_followup(self):
-        arrived, release = threading.Event(), threading.Event()
-        calls, cancelled = [], []
-        class Agent:
-            def __init__(self, _, __, session_id): self.id = session_id
-            def __enter__(self): return self
-            def __exit__(self, *_): pass
-            def cancel(self): cancelled.append(self.id); release.set()
-            def run(self, *_, on_stream, **__):
-                calls.append(self.id)
-                if len(calls) == 1:
-                    on_stream({'type': 'start', 'run_id': 'run', 'attempt_id': 'a', 'sequence': 1, 'revision': 1})
-                    arrived.set()
-                    release.wait(3)
-                    on_stream({'type': 'delta', 'run_id': 'run', 'attempt_id': 'a', 'sequence': 2,
-                               'revision': 2, 'index': 0, 'text': 'late text'})
-                return 'late answer' if len(calls) == 1 else 'followup answer'
+    def test_overflow_queues_in_order_and_running_cancel_holds_slot_until_cleanup(self):
+        self.addCleanup(self.release.set)
+        self.controller.execution_slots = 1
+        first_chat, second_chat, last_chat = [new_chat(self.a) for _ in range(3)]
+        other_chat = new_chat(self.b)
+        body = task_body(first_chat, 'HOLD first')
+        first = self.a.post(API+'/tasks', json=body)
+        self.assertEqual(first.status_code, 202)
+        task_id = first.json()['id']
+        self.assertTrue(self.admitted.wait(2))
+        self.assertEqual(self.a.post(API+'/tasks', json=body).json()['id'], task_id)
+        self.assertEqual(self.a.post(API+'/tasks', json={**body, 'prompt': 'Different'}).json()['detail']['code'],
+                         'request_conflict')
+        self.assertEqual(self.a.post(API+'/tasks', json=task_body(first_chat)).status_code, 409)
+        waiting_body = task_body(second_chat, 'Second task')
+        second = self.a.post(API+'/tasks', json=waiting_body)
+        last = self.a.post(API+'/tasks', json=task_body(last_chat, 'Last task'))
+        other = self.b.post(API+'/tasks', json=task_body(other_chat, 'Other browser'))
+        self.assertEqual([r.status_code for r in (second, last, other)], [202, 202, 202])
+        sid, lid, oid = [r.json()['id'] for r in (second, last, other)]
+        self.assertEqual(self.a.post(API+'/tasks', json=waiting_body).json()['id'], sid)
+        self.assertEqual(self.a.post(API+'/tasks', json=task_body(second_chat)).status_code, 409)
+        second_feed = self.controller.stream(self.controller.identity.verify(self.a.cookies.get(COOKIE)), sid)
+        self.assertEqual(second_feed.read()[0]['task']['status'], 'queued')
+        self.assertEqual(self.a.get(f'{API}/conversations/{second_chat}').json()['active_task'], sid)
+        with self.controller.store.connect() as db:
+            self.assertEqual(json.loads(self.controller.store.next_queued(db)['receipt'])['id'], sid)
+        self.assertEqual(self.b.get(f'{API}/tasks/{sid}').status_code, 404)
+        self.assertEqual(self.b.get(f'{API}/tasks/{sid}/events').status_code, 404)
+        self.assertEqual(self.b.post(f'{API}/tasks/{sid}/cancel').status_code, 404)
+        self.assertEqual(self.a.delete(f'{API}/conversations/{second_chat}').status_code, 409)
+        self.assertEqual(self.a.post(f'{API}/tasks/{task_id}/cancel').json()['status'], 'cancelling')
+        deadline = time.monotonic() + 2
+        while self.a.get(f'{API}/tasks/{task_id}').json()['cancellation'] != 'accepted' and time.monotonic() < deadline:
+            time.sleep(.01)
+        for job_id in (sid, lid):
+            self.assertEqual(self.a.get(f'{API}/tasks/{job_id}').json()['status'], 'queued')
+        self.assertEqual(len(self.controller.runtime.opens), 1)
+        self.release.set()
+        settled = wait_for_task(self.a, task_id)
+        self.assertEqual(settled['status'], 'cancelled')
+        self.assertEqual(self.a.post(f'{API}/tasks/{task_id}/cancel').json(), settled)
+        finished = [wait_for_task(self.a, sid), wait_for_task(self.a, lid), wait_for_task(self.b, oid)]
+        self.assertTrue(all(job['status'] == 'completed' and job['queue_wait_ms'] > 0 for job in finished))
+        self.assertEqual([job['dispatched_at'] for job in finished], sorted(job['dispatched_at'] for job in finished))
+        self.assertIn('starting', [event.get('patch', {}).get('status') for event in second_feed.read(after=0)])
+        self.assertIn('"status": "cancelled"', self.a.get(f'{API}/tasks/{task_id}/events?after=1').text)
+        self.assertEqual(self.a.delete(f'{API}/conversations/{first_chat}').status_code, 200)
+        self.assertEqual(self.a.get(f'{API}/tasks/{task_id}').status_code, 404)
 
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder, patch.dict('os.environ', {
-            'DSH_PROVIDER': 'deepseek-official', 'DEEPSEEK_API_KEY': 'test-only-key',
-        }):
-            controller = TaskController(Path(folder), agent_factory=Agent)
-            try:
-                first = controller.conversation()['conversation_id']
-                running = controller.create('stop this run', [100, 10, 101, 11])
-                self.assertTrue(arrived.wait(2))
-                with self.assertRaises(RuntimeError): controller.create('duplicate run', [100, 10, 101, 11])
-                second = controller.new_conversation()['conversation_id']
-                queued = controller.create('queued run', [100, 10, 101, 11])
-                self.assertEqual(queued['status'], 'queued')
-                listed = {item['id']: item for item in controller.list_conversations()}
-                self.assertEqual(listed[first]['task_status'], 'running')
-                self.assertEqual(listed[second]['task_status'], 'queued')
-                self.assertEqual(controller.cancel(queued['id'])['status'], 'cancelled')
-                self.assertIsNone(next(item['task_status'] for item in controller.list_conversations() if item['id'] == second))
-                self.assertEqual(controller.cancel(running['id'])['status'], 'cancelled')
-                self.assertEqual(controller.cancel(running['id'])['status'], 'cancelled')
-                followup = controller.create('follow up', [100, 10, 101, 11])
-                self.wait(controller, followup)
-                self.assertEqual(calls, [first, second])
-                self.assertEqual(cancelled, [first])
-                self.assertEqual(controller.get(running['id'])['status'], 'cancelled')
-                stream = controller.streams[running['id']]
-                self.assertTrue(stream.terminal)
-                self.assertIsNone(stream.read()[0]['answer'])
-                stream.update(status='completed', output={'message': 'late overwrite'})
-                self.assertEqual(stream.read()[0]['task']['status'], 'cancelled')
-                first_messages = controller.conversation(first)['messages']
-                self.assertEqual(len(first_messages), 2)
-                self.assertEqual(first_messages[-1]['status'], 'cancelled')
-                self.assertNotIn('late answer', str(first_messages))
-                second_messages = controller.conversation()['messages']
-                self.assertEqual([m.get('status') for m in second_messages if m['role'] == 'assistant'], ['cancelled', 'completed'])
-                completed = controller.get(followup['id'])
-                self.assertEqual(controller.cancel(followup['id']), completed)
-                with self.assertRaises(FileNotFoundError): controller.cancel('missing')
-            finally:
-                release.set()
-                controller.close()
+    def test_cancel_queued_job_without_opening_native_session(self):
+        self.addCleanup(self.release.set)
+        self.controller.execution_slots = 1
+        first = self.a.post(API+'/tasks', json=task_body(new_chat(self.a), 'HOLD first')).json()
+        self.assertTrue(self.admitted.wait(2))
+        cid = new_chat(self.a)
+        body = task_body(cid, 'Cancel this before it starts')
+        queued = self.a.post(API+'/tasks', json=body).json()
+        job_id = queued['id']
+        feed = self.controller.stream(self.controller.identity.verify(self.a.cookies.get(COOKIE)), job_id)
+        self.assertEqual(feed.read()[0]['task']['status'], 'queued')
+        cancelled = self.a.post(f'{API}/tasks/{job_id}/cancel').json()
+        self.assertEqual(cancelled['status'], 'cancelled')
+        self.assertNotIn('dispatched_at', cancelled)
+        self.assertTrue(feed.terminal)
+        self.assertEqual(self.a.post(API+'/tasks', json=body).json(), cancelled)
+        self.assertEqual(self.a.get(f'{API}/conversations/{cid}').json()['active_task'], None)
+        replacement = self.a.post(API+'/tasks', json=task_body(cid, 'Replacement task')).json()
+        self.release.set()
+        self.assertEqual(wait_for_task(self.a, first['id'])['status'], 'completed')
+        self.assertEqual(wait_for_task(self.a, replacement['id'])['status'], 'completed')
+        self.assertEqual(len(self.controller.runtime.opens), 2)
 
-    def test_stop_during_initialization_never_sends_a_prompt(self):
-        initializing, release = threading.Event(), threading.Event()
-        calls = []
-        class Agent:
-            def __init__(self, *_): pass
-            def __enter__(self): initializing.set(); release.wait(3); return self
-            def __exit__(self, *_): pass
-            def cancel(self): release.set()
-            def run(self, *_, **__): calls.append('prompt'); return 'unexpected'
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder, patch.dict('os.environ', {
-            'DSH_PROVIDER': 'deepseek-official', 'DEEPSEEK_API_KEY': 'test-only-key',
-        }):
-            controller = TaskController(Path(folder), agent_factory=Agent)
-            try:
-                job = controller.create('stop startup', [100, 10, 101, 11])
-                self.assertTrue(initializing.wait(2))
-                self.assertEqual(controller.cancel(job['id'])['status'], 'cancelled')
-            finally:
-                release.set()
-                controller.close()
-            self.assertEqual(calls, [])
+    def test_restart_keeps_only_owned_history_and_marks_live_receipts_interrupted(self):
+        cid = new_chat(self.a)
+        receipt = self.a.post(API+'/tasks', json=task_body(cid)).json()
+        settled = wait_for_task(self.a, receipt['id'])
+        token = self.a.cookies.get(COOKIE)
+        # Simulate a restart with a task durable in the queue and a separate in-flight receipt.
+        self.controller.execution_slots = 0
+        pending = self.a.post(API+'/tasks', json=task_body(new_chat(self.a), 'Queued before restart')).json()
+        self.controller.close()
+        with self.controller.store.connect(write=True) as db:
+            self.controller.store.save_task(db, {**settled, 'status': 'starting'})
+        (self.root/'state'/'chat-history.json').write_text(json.dumps({'messages': [{'content': 'legacy'}]}))
+        restarted = self.make_controller()
+        after = client_for(restarted)
+        after.cookies.set(COOKIE, token, domain='testserver.local', path='/')
+        self.assertEqual(after.get(f'{API}/tasks/{receipt["id"]}').json()['status'], 'interrupted')
+        self.assertEqual(after.get(f'{API}/conversations/{cid}').json()['active_task'], None)
+        self.assertNotIn('legacy', after.get(API+'/conversations').text)
+        self.assertEqual(after.get(f'{API}/tasks/{pending["id"]}').json()['status'], 'interrupted')
+        self.assertEqual(restarted.runtime.opens, [])
+        followup = after.post(API+'/tasks', json=task_body(cid, 'Resume previous session')).json()
+        self.assertEqual(wait_for_task(after, followup['id'])['status'], 'completed')
+        self.assertTrue(restarted.runtime.opens[0][1])
+
+    def test_rejects_cross_origin_mutation_and_ignores_spoofed_proxy_scheme(self):
+        forbidden = self.a.post(API+'/conversation/new', headers={'Origin':'http://untrusted.test'})
+        self.assertEqual(forbidden.status_code, 403)
+        self.b.cookies.clear()
+        response = self.b.get(API+'/session', headers={'X-Forwarded-Proto':'https'})
+        cookie = response.headers['set-cookie'].lower()
+        self.assertIn('httponly', cookie)
+        self.assertIn('samesite=lax', cookie)
+        self.assertNotIn('; secure', cookie)
+
+    def test_resident_limit_rotates_after_active_tasks_finish(self):
+        self.addCleanup(self.release.set)
+        self.controller.runtime.resident_limit = 1
+        a1, a2 = [new_chat(self.a) for _ in range(2)]
+        first = self.a.post(API+'/tasks', json=task_body(a1, 'HOLD until rotation')).json()
+        self.assertTrue(self.admitted.wait(2))
+        second = self.a.post(API+'/tasks', json=task_body(a2))
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(self.a.get(f'{API}/tasks/{second.json()["id"]}').json()['status'], 'queued')
+        self.assertEqual(self.controller.runtime.starts, 1)
+        self.release.set()
+        self.assertEqual(wait_for_task(self.a, first['id'])['status'], 'completed')
+        self.assertEqual(wait_for_task(self.a, second.json()['id'])['status'], 'completed')
+        self.assertEqual(self.controller.runtime.starts, 2)
+
+    def test_stop_during_native_open_prevents_prompt_admission(self):
+        opening, continue_open = threading.Event(), threading.Event()
+        native_open = self.controller.runtime.open
+        launched = []
+
+        def open_session(native_id, **kwargs):
+            opening.set()
+            assert continue_open.wait(3)
+            return native_open(native_id, **kwargs)
+
+        self.controller.runtime.open = open_session
+        self.controller.runtime.run = lambda **_: launched.append(True) or result()
+        try:
+            cid = new_chat(self.a)
+            task = self.a.post(API+'/tasks', json=task_body(cid)).json()
+            self.assertTrue(opening.wait(2))
+            response = self.a.post(f'{API}/tasks/{task["id"]}/cancel')
+            self.assertEqual(response.json()['status'], 'cancelling')
+            self.assertEqual(self.a.post(API+'/tasks', json=task_body(cid)).status_code, 409)
+            continue_open.set()
+            self.assertEqual(wait_for_task(self.a, task['id'])['status'], 'cancelled')
+            self.assertEqual(launched, [])
+        finally:
+            continue_open.set()
+
+    def test_application_deadline_cancels_through_the_same_native_bridge(self):
+        self.controller.timeout = 1
+        self.controller.runtime.run = lambda stop, **_: result(reason='aborted') if stop.wait(3) else result()
+        cid = new_chat(self.a)
+        job = self.a.post(API+'/tasks', json=task_body(cid)).json()
+        finished = wait_for_task(self.a, job['id'])
+        self.assertEqual(finished['status'], 'cancelled')
+        self.assertEqual(finished['stop_reason'], 'deadline')
+        self.assertEqual(finished['cancellation'], 'settled')

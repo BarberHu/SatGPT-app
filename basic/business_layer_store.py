@@ -10,22 +10,23 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
 
-_BUSINESS_LAYER_NAMESPACES: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_BUSINESS_LAYER_NAMESPACES: Dict[tuple[str, str, str], Dict[str, Dict[str, Any]]] = {}
 
 
-def _namespace_key(store_namespace: Optional[str], store_key: Optional[str]) -> str:
+def _namespace_key(owner_id: str, store_namespace: Optional[str], store_key: Optional[str]) -> tuple[str, str, str]:
     namespace = str(store_namespace or "business_layer_store").strip() or "business_layer_store"
     key = str(store_key or "default").strip() or "default"
-    return f"{namespace}::{key}"
+    return owner_id, namespace, key
 
 
 def upsert_business_layers(
     *,
+    owner_id: str,
     store_namespace: Optional[str],
     store_key: Optional[str],
     layers: Iterable[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    namespace_key = _namespace_key(store_namespace, store_key)
+    namespace_key = _namespace_key(owner_id, store_namespace, store_key)
     namespace_store = _BUSINESS_LAYER_NAMESPACES.setdefault(namespace_key, {})
 
     saved_layers: List[Dict[str, Any]] = []
@@ -44,10 +45,11 @@ def upsert_business_layers(
 def get_business_layer(
     *,
     layer_id: str,
+    owner_id: str,
     store_namespace: Optional[str],
     store_key: Optional[str],
 ) -> Optional[Dict[str, Any]]:
-    namespace_key = _namespace_key(store_namespace, store_key)
+    namespace_key = _namespace_key(owner_id, store_namespace, store_key)
     layer = _BUSINESS_LAYER_NAMESPACES.get(namespace_key, {}).get(layer_id)
     return deepcopy(layer) if layer else None
 
@@ -55,10 +57,11 @@ def get_business_layer(
 def resolve_business_layers(
     *,
     layer_ids: Iterable[str],
+    owner_id: str,
     store_namespace: Optional[str],
     store_key: Optional[str],
 ) -> List[Dict[str, Any]]:
-    namespace_key = _namespace_key(store_namespace, store_key)
+    namespace_key = _namespace_key(owner_id, store_namespace, store_key)
     namespace_store = _BUSINESS_LAYER_NAMESPACES.get(namespace_key, {})
     resolved: List[Dict[str, Any]] = []
 

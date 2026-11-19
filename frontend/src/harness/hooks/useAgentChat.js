@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chatApi } from '../chatApi';
+import { canStopTask, isActiveTask, isTerminalTask } from '../taskStatus';
 import { emptyStream, receiveStream } from '../streamState';
 import { chatViewModel } from '../chatViewModel';
 import { useConversationActivity } from './useConversationActivity';
@@ -46,7 +47,7 @@ export function useAgentChat({ visible = true } = {}) {
     source.current = stream;
     const epoch = generation.current;
     let state = emptyStream(id);
-    setTask({ id, conversation_id: conversationId.current, status: 'queued' });
+    setTask(previous => previous?.id === id ? previous : { id, conversation_id: conversationId.current, status: 'queued' });
     setAnswer(null);
     setReconnecting(false);
     stream.onopen = () => { if (source.current === stream) setReconnecting(false); };
@@ -58,7 +59,7 @@ export function useAgentChat({ visible = true } = {}) {
         if (!state.task) return;
         setTask(state.task);
         setAnswer(state.answer);
-        if (['completed', 'failed', 'cancelled'].includes(state.task.status)) {
+        if (isTerminalTask(state.task.status)) {
           stream.close();
           source.current = null;
           setReconnecting(false);
@@ -160,7 +161,8 @@ export function useAgentChat({ visible = true } = {}) {
         source.current = null;
         conversationId.current = data.conversation.conversation_id;
         setConversation(data.conversation);
-        setTask(null);
+        if (data.conversation.active_task) watch.current(data.conversation.active_task);
+        else setTask(null);
         setAnswer(null);
         setReconnecting(false);
       }
@@ -175,7 +177,7 @@ export function useAgentChat({ visible = true } = {}) {
   }, [loading, pending, stopping]);
 
   const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null) => {
-    if (deleteRequest.current || action.current || pending || loading || ['queued', 'running'].includes(task?.status)) return false;
+    if (deleteRequest.current || action.current || pending || loading || isActiveTask(task?.status)) return false;
     action.current = true;
     setPending(true);
     setError('');
@@ -202,7 +204,7 @@ export function useAgentChat({ visible = true } = {}) {
   }, [pending, loading, task?.status, load]);
 
   const stop = useCallback(async () => {
-    if (action.current || loading || stopping || !['queued', 'running'].includes(task?.status)) return false;
+    if (action.current || loading || stopping || !canStopTask(task?.status)) return false;
     const epoch = generation.current;
     const id = conversationId.current;
     const signal = request.current?.signal;
@@ -212,11 +214,12 @@ export function useAgentChat({ visible = true } = {}) {
     try {
       const stopped = await chatApi.cancel(task.id, signal);
       if (!alive.current || epoch !== generation.current) return false;
+      setTask(previous => previous?.id === stopped.id && (previous.revision ?? 0) > (stopped.revision ?? 0)
+        ? previous : stopped);
       // The response also completes Stop if the event stream is disconnected.
-      if (['completed', 'failed', 'cancelled'].includes(stopped.status)) {
+      if (isTerminalTask(stopped.status)) {
         source.current?.close();
         source.current = null;
-        setTask(stopped);
         setAnswer(null);
         setReconnecting(false);
         await load(epoch, signal, id);
@@ -241,7 +244,7 @@ export function useAgentChat({ visible = true } = {}) {
       active_task: view.busy ? task.id : null, task_status: view.busy ? task.status : null,
       latest_task: { id: task.id, status: task.status },
     } : item), [conversations, conversation.conversation_id, task, view.busy]);
-  const hasActiveTasks = sidebarConversations.some(item => ['queued', 'running'].includes(item.task_status));
+  const hasActiveTasks = sidebarConversations.some(item => isActiveTask(item.task_status));
   useEffect(() => {
     if (!hasActiveTasks) return undefined;
     let disposed = false;

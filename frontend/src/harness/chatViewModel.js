@@ -1,3 +1,4 @@
+import { isActiveTask, isTerminalTask } from './taskStatus.js';
 /** UI domain objects. The array order is the event order, never a type/time sort. */
 import { messageLayerBounds } from './map/viewState';
 
@@ -32,9 +33,9 @@ export function chatViewModel(messages, task, answer) {
     layers: (message.layers || []).map((layer, index) => ({ ...layer, id: `${message.job_id}-${index}`,
       bounds: messageLayerBounds(message, layer) })),
   }));
-  const busy = Boolean(task && ['queued', 'running'].includes(task.status));
+  const busy = Boolean(task && isActiveTask(task.status));
   const settled = messages.some(item => item.role === 'assistant' && item.job_id === task?.id);
-  if (task && !settled && (busy || ['completed', 'failed', 'cancelled'].includes(task.status))) {
+  if (task && !settled && (busy || isTerminalTask(task.status))) {
     items.push({ id: `task-${task.id}`, role: 'assistant',
       ...presentRun(task, answer, busy, task.status === 'failed' ? task.error : task.output?.message || ''),
       streaming: busy && answer?.status === 'streaming', pending: busy,

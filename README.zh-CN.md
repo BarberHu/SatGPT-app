@@ -170,7 +170,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/harness/health
 Invoke-RestMethod http://127.0.0.1:3000/readyz
 ```
 
-Vite 和生产网关均只代理到统一后端。`/readyz` 检查两模块本地生命周期是否完成，任一未完成返回 503；`/health` 保留 Basic 兼容字段并增加 Harness 字段及 `basic`、`harness` 独立明细。即使 GEE 不可用，本地组件仍可就绪；模型认证保持 `not_checked`，Basic 的 `gee_initialized` 单独报告 GEE 初始化结果。Harness 的 SDK 和工具进程在任务中按需启动，健康检查不声称它们已完成外部认证。
+Vite 和生产网关均只代理到统一后端。`/readyz` 检查两模块本地生命周期是否完成，任一未完成返回 503；`/health` 保留 Basic 兼容字段并增加 Harness 字段及 `basic`、`harness` 独立明细。即使 GEE 不可用，本地组件仍可就绪；模型认证保持 `not_checked`，Basic 的 `gee_initialized` 单独报告 GEE 初始化结果。Harness 在后端启动时初始化共享 SDK runtime，GEE worker 在收到工具调用后按需启动。会话归属、并发和停止语义见 [Harness 多用户运行说明](docs/HARNESS_MULTIUSER.md)。
 
 | 现象 | 检查内容 |
 | --- | --- |

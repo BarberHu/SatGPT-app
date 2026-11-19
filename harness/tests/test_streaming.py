@@ -11,6 +11,7 @@ from harness.app.stream_bridge import StreamBridge
 from harness.app.task_stream import TaskStream
 from harness.app.trace import add_harness_event
 from harness.app.controller import TaskController
+from harness.tests.runtime_fixture import SimulatedRuntime, client_for, new_chat, result, task_body, wait_for_task
 
 
 def frame(kind, attempt='a', sequence=1, revision=1, **extra):
@@ -109,66 +110,64 @@ class StreamTests(unittest.TestCase):
         self.assertEqual(feed.read()[0]['answer']['reasoning'], '')
 
     def test_loopback_auth_and_run_binding(self):
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             bridge = StreamBridge(Path(folder))
-            received = []
+            a, b = [], []
             try:
-                bridge.bind('session', received.append)
+                first = {'session_id':'a', 'run_id':'one'}
+                second = {'session_id':'b', 'run_id':'two'}
+                drained = bridge.bind(first, a.append).drained
+                bridge.bind(second, b.append)
                 address = bridge.environment()['SATGPT_STREAM_ENDPOINT']
                 def post(events, token):
                     request = urllib.request.Request(address, data=json.dumps(events).encode(),
                         headers={'Authorization': f'Bearer {token}'}, method='POST')
-                    # Explicitly ignore ambient proxies for this local channel.
                     return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=2)
                 with self.assertRaises(urllib.error.HTTPError) as caught:
                     post([], 'wrong')
                 self.assertEqual(caught.exception.code, 403)
-                with post([{'session_id': 'other', 'run_id': bridge.binding['run_id']}], bridge.token): pass
-                self.assertEqual(received, [])
-                event = {**bridge.binding, 'type': 'drained'}
-                with post([event], bridge.token): pass
-                self.assertTrue(bridge.drained.is_set())
-                self.assertEqual(received, [event])
-                bridge.unbind()
-                with post([event], bridge.token): pass
-                self.assertEqual(len(received), 1)
+                with post([first, second, {**first, 'run_id':'stale'}, {**first, 'type':'drained'}], bridge.token):
+                    pass
+                self.assertTrue(drained.is_set())
+                self.assertEqual(a, [first])
+                self.assertEqual(b, [second])
+                bridge.unbind('a', 'one')
+                with post([first, second], bridge.token):
+                    pass
+                self.assertEqual(a, [first])
+                self.assertEqual(b, [second, second])
             finally:
                 bridge.close()
 
     def test_controller_exposes_draft_during_run_but_persists_only_final(self):
         arrived, release = threading.Event(), threading.Event()
 
-        class LiveAgent:
-            def __init__(self, *_): pass
-            def __enter__(self): return self
-            def __exit__(self, *_): pass
-            def run(self, prompt, session_id, on_event, on_stream):
-                on_stream(frame('start'))
-                on_stream(frame('delta', sequence=2, revision=2, index=0, text='live prefix'))
-                arrived.set()
-                if not release.wait(3): raise TimeoutError('test did not release model')
-                return 'authoritative final'
+        def live(frame=frame, **kwargs):
+            send = kwargs['deliver']
+            send(frame('start'))
+            send(frame('delta', sequence=2, revision=2, index=0, text='live prefix'))
+            arrived.set()
+            assert release.wait(3)
+            return result('authoritative final')
 
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as folder, patch.dict('os.environ', {
-            'DSH_PROVIDER': 'deepseek-official', 'DEEPSEEK_API_KEY': 'test-only-key',
-        }):
-            controller = TaskController(Path(folder), agent_factory=LiveAgent)
+        with tempfile.TemporaryDirectory() as folder:
+            controller = TaskController(Path(folder), runtime_factory=lambda *a: SimulatedRuntime(
+                *a, run=lambda frame, **_: live(deliver=frame)))
             try:
-                job = controller.create('stream check', [100, 10, 101, 11])
+                client = client_for(controller)
+                cid = new_chat(client)
+                job = client.post('/api/harness/tasks', json=task_body(cid)).json()
                 self.assertTrue(arrived.wait(2))
-                self.assertEqual(controller.streams[job['id']].read()[0]['answer']['text'], 'live prefix')
-                self.assertEqual([m['role'] for m in controller.conversation()['messages']], ['user'])
-                self.assertNotIn('live prefix', controller.chat_file.read_text(encoding='utf-8'))
+                owner = controller.identity.verify(client.cookies.get('satgpt_browser'))
+                self.assertEqual(controller.stream(owner, job['id']).read()[0]['answer']['text'], 'live prefix')
+                history = client.get(f'/api/harness/conversations/{cid}').json()['messages']
+                self.assertEqual([item['role'] for item in history], ['user'])
                 release.set()
-                controller.pool.shutdown(wait=True)
-                self.assertEqual(controller.get(job['id'])['status'], 'completed')
-                self.assertIsNone(controller.streams[job['id']].read()[0]['answer'])
-                history = controller.conversation()['messages']
-                self.assertEqual([m['content'] for m in history if m['role'] == 'assistant'], ['authoritative final'])
+                self.assertEqual(wait_for_task(client, job['id'])['status'], 'completed')
+                self.assertIsNone(controller.stream(owner, job['id']).read()[0]['answer'])
+                history = client.get(f'/api/harness/conversations/{cid}').json()['messages']
+                self.assertEqual([item['content'] for item in history if item['role'] == 'assistant'],
+                                 ['authoritative final'])
             finally:
                 release.set()
                 controller.close()
-
-
-if __name__ == '__main__':
-    unittest.main()

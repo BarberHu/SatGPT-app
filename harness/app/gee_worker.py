@@ -10,10 +10,11 @@ import ast
 import builtins
 import json
 import math
-import os
+import re
 import sys
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.request import urlopen
 
 
@@ -24,9 +25,21 @@ SAFE_BUILTINS = {"int": int, "float": float, "str": str, "bool": bool,
                  "enumerate": enumerate, "zip": zip, "any": any, "all": all}
 DENIED_NAMES = {"open", "exec", "eval", "compile", "globals", "locals", "vars",
                 "getattr", "setattr", "delattr", "__import__", "breakpoint"}
-DENIED_EE_ATTRIBUTES = {"data", "batch", "Export", "ServiceAccountCredentials"}
+DENIED_EE_ATTRIBUTES = {"data", "batch", "Export", "ServiceAccountCredentials", "Initialize",
+                        "Authenticate", "Reset", "initialize", "reset", "importApi", "clearApi"}
+EE_TYPES = ("Algorithms", "Array", "Classifier", "Clusterer", "Date", "DateRange", "Dictionary",
+            "ErrorMargin", "Feature", "FeatureCollection", "Filter", "Geometry", "Image", "ImageCollection",
+            "Join", "Kernel", "List", "Number", "Projection", "Reducer", "String", "Terrain")
+STATEMENT_HINTS = {
+    ast.Import: "Remove the import. ee is already available.",
+    ast.ImportFrom: "Remove the import. ee is already available.",
+    ast.FunctionDef: "Use an inline lambda for a simple Earth Engine .map() callback.",
+    ast.AsyncFunctionDef: "Use an inline lambda for a simple Earth Engine .map() callback.",
+}
 _SESSION = None
 _PROJECT = None
+# Isolated Python startup does not add the worker directory to the import path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def earth_engine(project: str):
@@ -60,20 +73,24 @@ def checked_code(code: str) -> object:
         if isinstance(node, (ast.Import, ast.ImportFrom, ast.ClassDef, ast.FunctionDef,
                              ast.AsyncFunctionDef, ast.With, ast.AsyncWith, ast.Try,
                              ast.Raise, ast.Global, ast.Nonlocal, ast.Delete)):
-            raise ValueError(f"Unsupported Python statement: {type(node).__name__} (line {node.lineno})")
+            hint = STATEMENT_HINTS.get(type(node), "")
+            raise ValueError(f"Unsupported Python statement: {type(node).__name__} (line {node.lineno}). {hint}".rstrip())
         if isinstance(node, ast.Name) and (node.id.startswith("_") or node.id in DENIED_NAMES):
             raise ValueError(f"Name is not allowed: {node.id} (line {node.lineno})")
         if isinstance(node, ast.Attribute) and (
             node.attr.startswith("_") or node.attr in DENIED_EE_ATTRIBUTES
         ):
             raise ValueError(f"Attribute access is not allowed: {node.attr} (line {node.lineno})")
+        if isinstance(node, ast.Attribute) and not isinstance(node.ctx, ast.Load):
+            raise ValueError(f"Attribute mutation is not allowed (line {node.lineno})")
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and hasattr(builtins, node.func.id) and node.func.id not in SAFE_BUILTINS):
-            hint = "; return the output through result" if node.func.id == "print" else ""
+            hint = ". Assign the output to result." if node.func.id == "print" else ""
             raise ValueError(f"Python builtin {node.func.id} is unavailable in this executor (line {node.lineno}){hint}")
     if not any(isinstance(node, ast.Name) and node.id == "result" and isinstance(node.ctx, ast.Store)
                for node in ast.walk(tree)):
-        raise ValueError("Code must assign a value to result")
+        raise ValueError("Code must assign a value to result. Write result = stats or result = {...}. "
+                         "A standalone final expression is not returned.")
     return compile(tree, "<gee-code>", "exec")
 
 
@@ -96,11 +113,11 @@ def code_warnings(code: str) -> list[str]:
 
 
 def run_code(ee, code: str, analysis_context=None):
-    scope = {"ee": ee, "__builtins__": SAFE_BUILTINS}
+    available = {name: getattr(ee, name) for name in EE_TYPES if hasattr(ee, name)}
+    scope = {"ee": SimpleNamespace(**available), "__builtins__": SAFE_BUILTINS.copy()}
     if analysis_context is not None:
         # A fresh scope on every execution, including analysis_code. Never cache
         # mutable task geometry in this persistent worker's module globals.
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
         from analysis_region import validate_analysis_region
         geometry = validate_analysis_region(analysis_context.get('analysis_region'))
         if geometry is None:
@@ -135,11 +152,11 @@ def jsonable(value):
 def execute(payload: dict) -> dict:
     operation = payload.get("operation")
     if operation == "catalog":
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
         from gee_catalog import search
 
+        cache_dir = Path(payload['catalog_dir']) if payload.get('catalog_dir') else None
         return search(payload.get("query", ""), payload.get("limit", 20),
-                      payload.get("type"), bool(payload.get("refresh")))
+                      payload.get("type"), bool(payload.get("refresh")), cache_dir=cache_dir)
     if operation == "check":
         code = payload.get("code")
         try:
@@ -186,12 +203,9 @@ def execute(payload: dict) -> dict:
             png = response.read(12_000_001)
         if len(png) > 12_000_000 or not png.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("The GEE preview is not a valid PNG or exceeds 12 MB")
-        preview_dir = Path(__file__).resolve().parent.parent / "state" / "previews"
-        preview_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{uuid.uuid4().hex}.png"
-        (preview_dir / filename).write_bytes(png)
+        preview_url = save_png(png, payload)
         return {"preview": {"name": str(payload.get("name") or "GEE image preview")[:100],
-                            "url": f"/api/previews/{filename}", "bytes": len(png),
+                            "url": preview_url, "bytes": len(png),
                             "width": int.from_bytes(png[16:20], "big"),
                             "height": int.from_bytes(png[20:24], "big")}}
     image = run_code(ee, payload["layer_code"], payload.get('analysis_context'))
@@ -210,7 +224,6 @@ def execute(payload: dict) -> dict:
         }
     }
     # -I workers resolve local helpers explicitly, independent of startup cwd.
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from layer_details import layer_metadata, legend_labels
     output['layer']['metadata'] = layer_metadata(payload.get('metadata'))
     labels = legend_labels(payload.get('legend'), options)
@@ -220,7 +233,7 @@ def execute(payload: dict) -> dict:
     if bounds is not None:
         output['layer']['bounds'] = bounds
         try:
-            output['layer']['thumbnail'] = save_thumbnail(image, options, bounds, ee)
+            output['layer']['thumbnail'] = save_thumbnail(image, options, bounds, ee, payload)
         except Exception:
             # A failed optional preview must not discard an already-created map.
             output['layer']['thumbnail_status'] = 'unavailable'
@@ -232,7 +245,17 @@ def execute(payload: dict) -> dict:
     return output
 
 
-def save_thumbnail(image, visualization, bounds, ee):
+def save_png(png, payload):
+    directory = Path(payload['artifact_dir'])
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = f'{uuid.uuid4().hex}.png'
+    temporary = directory / (filename + '.tmp')
+    temporary.write_bytes(png)
+    temporary.replace(directory / filename)
+    return f"{payload['artifact_url']}/{filename}"
+
+
+def save_thumbnail(image, visualization, bounds, ee, payload):
     if (not isinstance(bounds, list) or len(bounds) != 4
             or not all(isinstance(v, (int, float)) for v in bounds)
             or not (-180 <= bounds[0] < bounds[2] <= 180 and -85 <= bounds[1] < bounds[3] <= 85)):
@@ -243,11 +266,7 @@ def save_thumbnail(image, visualization, bounds, ee):
         png = response.read(4_000_001)
     if len(png) > 4_000_000 or len(png) < 24 or not png.startswith(b'\x89PNG\r\n\x1a\n'):
         raise ValueError('Invalid layer thumbnail PNG')
-    directory = Path(__file__).resolve().parent.parent / 'state' / 'previews'
-    directory.mkdir(parents=True, exist_ok=True)
-    filename = f'{uuid.uuid4().hex}.png'
-    (directory / filename).write_bytes(png)
-    return {'url': f'/api/previews/{filename}', 'width': int.from_bytes(png[16:20], 'big'),
+    return {'url': save_png(png, payload), 'width': int.from_bytes(png[16:20], 'big'),
             'height': int.from_bytes(png[20:24], 'big')}
 
 
@@ -259,8 +278,12 @@ def main() -> None:
             result = {"id": request["id"], "ok": True, "data": execute(request["payload"])}
         except Exception as exc:
             result = {"id": request.get("id") if isinstance(request, dict) else None,
-                      "ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        sys.stdout.write(json.dumps(result, ensure_ascii=False, allow_nan=False) + "\n")
+                      "ok": False, "error": re.sub(r"https?://\S+", "[service URL]", f"{type(exc).__name__}: {exc}")[:1200]}
+        try:
+            line = json.dumps(result, ensure_ascii=False, allow_nan=False)
+        except (ValueError, TypeError):
+            line = json.dumps({'id': result['id'], 'ok': False, 'error': 'GEE result is not JSON serializable'})
+        sys.stdout.write(line + "\n")
         sys.stdout.flush()
 
 

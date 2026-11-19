@@ -1,3 +1,4 @@
+import { isActiveTask } from '../taskStatus';
 import React, { useRef, useState } from 'react';
 import { ChevronsLeft, Loader2, Plus } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -51,18 +52,19 @@ export default function ConversationSidebar({ conversations, currentId, disabled
       {groupedConversations(conversations).map(group => <section key={group.label || 'undated'}>
       {group.label ? <h3 className="agent-history-label">{group.label}</h3> : null}
       {group.rows.map(item => {
-        const running = item.task_status === 'running';
-        const queued = item.task_status === 'queued';
+        const active = isActiveTask(item.task_status);
+        const statusLabel = { queued: 'Queued', starting: 'Starting', running: 'Running',
+          cancelling: 'Stopping', cleaning: 'Finishing' }[item.task_status];
         return <div key={item.id} className="agent-conversation-row">
         <button type="button" disabled={disabled && item.id !== currentId}
         className={`agent-conversation ${item.id === currentId ? 'is-current' : ''}`}
         aria-current={item.id === currentId ? 'page' : undefined} onClick={() => onSelect(item.id)} title={item.title}>
         <span className="agent-conversation-title">{item.title}</span>
-        {running || queued ? <span className="agent-conversation-status" role="status" aria-label={running ? 'Running' : 'Queued'} title={running ? 'Running' : 'Queued'}>
+        {active ? <span className="agent-conversation-status" role="status" aria-label={statusLabel} title={statusLabel}>
           <Loader2 size={14} className="agent-spin" aria-hidden="true" />
         </span> : item.unread && item.id !== currentId ? <span className="agent-conversation-unread" role="status" aria-label="Unread response" title="New response" /> : null}
         </button>
-        {onDelete ? <ConversationActions title={item.title} disabled={disabled || running || queued}
+        {onDelete ? <ConversationActions title={item.title} disabled={disabled || active}
           onDelete={trigger => { deleteButton.current = trigger; setFailed(false); setSelected(item); }} /> : null}
         </div>;
       })}</section>)}
