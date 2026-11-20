@@ -8,7 +8,7 @@ const { execFile, spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { test } = require('node:test');
 const { promisify } = require('node:util');
-const { gunzipSync } = require('node:zlib');
+const { gunzipSync, gzipSync } = require('node:zlib');
 
 const frontend = path.resolve(__dirname, '../../frontend');
 const gridAsset = 'assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson';
@@ -154,22 +154,26 @@ test('production gateway preserves Basic and Harness contracts', { timeout: 2000
     assert.equal((await response.json()).url, '/api/previews/fixture.png');
   });
 
-  await t.test('serves the built frontend', async () => {
+  await t.test('serves the built frontend with direct script and stylesheet references', async () => {
     const response = await fetch(base);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /text\/html/);
-    assert.match(await response.text(), /<div id="root">/);
+    const html = await response.text();
+    assert.match(html, /<div id="root">/);
+    assert.match(html, /<script\b[^>]*type="module"[^>]*src="\/static\/[^"]+\.js"/);
+    assert.match(html, /<link\b[^>]*rel="stylesheet"[^>]*href="\/static\/[^"]+\.css"/);
   });
 
   await t.test('serves the built grid gzip and honors the requested encoding', async t => {
     const original = await readFile(path.join(frontend, 'public', gridAsset));
+    const compact = await readFile(path.join(frontend, 'build', gridAsset));
     const compressed = await readFile(path.join(frontend, 'build', `${gridAsset}.gz`));
     const url = `${base}/${gridAsset}`;
     for (const [encoding, useGzip] of [
       ['gzip', true], ['br, GZIP; q=0.5', true], ['identity', false], [undefined, false], ['br', false],
       ['br, gzip;q=0', false], ['gzip;q=0.000, *;q=1', false],
     ]) {
-      const expected = useGzip ? compressed : original;
+      const expected = useGzip ? compressed : compact;
       const response = await getRawResponse(url, { encoding });
       assert.equal(response.status, 200, encoding);
       assert.equal(response.headers['content-type'], 'application/geo+json', encoding);
@@ -191,9 +195,19 @@ test('production gateway preserves Basic and Harness contracts', { timeout: 2000
       }
     }
 
-    assert.ok(gunzipSync(compressed).equals(original), 'decompressed GeoJSON must match the source asset');
-    assert.ok(compressed.length <= original.length * 0.05, 'gzip must save at least 95% of the grid payload');
-    t.diagnostic(`GeoJSON HTTP body: ${original.length} bytes uncompressed, ${compressed.length} bytes gzip`);
+    assert.deepEqual(gunzipSync(compressed), compact);
+    const originalFeatures = JSON.parse(original).features;
+    const compactFeatures = JSON.parse(compact).features;
+    assert.equal(compactFeatures.length, originalFeatures.length);
+    for (const [index, feature] of compactFeatures.entries()) {
+      const { type, id, geometry, properties } = originalFeatures[index];
+      assert.equal(id, properties.FID);
+      assert.deepEqual(feature, { type, properties: { FID: properties.FID }, geometry });
+    }
+    assert.ok(compact.length <= original.length * 0.4, 'compact GeoJSON must reduce decoded bytes by at least 60%');
+    const previousGzip = gzipSync(original, { level: 6 });
+    assert.ok(compressed.length <= previousGzip.length * 0.75, 'compact GeoJSON must reduce gzip bytes by at least 25%');
+    t.diagnostic(`GeoJSON HTTP body: ${compact.length} bytes uncompressed, ${compressed.length} bytes gzip`);
   });
 
   await t.test('revalidates both grid encodings with zero-body GET and HEAD responses', async t => {

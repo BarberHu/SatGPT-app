@@ -82,6 +82,7 @@
 .harness-app .agent-assistant-label small { color: var(--satgpt-ui-subtle); font-size: 10px; font-weight: 400; }
 .harness-app .agent-assistant-label .agent-failure { color: #a35345; }
 .harness-app .agent-markdown { font-size: 14px; line-height: 1.9; overflow-wrap: anywhere; color: var(--satgpt-ui-text); }
+.harness-app .agent-markdown-plain { white-space: pre-wrap; }
 .harness-app .agent-markdown :where(p,ul,ol,blockquote,table,pre) { margin: 0 0 1em; }
 .harness-app .agent-markdown :where(h1,h2,h3,h4) { color: var(--satgpt-ui-heading); font-weight: 600; line-height: 1.5; margin: 1.4em 0 .6em; }
 .harness-app .agent-markdown h1 { font-size: 1.35em; }.harness-app .agent-markdown h2 { font-size: 1.18em; }.harness-app .agent-markdown h3 { font-size: 1.06em; }

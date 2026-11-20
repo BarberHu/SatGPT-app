@@ -8,6 +8,15 @@ const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(frontendRoot, '..');
 const config = createRequire(path.join(frontendRoot, 'vite.config.mjs'))('./projectEnv.cjs');
 
+const productionEntry = {
+  name: 'satgpt-production-entry',
+  apply: 'build',
+  transformIndexHtml: {
+    order: 'pre',
+    handler: html => html.replace('src="/src/index.jsx"', 'src="/src/appEntry.jsx"'),
+  },
+};
+
 function getPort(env, name, fallback) {
   return config.port({ [name]: String(fallback), ...env }, name);
 }
@@ -36,7 +45,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: frontendRoot,
-    plugins: [react()],
+    plugins: [react(), productionEntry],
     envDir: false,
     envPrefix: [],
     define: config.publicConfig(env),

@@ -1,6 +1,6 @@
 import React from 'react';
 import AreaControls from '../../aoi/AreaControls';
-import Markdown from './Markdown';
+import DeferredMarkdown from './DeferredMarkdown';
 import RunTimeline from './RunTimeline';
 import ResultCards from './ResultCards';
 
@@ -16,7 +16,7 @@ export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
           <img className="agent-assistant-avatar" src="/assets/images/satgpt-avatar.png" width="22" height="22" alt="" aria-hidden="true" />
           <span>SatGPT</span>
         </>} />
-      {message.text ? <Markdown text={message.text} streaming={message.streaming} /> : null}
+      {message.text ? <DeferredMarkdown text={message.text} streaming={message.streaming} /> : null}
       <ResultCards message={message} onFocusLayer={onFocusLayer} />
     </>}
   </article>;

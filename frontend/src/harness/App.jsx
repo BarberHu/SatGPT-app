@@ -10,6 +10,7 @@ import { regionKey, selectionKey } from './map/regionSelection';
 import ConversationSidebar from './components/ConversationSidebar';
 import MessageList from './components/MessageList';
 import Composer from './components/Composer';
+import { preloadMarkdown } from './components/DeferredMarkdown';
 import MapWorkspace from './components/MapWorkspace';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
@@ -112,7 +113,9 @@ export default function HarnessApp({ active = true }) {
     const geometry = region.snapshot();
     const area = geometry ? getBoundsFromGeometry(geometry) : null;
     const bounds = area ? [area.west, area.south, area.east, area.north] : map.bounds();
-    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata(), region.attach, reasoningEffort)) setPrompt('');
+    if (!text || !bounds) return;
+    preloadMarkdown();
+    if (await chat.send(text, bounds, geometry, region.metadata(), region.attach, reasoningEffort)) setPrompt('');
   };
   const editRegion = () => {
     if (region.begin() && narrow) setMobileView('map');

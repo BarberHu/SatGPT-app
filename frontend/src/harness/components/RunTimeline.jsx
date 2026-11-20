@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Brain, Check, ChevronRight, CircleAlert, Loader2, Square, Wrench } from 'lucide-react';
-import Markdown from './Markdown';
+import DeferredMarkdown from './DeferredMarkdown';
 import CodeBlock from './CodeBlock';
 
 const labels = { running: 'Running', done: 'Done', error: 'Failed', unknown: 'No result received' };
@@ -17,7 +17,7 @@ function Fold({ pending, className, label, children, ariaLabel }) {
 
 function TimelineRow({ row }) {
   if (row.kind === 'text') return <div className="agent-phase-message" data-event-id={row.id}>
-    <Markdown text={row.text} streaming={row.streaming} />
+    <DeferredMarkdown text={row.text} streaming={row.streaming} />
   </div>;
   const tool = row.kind === 'tool';
   const Icon = tool ? (row.status === 'error' ? CircleAlert : Wrench) : row.kind === 'reasoning' ? Brain : Loader2;
