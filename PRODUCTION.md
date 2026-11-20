@@ -10,7 +10,11 @@
 .\scripts\windows\satgpt.bat deploy
 ```
 
-默认访问 http://127.0.0.1:3000/。统一后端与前端端口分别由 `AGENT_PORT`（默认 8000）、`FRONTEND_PORT`（默认 3000）配置。`satgpt_config.py backend` 是唯一默认 API 启动入口，`AGENT_WORKERS=1` 为强制要求；也支持从任意目录用脚本绝对路径启动。Node 网关和 Vite 使用同一 `frontend/projectEnv.cjs` 加载根目录配置。
+Windows 启动脚本将生产网关固定在 `3000`，默认访问 http://127.0.0.1:3000/。生产后端使用 `AGENT_PORT`（默认 `8000`）。直接启动 Node 网关或 Vite 时，端口仍由 `FRONTEND_PORT` 配置。
+
+Windows 的 `dev` 命令把本机 Vite（`3001`）连到独立的本机开发后端（`8001`）。开发后端使用 `http://127.0.0.1:3001` 校验浏览器来源，并使用 `harness/state/dev-multiuser/` 保存 Harness 运行状态。开发后端已启动时，可用 `.\scripts\windows\satgpt.bat dev --frontend-only` 单独启动 Vite。
+
+`satgpt_config.py backend` 是统一 API 启动入口，每个后端进程要求 `AGENT_WORKERS=1`。Windows 启动脚本支持从任意目录按绝对路径调用。Node 网关和 Vite 使用同一个 `frontend/projectEnv.cjs` 加载根目录配置。
 
 ## Docker Compose
 

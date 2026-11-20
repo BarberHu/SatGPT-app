@@ -100,14 +100,18 @@ For optional reasoning, output-length, port, and network settings, see [`.env.ex
 
 Setup creates or reuses the single `harness/.venv/` environment from the single root `requirements.txt`, installs frontend dependencies, and copies the configuration template if `.env` does not exist. Development mode supports frontend hot updates. Configuration validation checks local settings; it does not prove successful model or GEE authentication.
 
-Open **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)**.
+Open **[http://127.0.0.1:3001/](http://127.0.0.1:3001/)**.
 
 | Service | Default address |
 | --- | --- |
-| Frontend | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
-| Unified Basic + Harness API | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
+| Vite development frontend | [http://127.0.0.1:3001](http://127.0.0.1:3001) |
+| Development Basic + Harness API | [http://127.0.0.1:8001](http://127.0.0.1:8001) |
+| Production gateway | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
+| Production Basic + Harness API | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
 
-`FRONTEND_PORT` and `AGENT_PORT` come from the root `.env` and must differ. `HARNESS_PORT` and `HARNESS_HOST` are ignored; remove them from existing configuration. Keep `AGENT_WORKERS=1`. Development and production use the same configured ports. Stop the existing services before switching startup modes. To stop the Windows services, press `Ctrl+C` in each of the two service windows, then close the windows.
+The Windows `dev` launcher starts Vite on port `3001` and its own backend on `8001`, both on `127.0.0.1`. Open `http://127.0.0.1:3001/` for Harness sessions. Development sessions and the Harness runtime use `harness/state/dev-multiuser/`.
+
+Use `.\scripts\windows\satgpt.bat dev --frontend-only` to start Vite when the development backend is already running on `8001`. Production uses gateway port `3000` and the `AGENT_PORT` setting (default `8000`). Keep `AGENT_WORKERS=1` for each backend and remove the legacy `HARNESS_PORT` and `HARNESS_HOST` settings. To stop a Windows service, press `Ctrl+C` in its service window.
 
 ## Using SatGPT
 
@@ -116,7 +120,7 @@ Open **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)**.
 3. Use conversation history to open another chat or start a new one during a run. Returning to a running chat restores its task subscription. New tasks remain subject to the shared execution queue.
 4. Use the square **Stop response** button to cancel a running or queued task. The task is recorded as **Stopped**, its runtime is closed when applicable, and you can send a follow-up. Stopping does not require text in the input or an available map.
 5. Inspect result layer cards for thumbnails, observation dates, sources, and legends. Toggle visibility, inspect details, locate a layer, or remove it. Unknown dates are marked explicitly; a failed thumbnail does not prevent use of the interactive layer.
-6. Request a chart when useful. Valid lowercase `echarts` JSON blocks render after the answer finishes; chart options remain available for copying, and charts can be exported as PNG. Invalid options show their source and an error. The development-only preview is available at [http://127.0.0.1:3000/?review=echarts](http://127.0.0.1:3000/?review=echarts).
+6. Request a chart when useful. Valid lowercase `echarts` JSON blocks render after the answer finishes; chart options remain available for copying, and charts can be exported as PNG. Invalid options show their source and an error. The development-only preview is available at [http://127.0.0.1:3001/?review=echarts](http://127.0.0.1:3001/?review=echarts).
 7. Use the screenshot button to save the current shared map view once the map is ready. On narrow screens, open the Agent map view first.
 
 Mode switches preserve the map and camera without reloading the basemap or automatically locating a result. Agent layers are isolated by conversation. The scale bar follows map movement, zoom, and panel resizing, switching between meters and kilometers.
@@ -167,10 +171,12 @@ The application currently targets trusted users. Public hosting requires authent
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
 Invoke-RestMethod http://127.0.0.1:8000/api/harness/health
+Invoke-RestMethod http://127.0.0.1:8001/readyz
+Invoke-RestMethod http://127.0.0.1:3001/readyz
 Invoke-RestMethod http://127.0.0.1:3000/readyz
 ```
 
-Both Vite and the production gateway use one backend upstream. `/readyz` checks both modules' local initialization; it returns 503 if either lifecycle is incomplete. `/health` retains Basic fields, adds Harness fields and separate `basic`/`harness` details. Readiness can be true while GEE is unavailable: external model authentication remains `not_checked`, and `gee_initialized` reports the result of Basic's GEE initialization. Harness initializes its SDK/tool process lazily on a task; its health does not claim those external calls succeeded.
+Vite and the production gateway each use one backend upstream. `/readyz` checks both modules' local initialization; it returns 503 if either lifecycle is incomplete. `/health` retains Basic fields, adds Harness fields and separate `basic`/`harness` details. Readiness can be true while GEE is unavailable: external model authentication remains `not_checked`, and `gee_initialized` reports the result of Basic's GEE initialization. Harness initializes its SDK/tool process lazily on a task; its health does not claim those external calls succeeded.
 
 | Symptom | Check |
 | --- | --- |

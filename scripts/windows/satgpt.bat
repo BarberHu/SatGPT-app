@@ -19,7 +19,7 @@ call "%SCRIPT_DIR%setup_windows.bat"
 exit /b %ERRORLEVEL%
 
 :dev
-call "%SCRIPT_DIR%start_windows.bat"
+call "%SCRIPT_DIR%start_windows.bat" "%~2"
 exit /b %ERRORLEVEL%
 
 :build
@@ -37,13 +37,14 @@ call "%SCRIPT_DIR%start_production.bat"
 exit /b %ERRORLEVEL%
 
 :help
-echo Usage: scripts\windows\satgpt.bat COMMAND
+echo Usage: scripts\windows\satgpt.bat COMMAND [OPTIONS]
 echo.
-echo   setup   Install dependencies and create .env
-echo   dev     Start the development services
-echo   build   Build production assets
-echo   prod    Start an existing production build
-echo   deploy  Build and start production
+echo   setup                Install dependencies and create .env
+echo   dev                  Start the development frontend on port 3001 and backend on port 8001
+echo   dev --frontend-only  Start the frontend on port 3001 with the existing development backend on port 8001
+echo   build                Build production assets
+echo   prod                 Start an existing production build on port 3000
+echo   deploy               Build and start production on port 3000
 exit /b 0
 
 :error

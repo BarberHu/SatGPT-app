@@ -100,14 +100,18 @@ Basic 与 Agent 的模型配置相互独立。`OPENAI_API_KEY` 用于 Basic 问�
 
 安装脚本仅创建或复用 `harness/.venv/`，仅按根目录 `requirements.txt` 安装两边的 Python 依赖及前端依赖，并在 `.env` 不存在时复制配置模板。开发模式支持前端热更新。配置校验只检查本地设置，不代表模型或 GEE 已认证成功。
 
-打开 **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)**。
+打开 **[http://127.0.0.1:3001/](http://127.0.0.1:3001/)**。
 
 | 服务 | 默认地址 |
 | --- | --- |
-| 前端 | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
-| 统一 Basic + Harness API | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
+| Vite 开发前端 | [http://127.0.0.1:3001](http://127.0.0.1:3001) |
+| 开发 Basic + Harness API | [http://127.0.0.1:8001](http://127.0.0.1:8001) |
+| 生产网关 | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
+| 生产 Basic + Harness API | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
 
-`FRONTEND_PORT` 和 `AGENT_PORT` 从根目录 `.env` 读取，且必须不同。旧 `HARNESS_PORT`、`HARNESS_HOST` 已忽略，请删除；`AGENT_WORKERS` 必须为 `1`。开发与生产使用相同的配置端口，切换启动模式前先停止旧服务。停止 Windows 服务时，在两个服务窗口分别按 `Ctrl+C`，然后关闭窗口。
+Windows 的 `dev` 命令在 `127.0.0.1` 上启动 Vite（`3001`）和独立开发后端（`8001`）。通过 `http://127.0.0.1:3001/` 使用开发版 Harness。开发会话和 Harness 运行状态保存在 `harness/state/dev-multiuser/`。
+
+开发后端已经运行时，使用 `.\scripts\windows\satgpt.bat dev --frontend-only` 单独启动 Vite。生产网关使用 `3000`，生产后端使用 `AGENT_PORT`（默认 `8000`）。每个后端的 `AGENT_WORKERS` 保持为 `1`。请删除旧的 `HARNESS_PORT` 和 `HARNESS_HOST` 配置。停止 Windows 服务时，在对应的服务窗口按 `Ctrl+C`。
 
 ## 使用 SatGPT
 
@@ -116,7 +120,7 @@ Basic 与 Agent 的模型配置相互独立。`OPENAI_API_KEY` 用于 Basic 问�
 3. 任务运行中可通过历史列表打开其他对话或新建对话。切回运行中的对话会恢复任务订阅，新任务仍受共用执行队列调度。
 4. 点击方形 **Stop response** 按钮，取消运行中或排队中的任务。任务记录为 **Stopped**，适用时关闭其运行进程，随后可继续提问。停止操作不要求输入框有文字或地图可用。
 5. 在结果图层卡片中查看缩略图、观测日期、来源和图例，控制显隐、查看详情、定位或移除图层。未知日期会明确标注；缩略图失败不影响交互图层的使用。
-6. 需要时请求生成图表。有效的小写 `echarts` JSON 代码块在回答完成后渲染，支持复制图表配置和导出 PNG；无效配置会显示源内容及错误。仅开发模式提供预览页面：[http://127.0.0.1:3000/?review=echarts](http://127.0.0.1:3000/?review=echarts)。
+6. 需要时请求生成图表。有效的小写 `echarts` JSON 代码块在回答完成后渲染，支持复制图表配置和导出 PNG；无效配置会显示源内容及错误。开发模式的预览入口为 [http://127.0.0.1:3001/?review=echarts](http://127.0.0.1:3001/?review=echarts)。
 7. 地图就绪后，使用截图按钮保存共享地图当前画面。窄屏设备需先打开 Agent 地图视图。
 
 模式切换保留地图和视角，不重载底图，也不自动定位结果。Agent 图层按对话隔离。比例尺随地图移动、缩放及面板尺寸更新，并自动切换米和公里。
@@ -167,10 +171,12 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
 Invoke-RestMethod http://127.0.0.1:8000/api/harness/health
+Invoke-RestMethod http://127.0.0.1:8001/readyz
+Invoke-RestMethod http://127.0.0.1:3001/readyz
 Invoke-RestMethod http://127.0.0.1:3000/readyz
 ```
 
-Vite 和生产网关均只代理到统一后端。`/readyz` 检查两模块本地生命周期是否完成，任一未完成返回 503；`/health` 保留 Basic 兼容字段并增加 Harness 字段及 `basic`、`harness` 独立明细。即使 GEE 不可用，本地组件仍可就绪；模型认证保持 `not_checked`，Basic 的 `gee_initialized` 单独报告 GEE 初始化结果。Harness 在后端启动时初始化共享 SDK runtime，GEE worker 在收到工具调用后按需启动。会话归属、并发和停止语义见 [Harness 多用户运行说明](docs/HARNESS_MULTIUSER.md)。
+Vite 和生产网关分别代理到各自的统一后端。`/readyz` 检查两模块本地生命周期是否完成，任一未完成返回 503；`/health` 保留 Basic 兼容字段并增加 Harness 字段及 `basic`、`harness` 独立明细。即使 GEE 不可用，本地组件仍可就绪；模型认证保持 `not_checked`，Basic 的 `gee_initialized` 单独报告 GEE 初始化结果。Harness 在后端启动时初始化共享 SDK runtime，GEE worker 在收到工具调用后按需启动。会话归属、并发和停止语义见 [Harness 多用户运行说明](docs/HARNESS_MULTIUSER.md)。
 
 | 现象 | 检查内容 |
 | --- | --- |
