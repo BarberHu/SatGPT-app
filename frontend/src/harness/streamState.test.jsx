@@ -32,15 +32,26 @@ test('incremental body is visible before completion and canonical content replac
     await render();
     expect(node.textContent).toContain('Canonical answer');
     expect(node.textContent).not.toContain('First words');
-    state = receiveStream(state, event(5, 'task', { patch: { status: 'completed', output: { message: 'Final answer' } } }));
+    state = receiveStream(state, event(5, 'timeline', { timeline_ops: [{ op: 'remove', ids: ['text-a'] }] }));
     await render();
-    expect(node.textContent).toContain('Final answer');
-    await render([{ id: 'final', role: 'assistant', job_id: 'job', content: 'Final answer' }]);
-    expect(node.textContent.match(/Final answer/g)).toHaveLength(1);
+    expect(node.textContent.match(/Canonical answer/g)).toHaveLength(1);
+    state = receiveStream(state, event(6, 'task', { patch: { status: 'completed', timeline: [], output: { message: 'Canonical answer' } } }));
+    await render();
+    expect(node.textContent.match(/Canonical answer/g)).toHaveLength(1);
+    await render([{ id: 'final', role: 'assistant', job_id: 'job', content: 'Canonical answer' }]);
+    expect(node.textContent.match(/Canonical answer/g)).toHaveLength(1);
   } finally {
     await act(async () => root.unmount());
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
   }
+});
+
+test('an earlier confirmed reply remains when it happens to match the final answer', () => {
+  const [message] = chatViewModel([{ id: 'final', role: 'assistant', job_id: 'job', status: 'completed',
+    content: 'Result available.', timeline: [{ id: 'earlier', kind: 'text', text: 'Result available.',
+      attempt_id: 'earlier-attempt', committed: true }] }], null, null).items;
+  expect(message.replyParts.map(part => [part.id, part.text])).toEqual([['earlier', 'Result available.']]);
+  expect(message.text).toBe('Result available.');
 });
 
 test('retry, interruption and task isolation retract temporary answers', () => {

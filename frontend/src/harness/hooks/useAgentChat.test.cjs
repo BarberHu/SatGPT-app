@@ -74,7 +74,7 @@ test('running chats switch independently; Stop works without SSE and stale repli
     assert.equal(node.querySelector('[aria-label="Stop response"]').disabled, false, 'Stop must work with empty input and an unavailable map');
     const firstStream = sources.at(-1);
     await emit(firstStream, 0, 'running', 'first draft');
-    assert.ok(chat.items.some(item => item.text === 'first draft'));
+    assert.deepEqual(chat.items.at(-1).replyParts.map(part => part.text), ['first draft']);
     await React.act(async () => assert.equal(await chat.changeConversation('webgis-two'), true));
     assert.equal(firstStream.closed, true);
     assert.equal(chat.conversationId, 'webgis-two');

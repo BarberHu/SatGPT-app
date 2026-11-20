@@ -201,31 +201,47 @@ test('real Agent surface streams, reconnects, settles once and restores after re
   const emit = async (source, id, type, data) => act(async () => source.onmessage({ data: JSON.stringify({
     id, type, task_id: 'job', conversation_id: 'webgis-test', ...data,
   }) }));
+  const workDetails = () => node.querySelector('[aria-label="Run timeline"]');
+  const toggleDetails = () => act(async () => workDetails().querySelector(':scope > summary').click());
+  const replyText = () => [...node.querySelectorAll('[aria-label="Assistant response"] .agent-markdown')]
+    .map(part => part.textContent);
   try {
     await act(async () => root.render(<AgentWorkspace />));
     for (let i = 0; i < 100 && !sources.length; i++) await flush();
     expect(sources).toHaveLength(1);
     const source = sources[0];
+    const firstNotice = { id: 'notice-1', kind: 'text', text: '找到问题。', attempt_id: 'notice-1',
+      committed: true, turn: 1, step: 1 };
+    const secondNotice = { id: 'notice-2', kind: 'text', text: '覆盖率已正常。', attempt_id: 'notice-2',
+      committed: true, turn: 1, step: 2 };
     const runningTool = { id: 'tool-1', seq: 1, kind: 'tool', call_id: 'call-1', name: 'gee_status',
       status: 'running', committed: true, turn: 1, step: 1 };
-    await emit(source, 0, 'snapshot', { task: { id: 'job', status: 'running', timeline: [runningTool] }, answer: null });
-    expect(node.querySelector('[aria-label="Run timeline"]')).not.toBeNull();
-    expect(node.querySelector('[aria-label="Run timeline"]').textContent).toContain('gee_status');
-    expect(node.querySelector('[aria-label="Run timeline"]').open).toBe(true);
+    await emit(source, 0, 'snapshot', { task: { id: 'job', status: 'running', timeline: [firstNotice, runningTool] }, answer: null });
+    expect(workDetails().textContent).toContain('gee_status');
+    expect(workDetails().open).toBe(false);
+    expect(replyText()).toEqual([firstNotice.text]);
+    await toggleDetails();
+    expect(workDetails().open).toBe(true);
     const doneTool = { ...runningTool, status: 'done', result: 'GEE 已连接' };
-    await emit(source, 1, 'task', { patch: {}, timeline_ops: [{ op: 'put', row: doneTool }] });
+    await emit(source, 1, 'task', { patch: {}, timeline_ops: [{ op: 'put', row: doneTool }, { op: 'put', row: secondNotice }] });
     expect(node.querySelector('.agent-run-timeline code').textContent).toBe('GEE 已连接');
     await emit(source, 2, 'answer.start', { answer: { attempt_id: 'a', text: '', status: 'streaming' } });
     await emit(source, 3, 'answer.delta', { attempt_id: 'a', text: 'doomed draft', timeline_ops: [{ op: 'put', row: {
       id: 'text-a', seq: 2, kind: 'text', text: 'doomed draft', attempt_id: 'a', committed: false, turn: 1, step: 1,
     } }] });
-    await emit(source, 4, 'reasoning.delta', { attempt_id: 'a', text: 'first thought', timeline_ops: [{ op: 'put', row: {
-      id: 'reason-a', seq: 3, kind: 'reasoning', text: 'first thought', attempt_id: 'a', committed: false, turn: 1, step: 1,
-    } }] });
-    expect(node.querySelector('[aria-label="Assistant response"]').textContent).toContain('doomed draft');
-    expect(node.querySelector('[aria-label="Run timeline"]').open).toBe(true);
+    const nextTool = { ...runningTool, id: 'tool-2', call_id: 'call-2', name: 'gee_eval', step: 2 };
+    await emit(source, 4, 'reasoning.delta', { attempt_id: 'a', text: 'first thought', timeline_ops: [
+      { op: 'put', row: nextTool }, { op: 'put', row: {
+        id: 'reason-a', seq: 3, kind: 'reasoning', text: 'first thought', attempt_id: 'a', committed: false, turn: 1, step: 2,
+      } },
+    ] });
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'doomed draft']);
+    expect(workDetails().open).toBe(true);
+    expect(workDetails().textContent).not.toContain(firstNotice.text);
     expect(node.querySelector('[data-kind="reasoning"]').textContent).toContain('first thought');
-    expect(node.querySelector('.agent-markdown').textContent).not.toContain('first thought');
+    await toggleDetails();
+    expect(workDetails().open).toBe(false);
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'doomed draft']);
     await act(async () => source.onerror());
     expect(source.closed).toBe(false);
     expect(node.textContent).toContain('Reconnecting');
@@ -235,6 +251,8 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     expect(node.textContent.match(/doomed draft/g)).toHaveLength(1);
     expect(node.querySelectorAll('[data-kind="reasoning"]')).toHaveLength(1);
     await emit(source, 5, 'answer.reset', { attempt_id: 'a', timeline_ops: [{ op: 'remove', ids: ['text-a', 'reason-a'] }] });
+    expect(workDetails().open).toBe(false);
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text]);
     expect(node.textContent).not.toContain('doomed draft');
     expect(node.textContent).not.toContain('first thought');
     await emit(source, 6, 'answer.start', { answer: { attempt_id: 'b', text: '', reasoning: '', status: 'streaming' } });
@@ -250,38 +268,52 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     for (let i = 0; i < 100 && sources.length < 2; i++) await flush();
     const restored = sources[1];
     expect(restored).toBeDefined();
-    await emit(restored, 8, 'snapshot', { task: { id: 'job', status: 'running', timeline: [doneTool,
+    await emit(restored, 8, 'snapshot', { task: { id: 'job', status: 'running', timeline: [firstNotice, doneTool, secondNotice, nextTool,
       { id: 'text-b', seq: 4, kind: 'text', text: 'new draft restored', attempt_id: 'b', committed: false, turn: 2, step: 1 },
       { id: 'reason-b', seq: 5, kind: 'reasoning', text: 'restored thought', attempt_id: 'b', committed: false, turn: 2, step: 1 },
     ] },
       answer: { attempt_id: 'b', text: 'new draft restored', reasoning: 'restored thought', status: 'streaming' } });
-    expect(node.textContent).toContain('new draft restored');
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'new draft restored']);
+    expect(workDetails().open).toBe(false);
     expect(node.querySelector('[data-kind="reasoning"]').textContent).toContain('restored thought');
     expect(node.querySelector('.agent-run-timeline code').textContent).toBe('GEE 已连接');
-    await emit(restored, 9, 'answer.settle', { answer: { attempt_id: 'b', text: 'canonical',
+    await toggleDetails();
+    const openedDetails = workDetails();
+    await emit(restored, 9, 'answer.settle', { answer: { attempt_id: 'b', text: 'final answer',
       reasoning: 'canonical thought', status: 'committed' }, timeline_ops: [
-      { op: 'put', row: { id: 'text-b', seq: 4, kind: 'text', text: 'canonical', attempt_id: 'b', committed: true, turn: 2, step: 1 } },
+      { op: 'put', row: { id: 'text-b', seq: 4, kind: 'text', text: 'final answer', attempt_id: 'b', committed: true, turn: 2, step: 1 } },
       { op: 'put', row: { id: 'reason-b', seq: 5, kind: 'reasoning', text: 'canonical thought', attempt_id: 'b', committed: true, turn: 2, step: 1 } },
     ] });
-    expect(node.textContent).toContain('canonical');
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'final answer']);
     expect(node.textContent).not.toContain('new draft');
+    await emit(restored, 10, 'timeline', { timeline_ops: [{ op: 'remove', ids: ['text-b'] }] });
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'final answer']);
+    const savedTimeline = [firstNotice, doneTool, secondNotice, nextTool,
+      { id: 'reason-b', seq: 5, kind: 'reasoning', text: 'canonical thought', committed: true, turn: 2, step: 1 }];
     history = [...history, { id: 'reply', role: 'assistant', job_id: 'job', content: 'final answer',
-      timeline: [doneTool, { id: 'reason-b', seq: 5, kind: 'reasoning', text: 'canonical thought', committed: true, turn: 2, step: 1 }],
+      timeline: savedTimeline,
       previews: [{ url: '/api/previews/test.png' }],
       layers: [{ name: 'result layer', bounds: [100, 10, 101, 11], url: 'https://earthengine.googleapis.com/v1/projects/p/maps/m/tiles/{z}/{x}/{y}' }] }];
     active = null;
-    await emit(restored, 10, 'task', { patch: { status: 'completed', output: { message: 'final answer' } } });
+    await emit(restored, 11, 'task', { patch: { status: 'completed', timeline: savedTimeline, output: { message: 'final answer' } } });
     await flush();
     expect(node.textContent.match(/final answer/g)).toHaveLength(1);
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'final answer']);
+    expect(workDetails()).toBe(openedDetails);
+    expect(workDetails().open).toBe(true);
     expect([...node.querySelectorAll('.agent-run-timeline code')].filter(n => n.textContent === 'GEE 已连接')).toHaveLength(1);
     expect(node.querySelectorAll('[data-kind="reasoning"]')).toHaveLength(1);
-    expect(node.querySelector('.agent-markdown').textContent).not.toContain('canonical');
     expect(node.querySelector('.harness-preview')).not.toBeNull();
     expect(node.textContent).toContain('result layer');
     expect(restored.closed).toBe(true);
     expect(fetcher.mock.calls.every(([url]) => ['/api/harness/conversation', '/api/harness/conversations', '/api/harness/conversations/webgis-test', '/api/harness/reasoning'].includes(url))).toBe(true);
     await act(async () => node.querySelector('.agent-reasoning-trigger').click());
     expect(node.querySelector('.agent-reasoning-panel [role="status"]').textContent).toBe('Unable to load reasoning levels. Try again.');
+    await act(async () => root.render(null));
+    await act(async () => root.render(<AgentWorkspace />));
+    await flush();
+    expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'final answer']);
+    expect(workDetails().open).toBe(false);
   } finally {
     await act(async () => root.unmount());
     node.remove();

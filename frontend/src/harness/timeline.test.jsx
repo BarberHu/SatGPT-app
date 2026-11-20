@@ -29,34 +29,40 @@ test('ordered SSE operations preserve interleaving, results update in place, ret
   state = receiveStream(state, event(7, 'task', { patch: { status: 'completed', output: { message: 'Final.' } } }));
   const message = chatViewModel([], state.task, null).items[0];
   expect(message.text).toBe('Final.');
-  expect(message.timeline.find(r => r.kind === 'text').text).toBe('Checking.');
+  expect(message.replyParts.map(part => part.text)).toEqual(['Checking.']);
+  expect(message.timeline.map(r => r.kind)).toEqual(['reasoning', 'tool']);
 });
 
-test('one run renders phase text between compact thinking/tool rows with a separate final body and working folds', async () => {
+test('reply parts and the final body stay outside the manually controlled work details', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const node = document.createElement('div'); document.body.appendChild(node);
   const root = createRoot(node);
-  const timeline = [row('1', 'reasoning', 'first thought'), row('2', 'text', 'Checking now.'),
+  const timeline = [row('1', 'reasoning', 'first thought'),
     row('3', 'tool', '', { name: 'gee_status', arguments: '{}', result: 'ok', status: 'done' }),
     row('4', 'reasoning', 'second thought', { step: 2 })];
   const message = { role: 'assistant', layers: [], attachments: [], timeline, text: 'Final answer.', pending: true, streaming: true,
+    replyParts: [{ id: '2', text: 'Checking now.' }],
     run: { startedAt: new Date(Date.now() - 5000).toISOString(), status: 'running' } };
   try {
     await act(async () => root.render(<ChatMessage message={message} />));
     const runTimeline = node.querySelector('[aria-label="Run timeline"]');
     const summary = runTimeline.querySelector(':scope > summary');
-    expect(runTimeline.open).toBe(true);
+    expect(runTimeline.open).toBe(false);
     expect(summary.querySelector('.agent-assistant-avatar')).not.toBeNull();
     expect(summary.querySelector('.agent-assistant-label').textContent).toBe('SatGPT');
     expect(summary.querySelector('.agent-run-status').textContent).toMatch(/^Running · \d+s$/);
     expect(summary.querySelector(':scope > .agent-chevron')).not.toBeNull();
     expect(summary.querySelector('[data-event-id]')).toBeNull();
     expect(summary.nextElementSibling.classList.contains('agent-run-phases')).toBe(true);
-    expect([...node.querySelectorAll('[data-event-id]')].map(n => n.dataset.eventId)).toEqual(['1', '2', '3', '4']);
+    expect([...runTimeline.querySelectorAll('[data-event-id]')].map(n => n.dataset.eventId)).toEqual(['1', '3', '4']);
+    expect(node.querySelector('.agent-reply-part').textContent).toBe('Checking now.');
     expect(node.querySelectorAll('.agent-markdown')).toHaveLength(2);
     expect(node.querySelectorAll('.agent-markdown')[1].textContent).toBe('Final answer.');
     expect(node.textContent.match(/Final answer\./g)).toHaveLength(1);
     expect(node.textContent).toContain('5s');
+    await act(async () => summary.click());
+    await act(async () => runTimeline.querySelector('.agent-run-phase > summary').click());
+    expect(runTimeline.open).toBe(true);
     const thinking = node.querySelector('[data-kind="reasoning"]');
     expect(thinking.open).toBe(false);
     await act(async () => thinking.querySelector('summary').click());
@@ -66,9 +72,12 @@ test('one run renders phase text between compact thinking/tool rows with a separ
     expect(summary.querySelector('.agent-run-status').textContent).toContain('Reconnecting…');
     await act(async () => root.render(<ChatMessage message={{ ...message, pending: false, streaming: false,
       run: { ...message.run, status: 'completed', finishedAt: new Date().toISOString() } }} />));
-    expect(runTimeline.open).toBe(false);
+    expect(runTimeline.open).toBe(true);
     expect(summary.querySelector('.agent-run-status').textContent).toContain('Completed');
     expect(summary.querySelector('.agent-assistant-label').textContent).toBe('SatGPT');
+    await act(async () => summary.click());
+    expect(runTimeline.open).toBe(false);
+    expect(node.querySelector('.agent-reply-part').textContent).toBe('Checking now.');
 
     await act(async () => root.render(<ChatMessage message={{ ...message, pending: false, streaming: false,
       timeline: [], run: {} }} />));

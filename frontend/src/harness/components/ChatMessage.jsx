@@ -16,6 +16,9 @@ export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
           <img className="agent-assistant-avatar" src="/assets/images/satgpt-avatar.png" width="22" height="22" alt="" aria-hidden="true" />
           <span>SatGPT</span>
         </>} />
+      {message.replyParts?.map(part => <div key={part.id} className="agent-reply-part" data-event-id={part.id}>
+        <Markdown text={part.text} streaming={part.streaming} />
+      </div>)}
       {message.text ? <Markdown text={message.text} streaming={message.streaming} /> : null}
       <ResultCards message={message} onFocusLayer={onFocusLayer} />
     </>}

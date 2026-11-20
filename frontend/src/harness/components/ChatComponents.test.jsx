@@ -125,12 +125,15 @@ test('view model keeps committed reasoning separate from final answer', () => {
   expect(model.items[0].layers[0].id).toBe('job-0');
 });
 
-test('live reasoning appears as a collapsed row in the open unified run', async () => {
+test('live reasoning is available on demand without covering the answer', async () => {
   const { default: ChatMessage } = await import('./ChatMessage');
   await act(async () => root.render(<ChatMessage message={{ id: 'task', role: 'assistant', text: 'answer',
     pending: true, timeline: [{ id: 'r', kind: 'reasoning', text: 'thinking live', streaming: true }],
     steps: [], attachments: [], layers: [], streaming: true }} />));
   const panel = node.querySelector('[aria-label="Run timeline"]');
+  expect(panel.open).toBe(false);
+  expect(panel.contains(node.querySelector('.agent-markdown'))).toBe(false);
+  await act(async () => panel.querySelector(':scope > summary').click());
   expect(panel.open).toBe(true);
   expect(panel.textContent).toContain('thinking live');
   expect(node.querySelector('[data-kind="reasoning"]').open).toBe(false);

@@ -1,24 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Brain, Check, ChevronRight, CircleAlert, Loader2, Square, Wrench } from 'lucide-react';
-import Markdown from './Markdown';
 import CodeBlock from './CodeBlock';
 
 const labels = { running: 'Running', done: 'Done', error: 'Failed', unknown: 'No result received' };
 const excerpt = value => String(value || '').replace(/\s+/g, ' ').slice(0, 180);
 
-function Fold({ pending, className, label, children, ariaLabel }) {
-  const [open, setOpen] = useState(Boolean(pending));
-  useEffect(() => { setOpen(Boolean(pending)); }, [pending]);
-  return <details className={className} aria-label={ariaLabel} open={open}
-    onToggle={event => setOpen(event.currentTarget.open)}>
+function Fold({ className, label, children, ariaLabel }) {
+  return <details className={className} aria-label={ariaLabel}>
     <summary>{label}<ChevronRight className="agent-chevron" size={13} /></summary>{children}
   </details>;
 }
 
 function TimelineRow({ row }) {
-  if (row.kind === 'text') return <div className="agent-phase-message" data-event-id={row.id}>
-    <Markdown text={row.text} streaming={row.streaming} />
-  </div>;
   const tool = row.kind === 'tool';
   const Icon = tool ? (row.status === 'error' ? CircleAlert : Wrench) : row.kind === 'reasoning' ? Brain : Loader2;
   const label = tool ? row.name || 'Tool' : row.kind === 'reasoning' ? 'Thinking' : 'Status';
@@ -75,7 +68,7 @@ export default function RunTimeline({ rows = [], run = {}, pending = false, reco
   const failed = ['failed', 'interrupted'].includes(run.status);
   const title = reconnecting && !failed ? 'Reconnecting…' : status[run.status] || (pending ? 'Running' : 'Completed');
   const phases = timelinePhases(rows);
-  return <Fold pending={pending} className="agent-run-timeline" ariaLabel="Run timeline"
+  return <Fold className="agent-run-timeline" ariaLabel="Run timeline"
     label={<>{identity}<span className="agent-run-status">
       {pending ? <Loader2 className="agent-spin" size={14} /> : run.status === 'cancelled' ? <Square size={14} /> : failed ? <CircleAlert size={14} /> : <Check size={14} />}
       <span>{title}{seconds !== null ? ` · ${seconds}s` : ''}</span>
@@ -86,7 +79,7 @@ export default function RunTimeline({ rows = [], run = {}, pending = false, reco
       const errors = tools.filter(row => row.status === 'error').length;
       const label = tools.length ? `${live ? 'Running' : 'Ran'} ${tools.length} tool${tools.length === 1 ? '' : 's'}${errors ? ` · ${errors} failed` : ''}`
         : live ? 'Analyzing' : 'Analysis complete';
-      return <Fold key={phase.id} pending={live} className="agent-run-phase"
+      return <Fold key={phase.id} className="agent-run-phase"
         label={<span>{label}</span>}>
         {phase.rows.map(row => <TimelineRow key={row.id} row={row} />)}
       </Fold>;

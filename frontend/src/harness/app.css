@@ -132,7 +132,7 @@
 .harness-app .agent-timeline-detail { padding: 9px 0 10px 22px; color: var(--satgpt-ui-muted); }
 .harness-app .agent-timeline-detail > p { font-size: 11px; margin: 5px 0; }
 .harness-app .agent-thought-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
-.harness-app .agent-phase-message { margin: 12px 0; }
+.harness-app .agent-reply-part { margin: 12px 0; }
 .harness-app .agent-run-waiting { padding: 8px 0; color: var(--satgpt-ui-subtle); }
 .harness-app .agent-code { border: 1px solid var(--satgpt-ui-border); border-radius: 9px; overflow: hidden; margin: 12px 0; background: var(--satgpt-ui-soft); color: var(--satgpt-ui-muted); }
 .harness-app .agent-code-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--satgpt-ui-border); min-height: 36px; padding: 1px 7px 1px 13px; font-size: 10px; }

@@ -2,25 +2,31 @@ import { isActiveTask, isTerminalTask } from './taskStatus.js';
 /** UI domain objects. The array order is the event order, never a type/time sort. */
 import { messageLayerBounds } from './map/viewState';
 
-function presentRun(source, busy, finalText) {
-  const ordered = source.timeline || [];
-  let timeline = ordered.map(row => ({ ...row,
-    status: row.status === 'running' && !busy ? 'unknown' : row.status,
-    streaming: !row.committed && busy,
-  }));
-  let text = finalText || '';
-  const tail = timeline.at(-1);
-  if (tail?.kind === 'text') {
-    if (!text) { text = tail.text; timeline = timeline.slice(0, -1); }
-    else if (tail.text.trim() === text.trim()) timeline = timeline.slice(0, -1);
+function presentRun(source, busy, finalText, answer) {
+  const timeline = [];
+  const replyParts = [];
+  for (const row of source.timeline || []) {
+    if (row.kind === 'text') {
+      if (row.text?.trim() && (busy || row.committed !== false)) {
+        replyParts.push({ id: row.id, attemptId: row.attempt_id, text: row.text, streaming: !row.committed && busy });
+      }
+    } else {
+      timeline.push({ ...row, status: row.status === 'running' && !busy ? 'unknown' : row.status,
+        streaming: !row.committed && busy });
+    }
   }
-  return { text, timeline, run: { status: busy ? (source.status || 'running') : source.status || 'completed',
+  // The server can remove the final attempt's duplicate rows just before sending the terminal snapshot.
+  if (busy && answer?.status === 'committed' && answer.text?.trim()
+    && !replyParts.some(part => part.attemptId === answer.attempt_id)) {
+    replyParts.push({ id: `settled-${answer.attempt_id}`, text: answer.text, streaming: false });
+  }
+  return { text: finalText || '', timeline, replyParts, run: { status: busy ? (source.status || 'running') : source.status || 'completed',
     startedAt: source.started_at, finishedAt: source.finished_at } };
 }
 
 export function chatViewModel(messages, task, answer) {
   const items = messages.map(message => ({
-    id: message.id, role: message.role,
+    id: message.id, role: message.role, jobId: message.job_id,
     analysisRegion: message.analysis_region, analysisAoi: message.analysis_aoi,
     hasScope: Object.hasOwn(message, 'analysis_region'),
     ...presentRun(message, false, message.content || ''),
@@ -36,9 +42,9 @@ export function chatViewModel(messages, task, answer) {
   const busy = Boolean(task && isActiveTask(task.status));
   const settled = messages.some(item => item.role === 'assistant' && item.job_id === task?.id);
   if (task && !settled && (busy || isTerminalTask(task.status))) {
-    items.push({ id: `task-${task.id}`, role: 'assistant',
-      ...presentRun(task, busy, task.status === 'failed' ? task.error : task.output?.message || ''),
-      streaming: busy && answer?.status === 'streaming', pending: busy,
+    const finalText = task.status === 'failed' ? task.error : task.output?.message;
+    items.push({ id: `task-${task.id}`, role: 'assistant', jobId: task.id,
+      ...presentRun(task, busy, finalText, answer), pending: busy,
       failed: task.status === 'failed', attachments: [], layers: [], code: '' });
   }
   return { items, busy };

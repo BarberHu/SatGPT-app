@@ -50,7 +50,8 @@ export default function MessageList({ items, loading, reconnecting, onSuggest, o
           </button>)}</div>
           {import.meta.env.DEV ? <p style={{ marginTop: 16 }}><a href="/?review=echarts">Preview interactive charts</a></p> : null}
         </div> : null}
-        {items.map(message => <ChatMessage key={message.id} message={message} reconnecting={reconnecting} onFocusLayer={onFocusLayer} />)}
+        {items.map(message => <ChatMessage key={message.role === 'assistant' && message.jobId ? `run-${message.jobId}` : message.id}
+          message={message} reconnecting={reconnecting} onFocusLayer={onFocusLayer} />)}
       </div>
     </div>
     {!atBottom ? <Button type="button" variant="outline" size="sm" className="agent-jump" onClick={jump}><ArrowDown />Jump to latest</Button> : null}
