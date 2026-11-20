@@ -10,6 +10,10 @@ import {
   installLongTaskObserver,
   updateAgentDiagnosticsContext,
 } from './utils/agentDiagnostics';
+
+// Deprecated. Keep the implementation until the Basic questions cleanup.
+const SHOW_BASIC_QUESTIONS = false;
+
 function App({ active = true }) {
   const { resultText } = useAppContext();
   const [chatOpen, setChatOpen] = useState(false);
@@ -31,10 +35,12 @@ function App({ active = true }) {
       <div className="ui">
         <Warnings />
       </div>
-      <div className={`ask-dock preset-ask-dock${chatOpen ? ' is-open' : ''}`}>
-        <button className="preset-chat-toggle" type="button" aria-expanded={chatOpen} onClick={() => setChatOpen(!chatOpen)}>Basic questions {chatOpen ? '−' : '+'}</button>
-        <div hidden={!chatOpen}><ResultBox /><div className="ask-dock-composer" hidden={Boolean(resultText)}><ChatBox /></div></div>
-      </div>
+      {SHOW_BASIC_QUESTIONS && (
+        <div className={`ask-dock preset-ask-dock${chatOpen ? ' is-open' : ''}`}>
+          <button className="preset-chat-toggle" type="button" aria-expanded={chatOpen} onClick={() => setChatOpen(!chatOpen)}>Basic questions {chatOpen ? '−' : '+'}</button>
+          <div hidden={!chatOpen}><ResultBox /><div className="ask-dock-composer" hidden={Boolean(resultText)}><ChatBox /></div></div>
+        </div>
+      )}
       <Spinner />
     </div>
   );

@@ -10,7 +10,7 @@ The application has two modes: **Static layers (Basic)** and **Intelligent analy
 
 | Area | Capabilities |
 | --- | --- |
-| Basic analysis | Map exploration, flood-related layers, grid selection, and basic question answering. |
+| Basic analysis | Map exploration, flood-related layers, and grid selection. The deprecated Basic questions panel is hidden. |
 | Agent analysis | GEE dataset search, coverage and statistics queries, image previews, and interactive result layers through the DeepSeek Harness SDK. |
 | Conversations | Streamed answers, an ordered run timeline, saved conversation history, switching during a run, and stopping running or queued tasks. |
 | Result layers | Per-conversation layer isolation, thumbnails, observation dates, sources, legends, visibility controls, location, and removal. |
@@ -210,7 +210,7 @@ The canonical backend command is `harness\.venv\Scripts\python.exe satgpt_config
 
 Existing `.env`, credentials, `harness/state/`, browser layer records and `basic-venv/` are preserved. After stopping all old services and verifying the unified setup, you may remove only the obsolete `basic-venv/` directory yourself. Keep `harness/.venv/` and `harness/state/`. For Compose upgrades, stop the old stack first without `-v`, then use the same project name and `harness_state` volume; see [PRODUCTION.md](PRODUCTION.md).
 
-Basic remains single-turn and uses its own model/provider configuration. Harness keeps multi-turn local sessions, one background task executor and an independent Python tool process using the same interpreter. Basic's semaphore still limits synchronous GEE request construction/tile retrieval off the event loop; remote sensing calculations run in GEE. The former random-port tile proxy is now `/api/ee-tiles/...` in the same API. No additional HTTP listener is opened for it.
+The legacy Basic question endpoint remains single-turn and uses its own model/provider configuration. Harness keeps multi-turn local sessions, one background task executor and an independent Python tool process using the same interpreter. Basic's semaphore still limits synchronous GEE request construction/tile retrieval off the event loop; remote sensing calculations run in GEE. The former random-port tile proxy is now `/api/ee-tiles/...` in the same API. No additional HTTP listener is opened for it.
 
 The HTTP process, thread resources, memory and failure boundary are now shared. A backend restart interrupts both modes; local task state and business-layer caches remain in memory. One worker and one backend replica are required; local conversation files are not multi-process storage. This consolidation does not promise faster model/GEE responses or lower memory usage.
 
