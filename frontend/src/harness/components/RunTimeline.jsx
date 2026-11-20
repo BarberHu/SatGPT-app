@@ -53,7 +53,7 @@ export function timelinePhases(rows = []) {
   return phases;
 }
 
-export default function RunTimeline({ rows = [], run = {}, pending = false, reconnecting }) {
+export default function RunTimeline({ rows = [], run = {}, pending = false, reconnecting, assistantLabel = null }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!pending) return undefined;
@@ -61,18 +61,25 @@ export default function RunTimeline({ rows = [], run = {}, pending = false, reco
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [pending]);
-  if (!rows.length && !pending && !run.startedAt) return null;
+  const hasTimeline = rows.length > 0 || pending || Boolean(run.startedAt);
+  const identity = assistantLabel && <span className="agent-assistant-label">
+    {assistantLabel}
+    {!hasTimeline && run.status === 'failed' ? <small className="agent-failure">Incomplete</small> : null}
+  </span>;
+  if (!hasTimeline) return identity;
   const started = Date.parse(run.startedAt);
   const ended = pending ? now : Date.parse(run.finishedAt);
   const seconds = Number.isFinite(started) && Number.isFinite(ended) ? Math.max(0, Math.floor((ended - started) / 1000)) : null;
   const status = { queued: 'Queued', starting: 'Starting', running: 'Running', cancelling: 'Stopping',
     cleaning: 'Finishing', cancelled: 'Stopped', failed: 'Interrupted', interrupted: 'Interrupted', completed: 'Completed' };
-  const title = reconnecting ? 'Reconnecting…' : status[run.status] || (pending ? 'Running' : 'Completed');
   const failed = ['failed', 'interrupted'].includes(run.status);
+  const title = reconnecting && !failed ? 'Reconnecting…' : status[run.status] || (pending ? 'Running' : 'Completed');
   const phases = timelinePhases(rows);
   return <Fold pending={pending} className="agent-run-timeline" ariaLabel="Run timeline"
-    label={<>{pending ? <Loader2 className="agent-spin" size={14} /> : run.status === 'cancelled' ? <Square size={14} /> : failed ? <CircleAlert size={14} /> : <Check size={14} />}
-      <span>{title}{seconds !== null ? ` · ${seconds}s` : ''}</span></>}>
+    label={<>{identity}<span className="agent-run-status">
+      {pending ? <Loader2 className="agent-spin" size={14} /> : run.status === 'cancelled' ? <Square size={14} /> : failed ? <CircleAlert size={14} /> : <Check size={14} />}
+      <span>{title}{seconds !== null ? ` · ${seconds}s` : ''}</span>
+    </span></>}>
     <div className="agent-run-phases">{phases.map((phase, index) => {
       const live = pending && index === phases.length - 1;
       const tools = phase.rows.filter(row => row.kind === 'tool');

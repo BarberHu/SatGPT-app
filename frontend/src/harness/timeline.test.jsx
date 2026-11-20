@@ -39,11 +39,19 @@ test('one run renders phase text between compact thinking/tool rows with a separ
   const timeline = [row('1', 'reasoning', 'first thought'), row('2', 'text', 'Checking now.'),
     row('3', 'tool', '', { name: 'gee_status', arguments: '{}', result: 'ok', status: 'done' }),
     row('4', 'reasoning', 'second thought', { step: 2 })];
-  const message = { role: 'assistant', layers: [], attachments: [], timeline, text: 'Final answer.', pending: true,
+  const message = { role: 'assistant', layers: [], attachments: [], timeline, text: 'Final answer.', pending: true, streaming: true,
     run: { startedAt: new Date(Date.now() - 5000).toISOString(), status: 'running' } };
   try {
     await act(async () => root.render(<ChatMessage message={message} />));
-    expect(node.querySelector('[aria-label="Run timeline"]').open).toBe(true);
+    const runTimeline = node.querySelector('[aria-label="Run timeline"]');
+    const summary = runTimeline.querySelector(':scope > summary');
+    expect(runTimeline.open).toBe(true);
+    expect(summary.querySelector('.agent-assistant-avatar')).not.toBeNull();
+    expect(summary.querySelector('.agent-assistant-label').textContent).toBe('SatGPT');
+    expect(summary.querySelector('.agent-run-status').textContent).toMatch(/^Running · \d+s$/);
+    expect(summary.querySelector(':scope > .agent-chevron')).not.toBeNull();
+    expect(summary.querySelector('[data-event-id]')).toBeNull();
+    expect(summary.nextElementSibling.classList.contains('agent-run-phases')).toBe(true);
     expect([...node.querySelectorAll('[data-event-id]')].map(n => n.dataset.eventId)).toEqual(['1', '2', '3', '4']);
     expect(node.querySelectorAll('.agent-markdown')).toHaveLength(2);
     expect(node.querySelectorAll('.agent-markdown')[1].textContent).toBe('Final answer.');
@@ -54,8 +62,45 @@ test('one run renders phase text between compact thinking/tool rows with a separ
     await act(async () => thinking.querySelector('summary').click());
     expect(thinking.open).toBe(true);
     expect(thinking.querySelector('.agent-thought-text').textContent).toBe('first thought');
-    await act(async () => root.render(<ChatMessage message={{ ...message, pending: false, run: { ...message.run, status: 'completed', finishedAt: new Date().toISOString() } }} />));
-    expect(node.querySelector('[aria-label="Run timeline"]').open).toBe(false);
+    await act(async () => root.render(<ChatMessage message={message} reconnecting />));
+    expect(summary.querySelector('.agent-run-status').textContent).toContain('Reconnecting…');
+    await act(async () => root.render(<ChatMessage message={{ ...message, pending: false, streaming: false,
+      run: { ...message.run, status: 'completed', finishedAt: new Date().toISOString() } }} />));
+    expect(runTimeline.open).toBe(false);
+    expect(summary.querySelector('.agent-run-status').textContent).toContain('Completed');
+    expect(summary.querySelector('.agent-assistant-label').textContent).toBe('SatGPT');
+
+    await act(async () => root.render(<ChatMessage message={{ ...message, pending: false, streaming: false,
+      timeline: [], run: {} }} />));
+    expect(node.querySelector('[aria-label="Run timeline"]')).toBeNull();
+    expect(node.querySelector('.agent-assistant-label').textContent).toBe('SatGPT');
+  } finally {
+    await act(async () => root.unmount()); node.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  }
+});
+
+test('failed replies use Interrupted in the timeline and Incomplete only when the timeline is missing', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const node = document.createElement('div'); document.body.appendChild(node);
+  const root = createRoot(node);
+  const failure = { id: 'job', status: 'failed', error: 'Unable to finish.' };
+  const renderFailure = task => act(async () => {
+    const [message] = chatViewModel([], task, null).items;
+    root.render(<ChatMessage message={message} reconnecting />);
+  });
+  try {
+    await renderFailure({ ...failure, started_at: '2026-11-20T00:00:00Z', finished_at: '2026-11-20T00:00:03Z',
+      timeline: [row('1', 'reasoning', 'Checking data.')] });
+    const summary = node.querySelector('.agent-run-timeline > summary');
+    expect(summary.querySelector('.agent-assistant-label').textContent).toBe('SatGPT');
+    expect(summary.querySelector('.agent-run-status').textContent).toBe('Interrupted · 3s');
+    expect(node.querySelector('.agent-failure')).toBeNull();
+    expect(node.querySelector('.agent-markdown').textContent).toBe(failure.error);
+
+    await renderFailure(failure);
+    expect(node.querySelector('.agent-run-timeline')).toBeNull();
+    expect(node.querySelector('.agent-assistant-label .agent-failure').textContent).toBe('Incomplete');
+    expect(node.querySelector('.agent-markdown').textContent).toBe(failure.error);
   } finally {
     await act(async () => root.unmount()); node.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;
   }

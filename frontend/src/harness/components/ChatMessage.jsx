@@ -11,11 +11,11 @@ export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
       {message.hasScope ? <small className="agent-message-scope">{message.analysisRegion ? `${message.analysisAoi?.label || 'Drawn analysis area'} · snapshot` : 'Map view · snapshot'}</small> : null}
       {message.analysisRegion ? <AreaControls historyOnly current={{ geojson: message.analysisRegion, source: 'draw', label: message.analysisAoi?.label || 'Historical analysis area' }} scopeKey={`history:${message.id}`} /> : null}
     </div> : <>
-      <div className="agent-assistant-label"><img className="agent-assistant-avatar" src="/assets/images/satgpt-avatar.png" width="22" height="22" alt="" aria-hidden="true" /><span>SatGPT</span>
-        {message.streaming ? <small>Generating</small> : null}
-        {message.failed ? <small className="agent-failure">Incomplete</small> : null}
-      </div>
-      <RunTimeline rows={message.timeline} run={message.run} pending={message.pending} reconnecting={reconnecting} />
+      <RunTimeline rows={message.timeline} run={message.run} pending={message.pending} reconnecting={reconnecting}
+        assistantLabel={<>
+          <img className="agent-assistant-avatar" src="/assets/images/satgpt-avatar.png" width="22" height="22" alt="" aria-hidden="true" />
+          <span>SatGPT</span>
+        </>} />
       {message.text ? <Markdown text={message.text} streaming={message.streaming} /> : null}
       <ResultCards message={message} onFocusLayer={onFocusLayer} />
     </>}

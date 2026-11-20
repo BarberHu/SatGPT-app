@@ -111,7 +111,11 @@
 .harness-app .agent-run-timeline { color: var(--satgpt-ui-muted); font-size: 12px; margin: 0 0 20px; }
 .harness-app .agent-run-timeline summary { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; list-style: none; }
 .harness-app .agent-run-timeline summary::-webkit-details-marker { display: none; }
-.harness-app .agent-run-timeline > summary { width: fit-content; padding: 5px 0; }
+.harness-app .agent-run-timeline > summary { width: fit-content; max-width: 100%; padding: 5px 0; }
+.harness-app .agent-run-timeline > summary > .agent-assistant-label { flex: none; margin: 0 4px 0 0; color: var(--satgpt-ui-text); white-space: nowrap; }
+.harness-app .agent-run-status { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.harness-app .agent-run-status > svg { flex: none; }
+.harness-app .agent-run-status > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .harness-app .agent-chevron { transition: transform .15s; flex: none; }
 .harness-app details[open] > summary > .agent-chevron { transform: rotate(90deg); }
 .harness-app .agent-run-phases { border-top: 1px solid var(--satgpt-ui-border); margin-top: 9px; padding-top: 8px; }
@@ -244,6 +248,10 @@
 @media (max-width: 420px) {
   .harness-app .agent-message-content { padding: 24px 20px 30px; }.harness-app .agent-composer-wrap { padding-left: 14px; padding-right: 14px; }
   .harness-app .agent-markdown, .harness-app .agent-user-bubble { font-size: 13px; }
+  .harness-app .agent-run-timeline > summary,
+  .harness-app .agent-run-timeline > summary > .agent-assistant-label,
+  .harness-app .agent-run-status { gap: 5px; }
+  .harness-app .agent-run-timeline > summary > .agent-assistant-label { margin-right: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .harness-app *, .harness-app *::before, .harness-app *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
