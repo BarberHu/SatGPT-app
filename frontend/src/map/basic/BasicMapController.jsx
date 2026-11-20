@@ -31,21 +31,20 @@ function BasicMapController({ map }) {
     button.classList.toggle('active', gridClickEnabled);
     button.setAttribute('aria-pressed', String(gridClickEnabled));
     button.title = gridClickEnabled
-      ? 'Click map grids to select a study area.'
-      : 'Map grid selection is off.';
+      ? 'Click a grid cell to select a study area. Toggle off to hide the grid and selected boundary.'
+      : 'Toggle on to show the grid and enable selection.';
   }, [gridClickEnabled]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || !map.getLayer('grid_cell-layer')) {
+    if (!map || !map.isStyleLoaded()) {
       return;
     }
 
-    map.setLayoutProperty(
-      'grid_cell-layer',
-      'visibility',
-      gridClickEnabled ? 'visible' : 'none'
-    );
+    const visibility = gridClickEnabled ? 'visible' : 'none';
+    for (const id of ['grid_cell-layer', ...AOI_LAYER_IDS]) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility);
+    }
 
     if (!gridClickEnabled) {
       map.getCanvas().style.cursor = '';
@@ -322,6 +321,7 @@ function BasicMapController({ map }) {
       return;
     }
 
+    const layout = { visibility: gridClickEnabledRef.current ? 'visible' : 'none' };
     map.addSource(sourceId, {
       type: 'geojson',
       data: displayedAoi.geojson,
@@ -331,6 +331,7 @@ function BasicMapController({ map }) {
       id: layerId,
       type: 'fill',
       source: sourceId,
+      layout,
       paint: {
         'fill-color': '#3b82f6',
         'fill-opacity': 0.1,
@@ -341,6 +342,7 @@ function BasicMapController({ map }) {
       id: outlineLayerId,
       type: 'line',
       source: sourceId,
+      layout,
       paint: {
         'line-color': '#3b82f6',
         'line-width': 2,

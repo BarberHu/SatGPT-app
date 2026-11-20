@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import MapContainer from '../components/MapContainer';
 import { AppProvider, useAppContext } from '../context/AppContext';
 import { SharedMapProvider, SharedMapSurface } from './SharedMapContext';
+import { basicSelectionKey } from '../aoi/snapshot';
 import usePresetLayers from '../hooks/usePresetLayers';
 import PresetMapController from '../presets/PresetMapController';
 import { FakeMap } from './tests/fakeMap';
@@ -31,6 +32,8 @@ test('the Basic grid switch controls selection across modes while late preset re
   const raw=FakeMap.instances[0];expect(raw).toBeTruthy();expect(raw.controls).toHaveLength(2);
   expect([...raw.layers.keys()].some(id=>id.startsWith('satgpt-basic-aux:gl-draw-'))).toBe(false);
   const gridToggle=()=>raw.getContainer().querySelector('[aria-label="Toggle grid selection"]');
+  const selectionVisibility = () => ['grid_cell-layer', 'analysis-aoi-fill', 'analysis-aoi-outline']
+   .map(id => raw.getLayer(`satgpt-basic-aux:${id}`).layout.visibility);
   const clickGrid=async FID=>{
    raw.queryRenderedFeatures=()=>[{properties:{FID}}];
    await act(async()=>raw.fire('click',{point:{x:20,y:30}}));
@@ -38,11 +41,14 @@ test('the Basic grid switch controls selection across modes while late preset re
   expect(gridToggle().getAttribute('aria-pressed')).toBe('true');
   await clickGrid(0);
   const savedAoi=observed.context.selectedAOI;
+  const savedSelection=localStorage.getItem(basicSelectionKey);
+  const fitsAfterSelection=raw.fitBounds.mock.calls.length;
   expect(savedAoi.source).toBe('fishnet');
   expect(savedAoi.bounds).toEqual({west:100,south:10,east:101,north:11});
+  expect(selectionVisibility()).toEqual(['visible','visible','visible']);
   await act(async()=>gridToggle().click());
   expect(gridToggle().getAttribute('aria-pressed')).toBe('false');
-  expect(raw.getLayer('satgpt-basic-aux:grid_cell-layer').layout.visibility).toBe('none');
+  expect(selectionVisibility()).toEqual(['none','none','none']);
   await clickGrid(1);
   expect(observed.context.selectedAOI).toBe(savedAoi);
   expect(raw.getSource('satgpt-basic-aux:analysis-aoi').data).toEqual(savedAoi.geojson);
@@ -51,8 +57,12 @@ test('the Basic grid switch controls selection across modes while late preset re
   expect(observed.context.selectedAOI).toBe(savedAoi);
   await act(async()=>node.querySelector('[data-switch]').click());
   expect(gridToggle().getAttribute('aria-pressed')).toBe('false');
+  expect(selectionVisibility()).toEqual(['none','none','none']);
   await act(async()=>gridToggle().click());
-  expect(raw.getLayer('satgpt-basic-aux:grid_cell-layer').layout.visibility).toBe('visible');
+  expect(selectionVisibility()).toEqual(['visible','visible','visible']);
+  expect(observed.context.selectedAOI).toBe(savedAoi);
+  expect(localStorage.getItem(basicSelectionKey)).toBe(savedSelection);
+  expect(raw.fitBounds).toHaveBeenCalledTimes(fitsAfterSelection);
   await clickGrid(1);
   expect(observed.context.selectedAOI.bounds).toEqual({west:101,south:10,east:102,north:11});
   let id;await act(async()=>{id=observed.store.add('slopeSteepness',observed.context.selectedAOI,{});});
@@ -66,6 +76,9 @@ test('the Basic grid switch controls selection across modes while late preset re
   expect(raw.getLayer(physical)?.layout.visibility).toBe('none');
   await act(async()=>node.querySelector('[data-switch]').click());
   expect(raw.getLayer(physical)?.layout.visibility).toBe('visible');
+  await act(async()=>gridToggle().click());
+  expect(selectionVisibility()).toEqual(['none','none','none']);
+  expect(raw.getLayer(physical).layout.visibility).toBe('visible');
   await act(async()=>{observed.store.patch(id,{visible:false,opacity:.4});});
   await act(async()=>node.querySelector('[data-switch]').click());await act(async()=>node.querySelector('[data-switch]').click());
   expect(raw.getLayer(physical).layout.visibility).toBe('none');expect(raw.getPaintProperty(physical,'raster-opacity')).toBe(.4);
