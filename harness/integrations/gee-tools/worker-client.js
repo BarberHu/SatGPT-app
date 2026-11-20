@@ -5,8 +5,8 @@ const MAX_RESPONSE = 20_000_000;
 
 /** A resident JSON-lines worker. A slot is reusable only once its old child exits. */
 export class WorkerClient {
-  constructor({ python, worker, cwd }) {
-    Object.assign(this, { python, worker, cwd });
+  constructor({ python, worker, cwd, service = 'GEE', endpoint }) {
+    Object.assign(this, { python, worker, cwd, service, endpoint });
     this.child = null;
     this.pending = null;
     this.buffer = '';
@@ -16,6 +16,10 @@ export class WorkerClient {
     if (this.child) return this.child;
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
       /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|LANG|LC_.*|HTTPS?_PROXY|NO_PROXY|SSL_CERT_FILE|REQUESTS_CA_BUNDLE|GOOGLE_APPLICATION_CREDENTIALS)$/i.test(key)));
+    if (this.service === 'OSM') {
+      delete env.GOOGLE_APPLICATION_CREDENTIALS;
+      env.SATGPT_OVERPASS_URL = this.endpoint;
+    }
     const child = spawn(this.python, ['-X', 'utf8', '-I', this.worker], {
       cwd: this.cwd, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env,
     });
@@ -24,18 +28,18 @@ export class WorkerClient {
       child.on('close', code => {
         this.child = null;
         this.buffer = '';
-        this.pending?.reject(new Error('GEE worker exited (' + code + ')'));
+        this.pending?.reject(new Error(this.service + ' worker exited (' + code + ')'));
         resolve();
       });
     });
-    child.on('error', () => this.terminate(child, new Error('Unable to start GEE worker')));
-    child.stdin.on('error', () => this.terminate(child, new Error('GEE worker input is unavailable')));
+    child.on('error', () => this.terminate(child, new Error('Unable to start ' + this.service + ' worker')));
+    child.stdin.on('error', () => this.terminate(child, new Error(this.service + ' worker input is unavailable')));
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => {
       if (child !== this.child) return;
       this.buffer += chunk;
       if (this.buffer.length > MAX_RESPONSE) {
-        this.terminate(child, new Error('GEE worker output exceeds the response limit'));
+        this.terminate(child, new Error(this.service + ' worker output exceeds the response limit'));
         return;
       }
       const end = this.buffer.indexOf('\n');
@@ -43,9 +47,9 @@ export class WorkerClient {
       try {
         const result = JSON.parse(this.buffer.slice(0, end));
         this.buffer = this.buffer.slice(end + 1);
-        if (result.id !== this.pending?.id || this.buffer) throw new Error('Mismatched GEE worker response');
+        if (result.id !== this.pending?.id || this.buffer) throw new Error('Mismatched ' + this.service + ' worker response');
         if (result.ok) this.pending.resolve(result.data);
-        else this.pending.reject(new Error(result.error || 'GEE worker failed'));
+        else this.pending.reject(new Error(result.error || this.service + ' worker failed'));
       } catch (error) {
         this.terminate(child, error);
       }
@@ -62,11 +66,11 @@ export class WorkerClient {
 
   close() {
     if (!this.child) return Promise.resolve();
-    return this.terminate(this.child, new Error('GEE worker is closing'));
+    return this.terminate(this.child, new Error(this.service + ' worker is closing'));
   }
 
   run(payload, { signal, timeout }) {
-    if (this.pending) return Promise.reject(new Error('GEE worker slot is occupied'));
+    if (this.pending) return Promise.reject(new Error(this.service + ' worker slot is occupied'));
     if (signal?.aborted) return Promise.reject(new Error('Tool call cancelled'));
     const child = this.start();
     const id = randomUUID();
@@ -79,7 +83,7 @@ export class WorkerClient {
         this.terminate(child, new Error(message)).then(() => finish(reject)(new Error(message)));
       };
       const abort = () => stop('Tool call cancelled');
-      const timer = setTimeout(() => stop('GEE worker timed out'), timeout);
+      const timer = setTimeout(() => stop(this.service + ' worker timed out'), timeout);
       const finish = callback => value => {
         if (this.pending?.id !== id) return;
         clearTimeout(timer);

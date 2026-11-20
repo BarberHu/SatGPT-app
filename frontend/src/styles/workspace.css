@@ -44,6 +44,9 @@
 /* One engine surface stays mounted while the business panels change. */
 .satgpt-root [hidden] { display: none !important; }
 .satgpt-map-surface { position: absolute; z-index: 1; inset: 0; visibility: hidden; overflow: hidden; }
+.satgpt-map-surface:has(.satgpt-osm-popup) { z-index: auto; }
+.satgpt-osm-popup { z-index: 3; overflow-wrap: anywhere; }
+.satgpt-osm-popup strong { display: block; padding-right: 14px; }
 .satgpt-map-canvas { position: absolute; inset: 0; }
 .satgpt-root[data-mode="agent"] .mapboxgl-canvas { cursor: grab; }
 .satgpt-root[data-mode="agent"] .mapboxgl-canvas:active { cursor: grabbing; }

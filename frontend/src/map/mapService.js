@@ -20,11 +20,14 @@ export class MapService {
   measureGroundDistance(start, end) { return this.engine.measureGroundDistance?.(start, end) ?? null; }
   physical(group, id) { return `scope--${encodeURIComponent(group)}--${id}`; }
   enabled(group) { return group === 'default' || (this.mode === 'basic' && group === 'basic:presets') || (this.mode === 'agent' && group === `agent:${this.conversation}`); }
-  render(row) { return { ...row.layer, id: this.physical(row.group, row.layer.id), visible: row.layer.visible && this.enabled(row.group) }; }
+  render(row) {
+    return { ...row.layer, id: this.physical(row.group, row.layer.id), visible: row.layer.visible && this.enabled(row.group),
+      ...(row.layer.dataUrl && row.group.startsWith('agent:') && { osmInteractive: true }) };
+  }
+  setOsmPickingSuspended(suspended) { this.engine.setOsmPickingSuspended?.(suspended); }
   listLayers(group = 'default') { return [...this.layers.values()].filter(row => row.group === group).map(row => row.layer); }
   addLayer(input, group = 'default') {
     const layer = normalizeLayer(input); const key = this.physical(group, layer.id);
-    if (this.layers.has(key)) this.engine.removeLayer(key);
     const row = { group, layer }; this.layers.set(key, row); this.engine.addLayer(this.render(row)); this.notify(); return layer;
   }
   removeLayer(id, group = 'default') {

@@ -1,5 +1,6 @@
 import React, { useId, useState } from 'react';
 import { Code2, Eye, EyeOff, ImageOff, Loader2, LocateFixed, MoreVertical, RotateCw, Trash2 } from 'lucide-react';
+import { publicPath } from '../../utils/publicPath.js';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '../ui/dialog';
 import LayerLegend from './LayerLegend';
@@ -25,6 +26,8 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
   const metadata = layer.metadata || {};
+  const osm = Boolean(layer.dataUrl);
+  const dataTime = metadata.observedAt || (osm ? 'OSM data time unavailable' : 'Observation date not provided');
   const bands = Array.isArray(layer.visualization?.bands) ? layer.visualization.bands.join(' / ') : '';
   const created = Date.parse(metadata.createdAt);
   const reload = layer.reload || {};
@@ -35,12 +38,12 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
   const urgentReload = unavailable || reload.reloading || Boolean(reload.error);
   return <article className={`agent-map-layer${layer.visible ? '' : ' is-hidden'}`} aria-label={`Layer ${layer.name}`}>
     <div className="agent-layer-heading">
-      <Thumbnail layer={layer} />
-      <div className="agent-layer-info"><strong title={layer.name}>{layer.name}</strong>
-        <div className="agent-layer-meta"><span title={metadata.observedAt}>{metadata.observedAt || 'Observation date not provided'}</span>
+      {osm ? null : <Thumbnail layer={layer} />}
+      <div className="agent-layer-info" style={osm ? { gridColumn: '1 / 3' } : undefined}><strong title={layer.name}>{layer.name}</strong>
+        <div className="agent-layer-meta"><span title={metadata.observedAt}>{dataTime}</span>
           <span aria-hidden="true">·</span><span title={metadata.source}>{metadata.source || 'Google Earth Engine'}</span></div>
       </div>
-      <LayerLegend legend={layer.legend} unit={metadata.unit} />
+      {osm ? null : <LayerLegend legend={layer.legend} unit={metadata.unit} />}
       <label className="agent-layer-eye" title={`${layer.visible ? 'Hide' : 'Show'} ${layer.name}`}>
         <input type="checkbox" aria-label={layer.name} checked={layer.visible} onChange={event => onToggle(layer.id, event.target.checked)} />
         {layer.visible ? <Eye size={20} /> : <EyeOff size={20} />}
@@ -48,7 +51,8 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
       <Button type="button" variant="ghost" size="icon" className="agent-layer-more" aria-label={`Layer details ${layer.name}`}
         aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}><MoreVertical size={19} /></Button>
     </div>
-    {urgentReload ? <div className="agent-layer-reload-bar">
+    {osm && unavailable ? <p className="agent-layer-reload-error" role="alert">Unable to load the OpenStreetMap layer.</p> : null}
+    {!osm && urgentReload ? <div className="agent-layer-reload-bar">
       <span role="status">{reload.reloading ? 'Reloading from Earth Engine…' : unavailable ? 'Layer unavailable or expired' : layer.reloadedAt ? 'Layer reloaded' : ''}</span>
       {reloadAction}
     </div> : null}
@@ -56,7 +60,7 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
     {expanded ? <div className="agent-layer-details" id={detailsId}>
       <dl><dt>Data source</dt><dd>{metadata.source || 'Google Earth Engine'}</dd>
         {metadata.datasetId ? <><dt>Dataset</dt><dd>{metadata.datasetId}</dd></> : null}
-        <dt>Observation date</dt><dd>{metadata.observedAt || 'Not provided'}</dd>
+        <dt>{osm ? 'OSM data time' : 'Observation date'}</dt><dd>{metadata.observedAt || 'Not provided'}</dd>
         {Number.isFinite(created) ? <><dt>Created</dt><dd>{new Date(created).toLocaleString('en-US', { hour12: false })}</dd></> : null}
         {bands ? <><dt>Bands</dt><dd>{bands}</dd></> : null}
         {layer.bounds ? <><dt>Bounds</dt><dd>{layer.bounds.map(value => Number(value).toFixed(3)).join(', ')}</dd></> : null}
@@ -65,10 +69,11 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
       {layer.reloadedAt ? <p>Last reloaded: {new Date(layer.reloadedAt).toLocaleString('en-US', { hour12: false })}</p> : null}
       {layer.code ? <details className="agent-layer-code"><summary><Code2 size={14} />View generation code</summary>
         <CodeBlock code={layer.code} language="python" label="GEE Python" />
-      </details> : <p>Generation code is unavailable for this legacy layer.</p>}
-      {!layer.reloadable ? <p>{layer.reloadUnavailableReason || 'Original generation parameters are unavailable. Run the original analysis again.'}</p> : null}
+      </details> : osm ? null : <p>Generation code is unavailable for this legacy layer.</p>}
+      {!osm && !layer.reloadable ? <p>{layer.reloadUnavailableReason || 'Original generation parameters are unavailable. Run the original analysis again.'}</p> : null}
       <div className="agent-layer-actions">
-        {!urgentReload ? reloadAction : null}
+        {!osm && !urgentReload ? reloadAction : null}
+        {osm ? <Button asChild variant="ghost" size="sm"><a href={publicPath(layer.dataUrl)} download>Download GeoJSON</a></Button> : null}
         {layer.bounds ? <Button type="button" variant="ghost" size="sm" aria-label={`Zoom to ${layer.name}`} onClick={() => onFocus(layer)}><LocateFixed size={14} />Zoom to layer</Button> : null}
         <Button type="button" variant="ghost" size="sm" className="agent-layer-remove" aria-label={`Remove ${layer.name}`} onClick={() => onRemove(layer.id)}><Trash2 size={14} />Remove layer</Button>
       </div>

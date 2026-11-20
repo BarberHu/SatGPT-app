@@ -1,5 +1,6 @@
 import { layerPresentation } from './layerPresentation';
 const GEE_TILE = /^https:\/\/earthengine\.googleapis\.com\/v1\/projects\/[\w./-]+\/tiles\/\{z\}\/\{x\}\/\{y\}$/;
+const OSM_RESULT = /^\/api\/harness\/conversations\/webgis-[a-f0-9]{32}\/tasks\/[a-f0-9]{32}\/osm\/[a-f0-9]{32}\.geojson$/;
 
 export function normalizeLayer(spec) {
   if (!spec || typeof spec !== 'object') throw new TypeError('Layer must be an object');
@@ -10,8 +11,9 @@ export function normalizeLayer(spec) {
   if (!['gee', 'raster', 'geojson', 'vector'].includes(kind)) throw new TypeError('Unsupported layer kind');
   if (kind === 'gee' && !GEE_TILE.test(spec.url || '')) throw new TypeError('Invalid GEE tile URL');
   if (kind === 'raster' && !/^https:\/\//.test(spec.url || '')) throw new TypeError('Raster tiles require HTTPS');
-  if (kind === 'geojson' && (!spec.data || !['Feature', 'FeatureCollection'].includes(spec.data.type))) {
-    throw new TypeError('GeoJSON layer requires a Feature or FeatureCollection');
+  const dataUrl = kind === 'geojson' && typeof spec.data_url === 'string' && OSM_RESULT.test(spec.data_url) ? spec.data_url : null;
+  if (kind === 'geojson' && !dataUrl && !['Feature', 'FeatureCollection'].includes(spec.data?.type)) {
+    throw new TypeError('GeoJSON layer requires a Feature, FeatureCollection or a task result');
   }
   if (kind === 'vector' && (!/^https:\/\//.test(spec.url || '') || !spec.sourceLayer)) {
     throw new TypeError('Vector layer requires HTTPS tiles and sourceLayer');
@@ -21,7 +23,7 @@ export function normalizeLayer(spec) {
   const renderAs = ['line', 'fill', 'circle'].includes(spec.renderAs) ? spec.renderAs : 'line';
   return {
     ...layerPresentation(spec),
-    id, name, kind, url: spec.url || null, data: spec.data || null,
+    id, name, kind, url: spec.url || null, data: spec.data || null, dataUrl,
     sourceLayer: spec.sourceLayer || null, visible: spec.visible !== false,
     renderAs, opacity: Math.max(0, Math.min(1, opacity)),
     bounds: Array.isArray(spec.bounds) ? spec.bounds : null,

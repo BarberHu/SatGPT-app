@@ -3,6 +3,7 @@ import { WorkerClient } from './worker-client.js';
 /** Fixed-size lazy pool, with bounded waiting and round-robin owners. */
 export class WorkerPool {
   constructor(options, size, limit = 128) {
+    this.service = options.service || 'GEE';
     this.slots = Array.from({ length: size }, () => new WorkerClient(options));
     this.idle = [...this.slots];
     this.waiting = new Map();
@@ -26,7 +27,7 @@ export class WorkerPool {
     }
     if (this.waitCount >= this.limit || (this.waiting.get(owner)?.length || 0) >= this.ownerLimit) {
       record('rejected', { reason: this.waitCount >= this.limit ? 'global_limit' : 'owner_limit' });
-      return Promise.reject(new Error('GEE worker queue is full'));
+      return Promise.reject(new Error(this.service + ' worker queue is full'));
     }
     return new Promise((resolve, reject) => {
       const queue = this.waiting.get(owner) || [];
@@ -45,7 +46,7 @@ export class WorkerPool {
         reject(error);
       };
       const abort = () => remove(new Error('Tool call cancelled'), 'cancelled');
-      const timer = setTimeout(() => remove(new Error('GEE worker wait timed out'), 'wait_timeout'), timeout);
+      const timer = setTimeout(() => remove(new Error(this.service + ' worker wait timed out'), 'wait_timeout'), timeout);
       const entry = { cleanup, remove, resolve, reject, payload, signal, deadline, record };
       signal?.addEventListener('abort', abort, { once: true });
       queue.push(entry);
@@ -86,7 +87,7 @@ export class WorkerPool {
   async close() {
     this.closed = true;
     for (const entries of [...this.waiting.values()]) {
-      for (const entry of [...entries]) entry.remove(new Error('GEE worker pool is closing'), 'cancelled');
+      for (const entry of [...entries]) entry.remove(new Error(this.service + ' worker pool is closing'), 'cancelled');
     }
     await Promise.all(this.slots.map(slot => slot.close()));
   }

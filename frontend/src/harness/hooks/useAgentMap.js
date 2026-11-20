@@ -56,7 +56,8 @@ export function useAgentMap(conversationId, messages) {
         try {
           const existing = map.listLayers().find(item => item.id === id);
           const spec = { ...messageLayerPresentation(layer, message),
-            id, kind: 'gee', bounds: messageLayerBounds(message, layer), visible: choices.current.visibility[id] ?? layer.visible };
+            id, kind: layer.kind === 'geojson' ? 'geojson' : 'gee',
+            bounds: messageLayerBounds(message, layer), visible: choices.current.visibility[id] ?? layer.visible };
           if (!existing) map.addLayer(spec);
           else if ((layer.reload_version || 0) > existing.reloadVersion || (!existing.code && spec.code)) map.replaceLayer(id, spec);
         } catch (cause) { setError(`Unable to load layer: ${cause.message}`); }

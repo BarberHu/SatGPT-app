@@ -178,3 +178,11 @@ def preview(conversation_id: str, task_id: str, filename: str, request: Request,
     with api_errors():
         path = request.app.state.controller.artifact(owner, conversation_id, task_id, filename)
     return FileResponse(path, media_type='image/png', headers={'X-Content-Type-Options': 'nosniff'})
+
+
+@router.get('/api/harness/conversations/{conversation_id}/tasks/{task_id}/osm/{filename}')
+def osm_result(conversation_id: str, task_id: str, filename: str, request: Request, owner: Owner):
+    with api_errors():
+        path = request.app.state.controller.artifact(owner, conversation_id, task_id, filename, osm=True)
+    return FileResponse(path, media_type='application/geo+json',
+                        headers={'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store'})

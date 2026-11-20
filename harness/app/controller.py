@@ -202,14 +202,19 @@ class TaskController:
         return {'artifact_dir': str(self.state / 'artifacts' / owner / cid / task_id),
                 'artifact_url': f'/api/previews/{cid}/{task_id}'}
 
-    def artifact(self, owner, cid, task_id, filename):
-        if not re.fullmatch(r'[0-9a-f]{32}\.png', filename):
+    def artifact(self, owner, cid, task_id, filename, *, osm=False):
+        if not re.fullmatch(r'[0-9a-f]{32}\.' + ('geojson' if osm else 'png'), filename):
             raise FileNotFoundError('Preview not found')
         with self.store.connect() as db:
             self.store.owned(db, owner, cid)
             task = self.store.read_task(db, owner, task_id)
             if task['conversation_id'] != cid or task['status'] != 'completed':
                 raise FileNotFoundError('Preview not found')
+            if osm and not any(
+                layer.get('kind') == 'geojson' and layer.get('artifact_ref') == Path(filename).stem
+                for layer in (task.get('output') or {}).get('layers', [])
+            ):
+                raise FileNotFoundError('OSM result not found')
         path = Path(self._artifact_fields(owner, cid, task_id)['artifact_dir']) / filename
         if not path.is_file():
             raise FileNotFoundError('Preview not found')
@@ -481,6 +486,19 @@ class TaskController:
             code = value.get('code') or ''
             if 'layer' in value:
                 layer = {**value['layer'], 'bounds': layer_focus_bounds(value)}
+                if layer.get('kind') == 'geojson':
+                    ref = layer.get('artifact_ref')
+                    render_as = layer.get('renderAs')
+                    if not isinstance(ref, str) or not re.fullmatch(r'[0-9a-f]{32}', ref) or render_as not in {'line', 'circle', 'fill'}:
+                        continue
+                    cid, job_id = task.receipt['conversation_id'], task.receipt['id']
+                    layers.append({
+                        'kind': 'geojson', 'renderAs': render_as, 'artifact_ref': ref,
+                        'name': layer['name'], 'bounds': layer['bounds'], 'visible': layer.get('visible') is True,
+                        'metadata': layer['metadata'],
+                        'data_url': f'/api/harness/conversations/{cid}/tasks/{job_id}/osm/{ref}.geojson',
+                    })
+                    continue
                 layer['generation'] = generation_recipe(code, layer, snapshot)
                 layer.update(code=code, reloadable=layer['generation'] is not None)
                 layers.append(layer)

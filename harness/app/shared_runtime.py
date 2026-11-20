@@ -69,6 +69,8 @@ class SharedRuntime:
                 env={**self.bridge.environment(), 'WEBGIS_ROOT': str(self.root),
                      'SATGPT_HARNESS_PYTHON': sys.executable, 'SATGPT_GEE_WORKERS': str(self.workers),
                      'SATGPT_GEE_QUEUE_LIMIT': str(integer('SATGPT_GEE_QUEUE_LIMIT')),
+                     'SATGPT_OSM_TOOLS': os.environ.get('SATGPT_OSM_TOOLS', '0'),
+                     'SATGPT_OVERPASS_URL': os.environ.get('SATGPT_OVERPASS_URL', ''),
                      'SATGPT_HARNESS_TIMING_LOG': os.environ.get('SATGPT_HARNESS_TIMING_LOG', ''),
                      'SATGPT_CATALOG_CACHE': str(self.home.parent / 'catalog'),
                      'SATGPT_CONTROL_TOKEN': self.token, 'SATGPT_CONTROL_PORT_FILE': str(port_file),

@@ -20,7 +20,7 @@ function englishText(value) {
 export function applyEnglishMapLabels(map) {
   for (const layer of map.getStyle?.()?.layers || []) {
     const field = layer.layout?.['text-field'];
-    if (layer.type !== 'symbol' || field == null) continue;
+    if (layer.type !== 'symbol' || field == null || layer.id.startsWith('satgpt-layer-')) continue;
     const translated = englishText(field);
     if (JSON.stringify(field) !== JSON.stringify(translated)) {
       map.setLayoutProperty(layer.id, 'text-field', translated);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { useSharedMap } from '../../map/SharedMapContext';
@@ -26,6 +26,11 @@ export function useAgentRegion(conversationId, messages, active, draftKey) {
   }, [conversationId, draftKey]);
   const current = useRef(selection); current.current = selection;
   const isActive = useRef(active); isActive.current = active;
+  useLayoutEffect(() => {
+    if (!active || !selection.editing || !shared.service) return undefined;
+    shared.service.setOsmPickingSuspended(true);
+    return () => shared.service.setOsmPickingSuspended(false);
+  }, [active, selection, selection.editing, shared.service]);
   useEffect(() => {
     if (attached.current === selection) attached.current = null;
   }, [conversationId, selection]);

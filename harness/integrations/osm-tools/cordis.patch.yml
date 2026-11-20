@@ -1,0 +1,3 @@
+- insert:
+    - id: satgpt-osm-tools
+      name: '@local/satgpt-osm-tools'
