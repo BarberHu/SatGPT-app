@@ -97,7 +97,7 @@ export default function BasicLayerWorkspace() {
     setCollapsed(false);
     setNotice('Select a different grid on the map if needed, then apply your changes.');
   };
-  const renderList = (entries, title, extra) => <section className="preset-list"><h3>{title}</h3>{entries.map(preset => <div key={preset.key} className={`preset-catalog-item${selected === preset.key ? ' is-selected' : ''}`}>
+  const renderList = (entries, title, extra) => <section className="preset-list">{title ? <h3>{title}</h3> : null}{entries.map(preset => <div key={preset.key} className={`preset-catalog-item${selected === preset.key ? ' is-selected' : ''}`}>
     <button type="button" className="preset-select" aria-expanded={selected === preset.key} onClick={() => selectPreset(preset.key)}>
       <Layers size={16} /><span><strong>{preset.title}</strong><small>{preset.model ? 'Model-based index' : preset.detailText || 'JRC · 1984–2021'}</small></span><ChevronRight size={15} />
     </button>
@@ -113,7 +113,7 @@ export default function BasicLayerWorkspace() {
           <nav className="preset-themes" aria-label="Hazard theme">{presetThemes.map(id => { const Icon = icons[id]; return <button key={id} type="button" aria-pressed={theme === id} onClick={() => { setTheme(id); selectPreset(presetLayerCatalog.find(preset => preset.theme === id).key); }}><Icon size={16} />{labels[id]}</button>; })}</nav>
           {aoiStorageError ? <p className="preset-notice" role="alert">{aoiStorageError}</p> : null}
           {notice ? <p className="preset-notice" role="status">{notice}</p> : null}
-          {renderList(presetLayerCatalog.filter(preset => preset.theme === theme), `${labels[theme]} presets`)}
+          {renderList(presetLayerCatalog.filter(preset => preset.theme === theme))}
           {renderList(presetLayerCatalog.filter(preset => preset.theme === 'context'), 'Context',
             <><div className="preset-road-entry">
               <div className="preset-road-label"><Route size={16} aria-hidden="true" /><span><strong>Road network</strong><small>Mapbox Streets v8</small></span></div>

@@ -78,6 +78,26 @@ test('the layer library has no study area tools and enables loading after grid s
   expect(state.request).not.toHaveBeenCalled();
 });
 
+test('hazard themes switch the layer list without repeating their names as headings', async () => {
+  await act(async () => root.render(<AppProvider><Probe /></AppProvider>));
+  const library = node.querySelector('[aria-label="Layer library"]');
+  const themeButtons = [...library.querySelectorAll('[aria-label="Hazard theme"] button')];
+  const expectedLayers = [
+    ['JRC annual water classification', 'Inundation Hotspot'],
+    ['Wildfire Risk', 'Burn History'],
+    ['Landslide Risk', 'Slope Steepness'],
+  ];
+  expect(themeButtons.map(button => button.textContent)).toEqual(['Flood', 'Wildfire', 'Landslide']);
+
+  for (const [index, button] of themeButtons.entries()) {
+    await act(async () => button.click());
+    expect(themeButtons.filter(theme => theme.getAttribute('aria-pressed') === 'true')).toEqual([button]);
+    expect([...library.querySelectorAll('.preset-list:first-of-type .preset-select strong')].map(title => title.textContent))
+      .toEqual(expectedLayers[index]);
+    expect([...library.querySelectorAll('.preset-list h3')].map(title => title.textContent)).toEqual(['Context']);
+  }
+});
+
 const sendTileStatus = (id, stateName) => act(async () => {
   for (const listener of state.tileListeners) {
     listener({ id, url: 'mapbox://mapbox.mapbox-streets-v8', state: stateName });
