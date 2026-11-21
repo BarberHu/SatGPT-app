@@ -9,7 +9,7 @@ import PresetMapController from '../presets/PresetMapController';
 import { FakeMap } from './tests/fakeMap';
 import { MapboxAdapter } from './mapboxAdapter';
 import { MapService } from './mapService';
-import { MAPBOX_STREETS_V8 } from './layerSpec';
+import { BUILDING_FOOTPRINT_MIN_ZOOM, MAPBOX_STREETS_V8 } from './layerSpec';
 import { ROAD_LEVELS, ROAD_OUTLINE_COLOR } from './roadLevels';
 const observed=vi.hoisted(()=>({context:null,resolve:null}));
 vi.mock('mapbox-gl',async()=>{const {FakeMap}=await import('./tests/fakeMap');return {default:{Map:FakeMap,NavigationControl:class{onAdd(){return document.createElement('div');}onRemove(){}}}};});
@@ -234,6 +234,70 @@ test('the road canvas clips outlined lines, preserves road hierarchy and is expo
     scope.setRoadLevels('roads', []);
     expect(overlay.hidden).toBe(true);
     expect(service.captureSnapshot()).toBe('data:image/png;base64,AA==');
+  } finally {
+    service.dispose();
+    context.mockRestore();
+    png.mockRestore();
+  }
+});
+
+test('building footprints preserve holes behind the grid mask and export after a basemap switch', async () => {
+  const draw = Object.fromEntries([
+    'setTransform', 'clearRect', 'save', 'beginPath', 'moveTo', 'lineTo', 'closePath', 'clip', 'fill', 'stroke', 'restore',
+  ].map(name => [name, vi.fn()]));
+  const composite = { drawImage: vi.fn() };
+  const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function getContext() {
+    return this.classList.contains('building-tiles-canvas') ? draw : composite;
+  });
+  const png = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,buildings');
+  const engine = new MapboxAdapter(document.createElement('div'), { token: 'pk.test', style: 'mapbox://styles/test' });
+  const service = new MapService(engine);
+  const group = 'basic:presets';
+  const scope = service.scope(group);
+  const raw = engine.map;
+  const polygon = [
+    [[99.75, 10.5], [100.75, 10.5], [100.75, 11.5], [99.75, 11.5], [99.75, 10.5]],
+    [[100.25, 10.75], [100.5, 10.75], [100.5, 11], [100.25, 11], [100.25, 10.75]],
+  ];
+  raw.project = ([lng, lat]) => ({ x: 50 + (lng - 100) * 100, y: 100 - (lat - 10) * 40 });
+  raw.queryRenderedFeatures = vi.fn(() => [
+    { geometry: { type: 'Polygon', coordinates: polygon } },
+    { geometry: { type: 'MultiPolygon', coordinates: [[polygon[0]], [polygon[0]]] } },
+  ]);
+  const add = (id, bounds) => scope.addLayer({ id, kind: 'vector', url: MAPBOX_STREETS_V8,
+    sourceLayer: 'building', renderAs: 'fill', bounds });
+  const canvases = () => [...raw.getContainer().querySelectorAll('.building-tiles-canvas')];
+  const layerId = id => `satgpt-layer-${service.physical(group, id)}`;
+
+  try {
+    add('one', [100, 10, 101, 12]);
+    const first = canvases()[0];
+    expect(raw.getLayer(layerId('one'))).toMatchObject({ type: 'fill', minzoom: BUILDING_FOOTPRINT_MIN_ZOOM,
+      'source-layer': 'building', paint: { 'fill-opacity': 0 } });
+    expect(raw.getLayer(layerId('one')).filter[1]).toEqual(['==', ['geometry-type'], 'Polygon']);
+    raw.fire('render');
+    expect(raw.queryRenderedFeatures).toHaveBeenCalledExactlyOnceWith([[50, 20], [150, 100]], { layers: [layerId('one')] });
+    expect(draw.moveTo.mock.calls.slice(0, 3)).toEqual([[50, 100], [25, 80], [75, 70]]);
+    expect(draw.clip.mock.invocationCallOrder[0]).toBeLessThan(draw.fill.mock.invocationCallOrder[0]);
+    expect(draw.fill.mock.calls).toEqual([['evenodd'], ['evenodd'], ['evenodd']]);
+
+    add('two', [101, 10, 102, 12]);
+    scope.setVisibility('one', false);
+    const change = service.setBasemap('mapbox://styles/mapbox/light-v11');
+    raw.finishStyle();
+    await change;
+    expect(first.parentNode).toBeNull();
+    expect(canvases().map(canvas => canvas.hidden)).toEqual([true, false]);
+    expect(service.captureSnapshot()).toBe('data:image/png;base64,buildings');
+    expect(composite.drawImage.mock.calls).toEqual([
+      [raw.getCanvas(), 0, 0], [canvases()[1], 0, 0, raw.getCanvas().width, raw.getCanvas().height],
+    ]);
+    service.setMode('agent');
+    expect(canvases().map(canvas => canvas.hidden)).toEqual([true, true]);
+    service.setMode('basic');
+    expect(canvases().map(canvas => canvas.hidden)).toEqual([true, false]);
+    scope.removeLayer('one');
+    expect(canvases().map(canvas => canvas.hidden)).toEqual([false]);
   } finally {
     service.dispose();
     context.mockRestore();

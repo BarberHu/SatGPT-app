@@ -1,6 +1,7 @@
 import mapboxgl from 'mapbox-gl';
 import { BasicMapPort } from './BasicMapPort';
-import { MAPBOX_STREETS_V8 } from './layerSpec';
+import { BUILDING_FOOTPRINT_MIN_ZOOM, MAPBOX_STREETS_V8 } from './layerSpec';
+import { BuildingTileOverlay } from './BuildingTileOverlay';
 import { OsmFeatureInteraction } from './OsmFeatureInteraction';
 import { ROAD_CLASSES, ROAD_LEVELS } from './roadLevels';
 import { RoadTileOverlay } from './RoadTileOverlay';
@@ -205,13 +206,15 @@ export class MapboxAdapter {
     if (layer.kind === 'vector') {
       const streets = layer.url === MAPBOX_STREETS_V8;
       const roads = streets && layer.sourceLayer === 'road';
+      const buildings = streets && layer.sourceLayer === 'building' && layer.renderAs === 'fill';
       const clippedRoads = roads && Array.isArray(layer.roadLevels);
+      const clippedBuildings = buildings && layer.bounds;
       this.map.addSource(sourceId, {
         type: 'vector',
         ...(streets ? { url: layer.url, bounds: layer.bounds } : { tiles: [layer.url] }),
       });
       const paint = layer.renderAs === 'fill'
-        ? { 'fill-color': '#1f83c7', 'fill-opacity': layer.opacity }
+        ? { 'fill-color': '#1f83c7', 'fill-opacity': clippedBuildings ? 0 : layer.opacity }
         : layer.renderAs === 'circle'
           ? { 'circle-color': '#1f83c7', 'circle-opacity': layer.opacity, 'circle-radius': 5 }
           : { 'line-color': '#1f83c7', 'line-opacity': clippedRoads ? 0 : layer.opacity, 'line-width': 2 };
@@ -219,10 +222,16 @@ export class MapboxAdapter {
         type: layer.renderAs, layout: { visibility: layer.visible ? 'visible' : 'none' }, paint,
         ...(roads && { filter: ['all', ['==', ['geometry-type'], 'LineString'],
           ['in', ['get', 'class'], ['literal', clippedRoads ? ROAD_CLASSES : ROAD_LEVELS[0].classes]]] }),
+        ...(buildings && { minzoom: BUILDING_FOOTPRINT_MIN_ZOOM,
+          filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['!=', ['get', 'type'], 'building:part'],
+            ['!=', ['get', 'underground'], 'true']] }),
       }, this.overlayAnchor());
       const overlayOptions = { layerId, sourceId, bounds: layer.bounds, visible: layer.visible, opacity: layer.opacity };
       if (clippedRoads) {
         this.gridOverlays.set(layer.id, new RoadTileOverlay(this.map, { ...overlayOptions, levels: layer.roadLevels }));
+      }
+      if (clippedBuildings) {
+        this.gridOverlays.set(layer.id, new BuildingTileOverlay(this.map, overlayOptions));
       }
       return;
     }

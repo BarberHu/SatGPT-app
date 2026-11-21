@@ -48,7 +48,7 @@
 .preset-road-levels input { margin: 0; accent-color: var(--satgpt-ui-accent); }
 .preset-road-swatch { display: inline-grid; place-items: center; flex: none; width: 16px; height: var(--road-swatch-outline-width); border-radius: 99px; background: var(--road-swatch-outline-color); }
 .preset-road-swatch::before { content: ''; width: calc(100% - 2px); height: var(--road-swatch-width); border-radius: inherit; background: var(--road-swatch-color); }
-.road-tiles-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.road-tiles-canvas, .building-tiles-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .satgpt-root[data-mode="basic"]:has([data-grid-tiles-visible]) .mapboxgl-ctrl-logo,
 .satgpt-root[data-mode="basic"]:has([data-grid-tiles-visible]) .mapboxgl-ctrl-attrib:is(:not(.mapboxgl-compact), .mapboxgl-compact-show) .mapboxgl-ctrl-attrib-inner {
   display: block;

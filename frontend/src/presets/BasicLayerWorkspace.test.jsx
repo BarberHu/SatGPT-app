@@ -27,7 +27,7 @@ beforeEach(()=>{
    state.tileListeners.add(listener);
    return ()=>state.tileListeners.delete(listener);
  }};
- state.service={scope:()=>state.scope};
+ state.service={scope:()=>state.scope,getCurrentView:()=>({zoom:8}),subscribeView:vi.fn()};
  state.request=vi.fn(async row=>({status:'ready',layer:{id:row.id,name:row.presetId,kind:'gee',url:'https://earthengine.googleapis.com/v1/projects/p/maps/m/tiles/{z}/{x}/{y}',metadata:{source:'Verified source',observedAt:'2021',description:'Verified method'},legend:{type:'continuous',colors:['#000000'],min:0,max:1},visible:true,opacity:.8}}));
  vi.stubGlobal('fetch',vi.fn(async()=>({json:async()=>({})})));
  node=document.createElement('div');document.body.appendChild(node);root=createRoot(node);
@@ -84,6 +84,46 @@ const sendTileStatus = (id, stateName) => act(async () => {
   }
 });
 const roadCard = longitude => node.querySelector(`[aria-label="Layer Road network, Grid 10.500° N, ${longitude}.500° E"]`);
+const buildingCard = longitude => node.querySelector(`[aria-label="Layer Building footprints, Grid 10.500° N, ${longitude}.500° E"]`);
+
+test('building footprints append by grid and have their own visibility and removal', async () => {
+  await act(async () => root.render(<AppProvider><Probe /></AppProvider>));
+  const load = [...node.querySelectorAll('button')].find(button => button.textContent === 'Load buildings');
+  expect(load.disabled).toBe(true);
+  await selectGrid();
+  expect(load.disabled).toBe(false);
+  await click('Load buildings');
+  expect(buildingCard(100).textContent).toContain('Zoom in to see building footprints.');
+  await act(async () => state.service.subscribeView.mock.lastCall[0]({zoom:16}));
+  expect(buildingCard(100).textContent).not.toContain('Zoom in');
+  await selectGrid(101);
+  expect(buildingCard(100)).not.toBeNull();
+  expect(load.disabled).toBe(false);
+  await click('Load buildings');
+  expect(state.scope.addLayer.mock.calls.map(([layer]) => layer)).toEqual([
+    expect.objectContaining({ sourceLayer: 'building', renderAs: 'fill', bounds: [100, 10, 101, 11] }),
+    expect.objectContaining({ sourceLayer: 'building', renderAs: 'fill', bounds: [101, 10, 102, 11] }),
+  ]);
+  await selectGrid();
+  expect(load.disabled).toBe(true);
+  await click('Load buildings');
+  expect(state.scope.addLayer).toHaveBeenCalledTimes(2);
+  expect(node.querySelector('.workspace-layer-count').textContent).toBe('2');
+  await click('Hide Building footprints, Grid 10.500° N, 100.500° E');
+  expect(state.scope.setVisibility).toHaveBeenCalledExactlyOnceWith('basic-building-footprints-1', false);
+  expect(buildingCard(101).classList.contains('is-hidden')).toBe(false);
+  const threeD = [...node.querySelectorAll('.preset-map-options label')].find(label => label.textContent === '3D Buildings');
+  const before = state.context.isBuildingsEnabled;
+  await act(async () => threeD.querySelector('input').click());
+  expect(state.context.isBuildingsEnabled).toBe(!before);
+  expect(state.scope.setVisibility).toHaveBeenCalledTimes(1);
+  await click('Remove Building footprints, Grid 10.500° N, 100.500° E');
+  expect(state.scope.removeLayer).toHaveBeenCalledExactlyOnceWith('basic-building-footprints-1');
+  expect(buildingCard(100)).toBeNull();
+  expect(buildingCard(101)).not.toBeNull();
+  expect(load.disabled).toBe(false);
+});
+
 test('loads, toggles, and removes the selected grid road tiles without posting to the road API', async () => {
   const post = vi.spyOn(httpClient, 'post');
   try {

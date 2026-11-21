@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Layers, Droplets, Eye, EyeOff, Flame, Mountain, Route, Trash2 } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, Layers, Droplets, Eye, EyeOff, Flame, Mountain, Route, Trash2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useSharedMap } from '../map/SharedMapContext';
 import { presetLayerCatalog, presetById, presetThemes } from '../config/presetLayerCatalog';
 import { aoiKey } from './PresetLayerStore';
 import usePresetLayers from '../hooks/usePresetLayers';
-import useGridTileLayers, { ROAD_NETWORK } from '../hooks/useGridTileLayers';
+import useGridTileLayers, { BUILDING_FOOTPRINTS, ROAD_NETWORK } from '../hooks/useGridTileLayers';
+import { BUILDING_FOOTPRINT_MIN_ZOOM } from '../map/layerSpec';
 import { ROAD_LEVELS, ROAD_OUTLINE_COLOR } from '../map/roadLevels';
 import PresetMapController from './PresetMapController';
 import PresetParameterForm from './PresetParameterForm';
@@ -16,13 +17,15 @@ import LayerPanel from '../map/LayerPanel';
 const labels = { flood: 'Flood', wildfire: 'Wildfire', landslide: 'Landslide' };
 const icons = { flood: Droplets, wildfire: Flame, landslide: Mountain };
 
-function GridTileCard({ row, tiles, icon: Icon }) {
+function GridTileCard({ row, tiles, icon: Icon, zoomRequired = false }) {
   const { id, bounds, name } = row.layer;
   const [west, south, east, north] = bounds;
   const lat = (south + north) / 2;
   const lng = (west + east) / 2;
   const grid = `Grid ${Math.abs(lat).toFixed(3)}° ${lat < 0 ? 'S' : 'N'}, ${Math.abs(lng).toFixed(3)}° ${lng < 0 ? 'W' : 'E'}`;
-  const visible = row.visible && row.levels.length > 0;
+  const isRoad = row.levels !== null;
+  const visible = row.visible && (!isRoad || row.levels.length > 0);
+  const tileName = isRoad ? 'road' : 'building';
   return <article className={`preset-layer-card${row.visible ? '' : ' is-hidden'}`} aria-label={`Layer ${name}, ${grid}`}
     data-grid-tiles-visible={visible ? '' : undefined}>
     <div className="preset-layer-row preset-road-row">
@@ -35,7 +38,7 @@ function GridTileCard({ row, tiles, icon: Icon }) {
         <button type="button" aria-label={`Remove ${name}, ${grid}`} onClick={() => tiles.remove(id)}><Trash2 size={16} /></button>
       </div>
     </div>
-    <div className="preset-road-levels" role="group" aria-label="Road levels">
+    {isRoad ? <div className="preset-road-levels" role="group" aria-label="Road levels">
       {ROAD_LEVELS.map(level => <label key={level.id}>
         <input type="checkbox" checked={row.levels.includes(level.id)} onChange={() => tiles.toggleLevel(id, level.id)} />
         <span className="preset-road-swatch" aria-hidden="true" style={{
@@ -46,10 +49,11 @@ function GridTileCard({ row, tiles, icon: Icon }) {
         }} />
         {level.label}
       </label>)}
-    </div>
-    {visible && row.status === 'loading' ? <small role="status">Loading road tiles…</small> : null}
+    </div> : null}
+    {visible && zoomRequired ? <small>Zoom in to see building footprints.</small> : null}
+    {visible && !zoomRequired && row.status === 'loading' ? <small role="status">Loading {tileName} tiles…</small> : null}
     {row.status === 'error' ? <div className="preset-layer-warning" role="status">
-      <span>Mapbox road tiles failed to load.</span>
+      <span>Mapbox {tileName} tiles failed to load.</span>
       <button type="button" onClick={() => tiles.retry(id)}>Retry</button>
     </div> : null}
   </article>;
@@ -61,13 +65,21 @@ export default function BasicLayerWorkspace() {
   const { service } = useSharedMap();
   const { rows, store } = usePresetLayers();
   const roads = useGridTileLayers(selectedAOI, service, ROAD_NETWORK);
+  const buildings = useGridTileLayers(selectedAOI, service, BUILDING_FOOTPRINTS);
+  const [buildingZoomRequired, setBuildingZoomRequired] = useState(true);
+  useEffect(() => {
+    if (!service) return undefined;
+    const update = view => setBuildingZoomRequired(view.zoom < BUILDING_FOOTPRINT_MIN_ZOOM);
+    update(service.getCurrentView());
+    return service.subscribeView(update);
+  }, [service]);
   const [theme, setTheme] = useState('flood');
   const [selected, setSelected] = useState('singleInundationEvent');
   const [editing, setEditing] = useState(null);
   const [collapsed, setCollapsed] = useState(() => window.matchMedia?.('(max-width: 760px)').matches || false);
   const [layersOpen, setLayersOpen] = useState(true);
   const [notice, setNotice] = useState('');
-  const layerCount = rows.length + roads.rows.length;
+  const layerCount = rows.length + roads.rows.length + buildings.rows.length;
   useEffect(() => {
     fetch('/assets/data/countries.json').then(response => response.json()).then(setCountries).catch(() => {});
   }, [setCountries]);
@@ -103,21 +115,27 @@ export default function BasicLayerWorkspace() {
           {notice ? <p className="preset-notice" role="status">{notice}</p> : null}
           {renderList(presetLayerCatalog.filter(preset => preset.theme === theme), `${labels[theme]} presets`)}
           {renderList(presetLayerCatalog.filter(preset => preset.theme === 'context'), 'Context',
-            <div className="preset-road-entry">
+            <><div className="preset-road-entry">
               <div className="preset-road-label"><Route size={16} aria-hidden="true" /><span><strong>Road network</strong><small>Mapbox Streets v8</small></span></div>
               <button type="button" disabled={roads.disabled} onClick={() => { setLayersOpen(true); roads.load(); }}>
                 {roads.current?.status === 'error' ? 'Retry roads' : 'Load roads'}
               </button>
-            </div>)}
+            </div><div className="preset-road-entry">
+              <div className="preset-road-label"><Building2 size={16} aria-hidden="true" /><span><strong>Building footprints</strong><small>Mapbox Streets v8</small></span></div>
+              <button type="button" disabled={buildings.disabled} onClick={() => { setLayersOpen(true); buildings.load(); }}>
+                {buildings.current?.status === 'error' ? 'Retry buildings' : 'Load buildings'}
+              </button>
+            </div></>)}
           <details className="preset-map-options"><summary>Map display</summary><label><input type="checkbox" checked={is3DEnabled} onChange={event => setIs3DEnabled(event.target.checked)} />3D terrain</label>
-            <label><input type="checkbox" checked={isBuildingsEnabled} onChange={event => setIsBuildingsEnabled(event.target.checked)} />Buildings</label></details>
+            <label><input type="checkbox" checked={isBuildingsEnabled} onChange={event => setIsBuildingsEnabled(event.target.checked)} />3D Buildings</label></details>
         </div>
       </aside>}
     <LayerPanel count={layerCount} open={layersOpen} onOpenChange={setLayersOpen} className="preset-current-layers" scrollClassName="preset-current-scroll">
       {roads.rows.map(row => <GridTileCard key={`road-${row.selection}`} row={row} tiles={roads} icon={Route} />)}
+      {buildings.rows.map(row => <GridTileCard key={`building-${row.selection}`} row={row} tiles={buildings} icon={Building2} zoomRequired={buildingZoomRequired} />)}
       {rows.map((row, index) => <PresetLayerCard key={row.id} row={row} store={store} first={index === 0} last={index === rows.length - 1}
         stale={aoiKey(row.aoi) !== aoiKey(selectedAOI)} onEdit={edit} onFocus={row => service?.scope('basic:presets').setView({ bounds: [row.aoi.bounds.west, row.aoi.bounds.south, row.aoi.bounds.east, row.aoi.bounds.north] })} />)}
-      {!layerCount ? <p className="preset-empty">Select a grid cell on the map, then load a preset or roads.</p> : null}
+      {!layerCount ? <p className="preset-empty">Select a grid cell on the map, then load a preset, roads or buildings.</p> : null}
     </LayerPanel>
   </div>;
 }

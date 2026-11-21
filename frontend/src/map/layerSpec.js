@@ -3,6 +3,7 @@ import { normalizeRoadLevels } from './roadLevels';
 const GEE_TILE = /^https:\/\/earthengine\.googleapis\.com\/v1\/projects\/[\w./-]+\/tiles\/\{z\}\/\{x\}\/\{y\}$/;
 const OSM_RESULT = /^\/api\/harness\/conversations\/webgis-[a-f0-9]{32}\/tasks\/[a-f0-9]{32}\/osm\/[a-f0-9]{32}\.geojson$/;
 export const MAPBOX_STREETS_V8 = 'mapbox://mapbox.mapbox-streets-v8';
+export const BUILDING_FOOTPRINT_MIN_ZOOM = 13;
 
 export function normalizeLayer(spec) {
   if (!spec || typeof spec !== 'object') throw new TypeError('Layer must be an object');
@@ -24,7 +25,8 @@ export function normalizeLayer(spec) {
   const roadLevels = streets && spec.sourceLayer === 'road' && Array.isArray(spec.roadLevels)
     ? normalizeRoadLevels(spec.roadLevels) : null;
   const bounds = Array.isArray(spec.bounds) ? spec.bounds : null;
-  if (roadLevels && (bounds?.length !== 4 || !bounds.every(Number.isFinite) ||
+  const clippedBuildings = streets && spec.sourceLayer === 'building' && spec.bounds != null;
+  if ((roadLevels || clippedBuildings) && (bounds?.length !== 4 || !bounds.every(Number.isFinite) ||
       bounds[0] >= bounds[2] || bounds[1] >= bounds[3])) {
     throw new TypeError('A grid tile overlay requires valid grid bounds');
   }

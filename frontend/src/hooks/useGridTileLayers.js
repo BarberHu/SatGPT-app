@@ -4,6 +4,7 @@ import { DEFAULT_ROAD_LEVELS } from '../map/roadLevels';
 import { aoiKey } from '../presets/PresetLayerStore';
 
 export const ROAD_NETWORK = { idPrefix: 'basic-road-network', name: 'Road network', sourceLayer: 'road', renderAs: 'line', levels: DEFAULT_ROAD_LEVELS };
+export const BUILDING_FOOTPRINTS = { idPrefix: 'basic-building-footprints', name: 'Building footprints', sourceLayer: 'building', renderAs: 'fill' };
 
 export default function useGridTileLayers(selectedAOI, service, { idPrefix, name, sourceLayer, renderAs, levels = null }) {
   const selection = useMemo(() => aoiKey(selectedAOI), [selectedAOI]);

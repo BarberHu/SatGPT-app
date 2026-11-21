@@ -32,6 +32,8 @@ Agent result layers retain their own `generation` recipe: original Python code, 
 
 **Load roads** adds a Mapbox Streets v8 overlay for the selected grid. To display roads across several grids, select each grid and click **Load roads**. Current layers shows one road card per loaded grid, identified by its center coordinates. Each card controls its own visibility, road levels, retry and removal. The overlays retain their original grid bounds and remain available for the life of the workspace, including across basemap and mode switches.
 
+**Load buildings** adds a separate Mapbox Streets v8 building-footprint overlay for a grid. Each loaded grid has its own card, visibility, retry and removal. Footprints appear at zoom 13 and above, are clipped to the loaded grid, and are included in map PNG captures when visible. The **3D Buildings** display option continues to control extruded buildings independently.
+
 From `frontend/`, run `npm test` for Vitest regressions, `npm run test:node` for chat/grid integration checks and `npm run build` for production validation. The grid integration test checks complete geometry at five zoom levels and nine click positions, then submits that geometry through the current preset request adapter. Shared-map and preset tests cover hidden-mode responses, layer choices, drawing, cancellation and disposal.
 
 ## Saved analysis areas
