@@ -284,5 +284,5 @@ export function useAgentChat({ visible = true } = {}) {
   const conversationsWithActivity = useConversationActivity(sidebarConversations, conversation, visible && !loading, deletedId);
   return { ...view, conversationId: conversation.conversation_id, draftKey, messages: conversation.messages,
     conversations: conversationsWithActivity, loading, pending, stopping, deleting, reconnecting, error, clearError: () => setError(''),
-    changeConversation, deleteConversation, send, stop };
+    changeConversation, deleteConversation, refreshList, send, stop };
 }

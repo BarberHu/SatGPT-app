@@ -19,6 +19,7 @@ from pathlib import Path
 from weakref import WeakValueDictionary
 
 from satgpt_config import integer
+from . import history_recovery
 from .agent import conversation_prompt, describe_run_failure
 from .identity import BrowserIdentity
 from .session_store import ACTIVE, SessionStore, encode, message, timestamp
@@ -194,19 +195,73 @@ class TaskController:
                     or any(conversation == cid for conversation, _ in self.reloads)):
                 raise AdmissionError('conversation_busy', 'This conversation is busy.', 409)
             db.execute('UPDATE conversations SET deleted=1 WHERE id=?', (cid,))
+            db.execute('DELETE FROM history_proofs WHERE conversation_id=?', (cid,))
         # Keep native logs and artifacts intact while their Agent may still be resident.
         replacement = self.current(owner)
         return {'deleted_id': cid, 'conversation': replacement, 'conversations': self.list_conversations(owner)}
 
-    def _artifact_fields(self, owner, cid, task_id):
-        return {'artifact_dir': str(self.state / 'artifacts' / owner / cid / task_id),
+    def history_proof(self, owner, cid):
+        with self.store.connect(write=True) as db:
+            self.store.owned(db, owner, cid)
+            return history_recovery.issue_proof(db, cid)
+
+    def create_history_request(self, owner):
+        with self.store.connect(write=True) as db:
+            return history_recovery.open_request(db, owner)
+
+    def history_request_status(self, owner):
+        with self.store.connect() as db:
+            return history_recovery.request_status(db, owner)
+
+    def claim_history(self, owner, request_id):
+        with self.store.connect(write=True) as db:
+            history_recovery.mark_attempt(db, owner, request_id)
+        with self.lock:
+            try:
+                return self._transfer_history(owner, request_id)
+            except sqlite3.IntegrityError as exc:
+                if str(exc) != 'UNIQUE constraint failed: tasks.owner, tasks.request_id':
+                    raise
+                error = history_recovery.RecoveryError('request_conflict', 'A task request ID conflicts with the receiving history.')
+            except history_recovery.RecoveryError as exc:
+                error = exc
+            with self.store.connect(write=True) as db:
+                request = history_recovery.claim_request(db, owner, request_id)
+                for approval in history_recovery.approvals_for(db, request_id):
+                    history_recovery.audit(db, request, approval, error.code)
+            raise error
+
+    def _transfer_history(self, owner, request_id):
+        with self.store.connect(write=True) as db:
+            request = history_recovery.claim_request(db, owner, request_id)
+            approved = history_recovery.approvals_for(db, request_id)
+            if request['consumed'] is not None:
+                return {'count': len(approved)}
+            if not approved:
+                raise history_recovery.RecoveryError('approval_pending', 'The deployer has not approved this request yet.')
+            for approval in approved:
+                cid, source = approval['conversation_id'], approval['source_owner']
+                try:
+                    self.store.owned(db, source, cid)
+                except FileNotFoundError:
+                    raise history_recovery.RecoveryError('stale_approval', 'A selected conversation is no longer available.') from None
+                if self.store.has_active_task(db, source, cid) or any(key[0] == cid for key in self.reloads):
+                    raise history_recovery.RecoveryError('conversation_busy', 'A conversation is busy. Try again after its work finishes.')
+                history_recovery.transfer_conversation(db, approval, owner)
+                history_recovery.audit(db, request, approval, 'transferred')
+            db.execute('UPDATE history_requests SET consumed=? WHERE id=?', (int(time.time()), request_id))
+            return {'count': len(approved)}
+
+    def _artifact_fields(self, storage_owner, cid, task_id):
+        return {'artifact_dir': str(self.state / 'artifacts' / storage_owner / cid / task_id),
                 'artifact_url': f'/api/previews/{cid}/{task_id}'}
 
     def artifact(self, owner, cid, task_id, filename, *, osm=False):
         if not re.fullmatch(r'[0-9a-f]{32}\.' + ('geojson' if osm else 'png'), filename):
             raise FileNotFoundError('Preview not found')
         with self.store.connect() as db:
-            self.store.owned(db, owner, cid)
+            db.execute('BEGIN')
+            row = self.store.owned(db, owner, cid)
             task = self.store.read_task(db, owner, task_id)
             if task['conversation_id'] != cid or task['status'] != 'completed':
                 raise FileNotFoundError('Preview not found')
@@ -215,7 +270,7 @@ class TaskController:
                 for layer in (task.get('output') or {}).get('layers', [])
             ):
                 raise FileNotFoundError('OSM result not found')
-        path = Path(self._artifact_fields(owner, cid, task_id)['artifact_dir']) / filename
+        path = Path(self._artifact_fields(row['artifact_owner'] or owner, cid, task_id)['artifact_dir']) / filename
         if not path.is_file():
             raise FileNotFoundError('Preview not found')
         return path
@@ -241,7 +296,7 @@ class TaskController:
                 raise AdmissionError('layer_busy', 'This layer is already reloading.', 409)
             if len(self.reloads) >= self.gee_workers * 2 or sum(value == owner for value in self.reloads.values()) >= 2:
                 raise AdmissionError('reload_capacity', 'Layer reload capacity reached. Try again shortly.')
-            payload.update(self._artifact_fields(owner, cid, item['job_id']))
+            payload.update(self._artifact_fields(row['artifact_owner'] or owner, cid, item['job_id']))
             self.reloads[key] = owner
         settled = False
         try:
@@ -562,7 +617,8 @@ class TaskController:
                 self._update(task, status='running', started_at=timestamp())
             binding = bridge.bind({**snapshot, 'owner_id': task.owner, 'session_id': session_id,
                                    'reasoning_effort': job.get('reasoning_effort', self.runtime.default_reasoning_effort),
-                                   'run_id': task.run_id, **self._artifact_fields(task.owner, cid, job_id)}, task.stream.frame)
+                                   'run_id': task.run_id, **self._artifact_fields(row['artifact_owner'] or task.owner, cid, job_id)},
+                                  task.stream.frame)
             bound = True
             with self.lock:
                 if task.stop_requested is not None:

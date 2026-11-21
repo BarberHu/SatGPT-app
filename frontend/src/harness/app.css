@@ -60,6 +60,18 @@
 .harness-app .agent-map-context i { width: 5px; height: 5px; border-radius: 50%; background: var(--satgpt-ui-accent); flex: none; }
 .harness-app .agent-map-context span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .harness-app .agent-history-empty { color: var(--satgpt-ui-subtle); font-size: 12px; padding: 8px 10px; }
+.harness-app .agent-recovery-trigger { flex: none; margin: 4px 8px 8px; justify-content: flex-start; color: var(--satgpt-ui-muted); }
+.harness-app .agent-recovery-dialog { max-width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; border-radius: 12px; }
+.harness-app .agent-recovery-dialog h2 { padding-right: 24px; }
+.harness-app .agent-recovery-dialog section { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--satgpt-ui-border); }
+.harness-app .agent-recovery-dialog h3 { font-size: 14px; font-weight: 600; }
+.harness-app .agent-recovery-dialog p, .harness-app .agent-recovery-value { font-size: 13px; line-height: 1.5; color: var(--satgpt-ui-muted); }
+.harness-app .agent-recovery-dialog p:empty { display: none; }
+.harness-app .agent-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.harness-app .agent-recovery-dialog section > button { justify-self: start; }
+.harness-app .agent-recovery-value { display: grid; gap: 3px; }
+.harness-app .agent-recovery-value input { width: 100%; border: 1px solid var(--satgpt-ui-border); padding: 4px 6px; font-family: monospace; }
+.harness-app .agent-recovery-dialog .agent-recovery-error { color: hsl(var(--destructive)); }
 .harness-app .agent-workspace { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .harness-app .agent-panels { min-height: 0; flex: 1; }
 .harness-app .agent-chat-panel, .harness-app .agent-map-panel { min-width: 0; }

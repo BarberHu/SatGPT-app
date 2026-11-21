@@ -4,6 +4,7 @@ import { ChevronsLeft, Loader2, Plus } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog';
 import ConversationActions from './ConversationActions';
+import ConversationRecovery from './ConversationRecovery';
 
 function groupedConversations(conversations) {
   const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -16,7 +17,7 @@ function groupedConversations(conversations) {
   return groups.filter(group => group.rows.length);
 }
 
-export default function ConversationSidebar({ conversations, currentId, disabled, onNew, onSelect, onCollapse, onDelete, deleteError, collapseButtonRef }) {
+export default function ConversationSidebar({ conversations, currentId, disabled, onNew, onSelect, onCollapse, onDelete, deleteError, collapseButtonRef, onRecovered }) {
   const [selected, setSelected] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -69,6 +70,7 @@ export default function ConversationSidebar({ conversations, currentId, disabled
         </div>;
       })}</section>)}
     </nav>
+    {onRecovered ? <ConversationRecovery key={currentId} currentId={currentId} onRecovered={onRecovered} /> : null}
     <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open && !submitting.current) setSelected(null); }}>
       <DialogContent className="agent-delete-dialog" onOpenAutoFocus={event => {
         event.preventDefault();

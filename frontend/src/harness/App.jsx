@@ -101,7 +101,7 @@ export default function HarnessApp({ active = true }) {
   };
   const sidebar = <ConversationSidebar conversations={chat.conversations} currentId={chat.conversationId}
     disabled={chat.loading || chat.pending || chat.stopping || chat.deleting} onNew={() => changeConversation()}
-    onDelete={deleteConversation} deleteError={chat.error} collapseButtonRef={historyCollapseButton}
+    onDelete={deleteConversation} deleteError={chat.error} collapseButtonRef={historyCollapseButton} onRecovered={chat.refreshList}
     onSelect={id => changeConversation(id)} onCollapse={() => {
       if (narrow) setMobileHistoryOpen(false);
       else { focusAfterRender.current = historyButton; setHistoryOpen(false); }

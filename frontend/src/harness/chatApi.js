@@ -54,6 +54,11 @@ export const chatApi = {
   },
   get: (id, signal) => request(conversationPath(id), { signal }),
   list: signal => request('/conversations', { signal }),
+  issueRecoveryProof: id => request(conversationPath(id) + '/recovery-proof', { method: 'POST' }),
+  createRecoveryRequest: () => request('/history-recovery/request', { method: 'POST' }),
+  recoveryStatus: signal => request('/history-recovery/request', { signal }),
+  claimRecovery: id => request('/history-recovery/claim', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: id }) }),
   async reasoning(signal) {
     const options = await request('/reasoning', { signal });
     if (!Array.isArray(options?.levels) || options.levels.some(level =>

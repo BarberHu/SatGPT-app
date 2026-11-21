@@ -9,6 +9,8 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .history_recovery import initialize as initialize_history_recovery
+
 ACTIVE = frozenset({'queued', 'starting', 'running', 'cancelling', 'cleaning'})
 _ACTIVE_SQL = ', '.join(f"'{status}'" for status in sorted(ACTIVE))
 TERMINAL = frozenset({'completed', 'failed', 'cancelled', 'interrupted'})
@@ -25,6 +27,18 @@ def encode(value):
 def message(role, content, job_id, **fields):
     return {'id': uuid.uuid4().hex, 'role': role, 'content': content, 'job_id': job_id,
             'created_at': timestamp(), **fields}
+
+
+@contextmanager
+def connect_database(path: Path, *, write=False, mode=None):
+    database = f'{path.resolve().as_uri()}?mode={mode}' if mode else path
+    with closing(sqlite3.connect(database, timeout=3, uri=mode is not None)) as db:
+        db.row_factory = sqlite3.Row
+        db.execute('PRAGMA foreign_keys=ON')
+        if write:
+            db.execute('BEGIN IMMEDIATE')
+        with db:
+            yield db
 
 
 class SessionStore:
@@ -56,7 +70,10 @@ class SessionStore:
                 CREATE INDEX IF NOT EXISTS tasks_conversation ON tasks(conversation_id);
                 CREATE INDEX IF NOT EXISTS tasks_waiting ON tasks(status) WHERE status='queued';
             """)
+            initialize_history_recovery(db)
         with self.connect(write=True) as db:
+            if not any(column['name'] == 'artifact_owner' for column in db.execute('PRAGMA table_info(conversations)')):
+                db.execute('ALTER TABLE conversations ADD COLUMN artifact_owner TEXT')
             unfinished = f'SELECT id, owner, conversation_id, receipt FROM tasks WHERE status IN ({_ACTIVE_SQL}) LIMIT 100'
             while rows := db.execute(unfinished).fetchall():
                 for row in rows:
@@ -75,15 +92,8 @@ class SessionStore:
             db.execute(f'CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_active_per_conversation '
                        f'ON tasks(conversation_id) WHERE status IN ({_ACTIVE_SQL})')
 
-    @contextmanager
     def connect(self, *, write=False):
-        with closing(sqlite3.connect(self.path, timeout=3)) as db:
-            db.row_factory = sqlite3.Row
-            db.execute('PRAGMA foreign_keys=ON')
-            if write:
-                db.execute('BEGIN IMMEDIATE')
-            with db:
-                yield db
+        return connect_database(self.path, write=write)
 
     @staticmethod
     def owned(db, owner, cid):
@@ -123,7 +133,7 @@ class SessionStore:
     @staticmethod
     def read_task(db, owner, job_id):
         row = db.execute('SELECT t.receipt FROM tasks t JOIN conversations c ON t.conversation_id=c.id '
-                         'WHERE t.id=? AND t.owner=? AND c.deleted=0', (job_id, owner)).fetchone()
+                         'WHERE t.id=? AND t.owner=? AND c.owner=t.owner AND c.deleted=0', (job_id, owner)).fetchone()
         if row is None:
             raise FileNotFoundError('Task not found')
         return json.loads(row['receipt'])

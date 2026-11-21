@@ -80,6 +80,27 @@ Basic 的重任务信号量保留，主要限制同步 GEE 请求与瓦片获取
 
 仅支持单 worker、单后端副本。任务和业务图层缓存仍在内存，重启会丢失这些状态；已有会话文件继续保存在原位置。两边不再可以独立重启。本次合并不承诺模型速度、GEE 计算速度或内存占用改善。
 
+## `pro2.0` 正式上线验收：Agent 对话历史恢复
+
+正式上线前，在待发布版本与测试状态卷完成一次恢复演练。确认新浏览器能打开转回的对话和旧图层，再提交一轮依赖旧上下文的追问。分别核查旧浏览器及第三个无关浏览器对迁移后对话、任务和私有产物的访问被拒绝，部署者可看到审批与交接记录。已过期的上游图层按原有重载规则处理。
+
+1. 用户仍能访问原对话时，在 Agent 历史侧栏打开 **Conversation recovery**，为当前对话生成恢复凭证，私下保存对话 ID 和凭证。重新生成会使旧凭证及依赖该凭证的未领取审批失效。每条对话有独立凭证。
+2. Cookie 丢失或换浏览器后，用户在新浏览器的同一入口创建请求码。请求有效期为 24 小时，绑定创建请求的匿名浏览器。用户通过部署者指定的私密支持渠道提供请求码、对话 ID 和原对话的恢复凭证。
+3. 部署者在宿主机或后端容器中执行 `list`、`show` 或 `approve`。`approve` 使用隐藏输入读取请求码和每条对话的恢复凭证，逐条核对凭证与所选对话的绑定，再一次性批准整批。最多选择 20 条，重复传入 `--conversation`。`list` 默认只显示元数据，支持 `--owner`、`--after`、`--before`、`--state`、`--task-status` 和分页。`show` 只在确需核对内容时使用。
+4. 用户在新浏览器点击 **Check approval**，核对数量后点击 **Recover approved conversations**。领取后原对话、任务及产物由新浏览器访问，旧浏览器仍可使用其余历史。正在执行任务或重载图层时，等操作结束再领取。若提示任务请求冲突，整批仍在原归属，部署者可重新选择要交接的对话。
+
+漏存凭证的旧记录，只能通过能把已核验的请求人和具体旧对话联系起来的独立证据审批，例如已有的部署者支持记录中，用户曾在还能访问旧对话时完成归属验证。将证据保留在受控支持系统，命令用 `--verified-case CASE-123` 引用该记录并写入审计。标题、时间、对话 ID 或新浏览器请求码只能辅助定位，其中没有可单独证明旧归属的字段。缺少独立证据时应停止交接。
+
+从仓库根目录运行以下 PowerShell 示例。`--state-dir` 必须指向实际运行的 Harness 状态目录。Windows 开发服务默认使用 `harness/state/dev-multiuser`。Compose 可以用同一项目的 `docker compose exec agent` 在容器内运行 `python -m harness.app.history_admin`，默认状态路径为 `/app/harness/state/multiuser`。权限由部署主机或容器的访问控制管理。
+
+```powershell
+.\harness\.venv\Scripts\python.exe -m harness.app.history_admin --state-dir harness/state/multiuser list --state live --limit 20
+.\harness\.venv\Scripts\python.exe -m harness.app.history_admin --state-dir harness/state/multiuser approve --conversation webgis-EXAMPLE
+.\harness\.venv\Scripts\python.exe -m harness.app.history_admin --state-dir harness/state/multiuser audit webgis-EXAMPLE
+```
+
+Cookie 丢失恢复依赖原状态卷。备份部署时，将 SQLite、`identity.key`、`dsh-home/` 与 `artifacts/` 作为同一组保存。状态卷丢失时按部署备份处理。
+
 ## 回归验证命令
 
 从根目录执行：

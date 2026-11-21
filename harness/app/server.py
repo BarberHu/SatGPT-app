@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.applications import Starlette
 
 from .controller import AdmissionError, TaskController, empty_conversation
+from .history_recovery import RecoveryError
 from .identity import owner_for, session_response
 from .model_config import model_key_configured
 from .shared_runtime import RuntimeUnavailable
@@ -53,13 +54,18 @@ class TaskRequest(BaseModel):
     reasoning_effort: str | None = Field(default=None, min_length=1, max_length=100)
 
 
+class HistoryClaim(BaseModel):
+    model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
+    request_id: str = Field(pattern=r'^[a-f0-9]{32}$')
+
+
 @contextmanager
 def api_errors():
     try:
         yield
     except FileNotFoundError:
         raise HTTPException(404, 'Resource not found') from None
-    except AdmissionError as exc:
+    except (AdmissionError, RecoveryError) as exc:
         headers = {'Retry-After': '2'} if exc.status in {429, 503} else None
         raise HTTPException(exc.status, {'code': exc.code, 'message': str(exc)}, headers=headers) from None
     except RuntimeUnavailable:
@@ -102,6 +108,30 @@ def new_conversation(owner: Owner):
 @router.get('/api/harness/conversations')
 def list_conversations(request: Request, owner: Owner):
     return {'conversations': request.app.state.controller.list_conversations(owner)}
+
+
+@router.post('/api/harness/conversations/{conversation_id}/recovery-proof', status_code=201)
+def recovery_proof(conversation_id: str, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.history_proof(owner, conversation_id)
+
+
+@router.post('/api/harness/history-recovery/request', status_code=201)
+def open_history_request(request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.create_history_request(owner)
+
+
+@router.get('/api/harness/history-recovery/request')
+def get_history_request(request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.history_request_status(owner)
+
+
+@router.post('/api/harness/history-recovery/claim')
+def claim_history(body: HistoryClaim, request: Request, owner: Owner):
+    with api_errors():
+        return request.app.state.controller.claim_history(owner, body.request_id)
 
 
 @router.delete('/api/harness/conversations/{conversation_id}')
