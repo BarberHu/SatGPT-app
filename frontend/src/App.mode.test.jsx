@@ -66,6 +66,44 @@ test('keyboard mode navigation, persistent Basic state and reserved settings rem
  await act(async()=>dialog.querySelector('[aria-label="Close settings"]').click());
 });
 
+test('the shared Help opens the interface tutorial in both modes and returns focus on dismissal', async () => {
+  await act(async () => root.render(<ModeRoot />));
+  await flush();
+  const help = node.querySelector('[aria-label="Help"]');
+  const canvas = node.querySelector('canvas');
+  const map = FakeMap.instances[0];
+  const view = { ...map.view };
+  expect(help.previousElementSibling.getAttribute('aria-label')).toBe('Save map image');
+  expect(help.nextElementSibling.getAttribute('aria-label')).toBe('Settings');
+
+  for (const mode of ['basic', 'agent']) {
+    await select(mode);
+    await flush();
+    await act(async () => help.click());
+    const guide = document.querySelector('[role="dialog"]');
+    expect(guide.querySelector('h2').textContent).toBe('SATGPT User Guide');
+    expect(guide.querySelector('h3').textContent).toBe('SATGPT Pro 2.0 Interface Overview');
+    const image = guide.querySelector('img');
+    const link = guide.querySelector('a');
+    expect(image.alt).toContain('Intelligent analysis');
+    expect(image.getAttribute('src')).toMatch(/\/assets\/help\/satgpt-pro-2-0-interface-overview\.png$/);
+    expect(link.textContent).toBe('Open full-size image');
+    expect(link.href).toBe(image.src);
+    expect(link.target).toBe('_blank');
+
+    if (mode === 'basic') {
+      await act(async () => guide.querySelector('[aria-label="Close help"]').click());
+    } else {
+      await act(async () => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    }
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(help)));
+    expect(node.querySelector(`[role="tab"][data-mode="${mode}"]`).getAttribute('aria-selected')).toBe('true');
+    expect(node.querySelector('canvas')).toBe(canvas);
+    expect(map.view).toEqual(view);
+  }
+});
+
 test('hiding a narrow-screen map slot suspends capture and restores the same canvas at its new size',async()=>{
  await act(async()=>root.render(<ModeRoot/>));await flush();
  const raw=FakeMap.instances[0],canvas=node.querySelector('canvas');

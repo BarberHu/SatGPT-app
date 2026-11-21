@@ -1,5 +1,5 @@
 /* Shared palette follows the Basic layer manager; scoped to the workspace and portals. */
-.satgpt-root, .harness-app, .satgpt-settings-dialog {
+.satgpt-root, .harness-app, .satgpt-settings-dialog, .satgpt-help-dialog {
   --satgpt-ui-surface: rgba(255, 255, 255, .96);
   --satgpt-ui-canvas: #ffffff;
   --satgpt-ui-soft: #f8fafc;

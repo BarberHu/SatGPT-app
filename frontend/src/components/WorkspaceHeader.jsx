@@ -1,6 +1,7 @@
 import React from 'react';
 import { Camera, Settings2, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
+import WorkspaceHelp from './WorkspaceHelp';
 
 const modes = [{ id: 'basic', label: 'Static layers' }, { id: 'agent', label: 'Intelligent analysis' }];
 export default function WorkspaceHeader({ mode, onModeChange, canCapture, capturing, onCapture, captureHint,
@@ -35,6 +36,7 @@ export default function WorkspaceHeader({ mode, onModeChange, canCapture, captur
       </label> : null}
       <button type="button" className="satgpt-toolbar-button" aria-label="Save map image" title={canCapture ? 'Save current map image' : captureHint || 'Map capture will be available when the map is ready'}
         disabled={!canCapture || capturing} onClick={onCapture}><Camera size={20} strokeWidth={1.7} /></button>
+      <WorkspaceHelp />
       <Dialog.Root><Dialog.Trigger asChild>
         <button type="button" className="satgpt-toolbar-button" aria-label="Settings" title="Settings (coming soon)"><Settings2 size={20} strokeWidth={1.7} /></button>
       </Dialog.Trigger><Dialog.Portal>
