@@ -89,6 +89,7 @@ function BasicMapController({ map }) {
     let featuresByFid = null;
     if (!map.getSource('grid_cell')) map.addSource('grid_cell', {
       type: 'geojson',
+      promoteId: 'FID',
       data: { type: 'FeatureCollection', features: [] },
     });
 
