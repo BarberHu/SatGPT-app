@@ -1,1 +1,1 @@
-"""Water dataset catalog and GEE tile support for the Basic API."""
+"""Earth Engine tile proxy support for the Basic API."""

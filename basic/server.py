@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -19,18 +20,11 @@ from satgpt_config import load_project_env, required_env, validate_config
 load_project_env()
 from .gee_service import gee_service, get_flood_images
 from .gee_code_generator import generate_flood_gee_code
-from .flood_dataset_service import build_confirmation_context, get_default_flood_layer_catalog, renderer
-from .flood_aoi import search_location_candidates
 from harness.app.identity import owner_for
 from .business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
 from .water_assets.tile_service import TileProxyServer
 from .flood_api_services import (
-    build_script_pdf,
     get_agent_raster_download_file,
-    get_agent_raster_download_payload,
-    get_agent_raster_layers_payload,
-    get_chatgpt_response,
-    get_code_response,
     get_default_map_payload,
     get_flood_hotspot_map_payload,
     get_historical_map_payload,
@@ -40,6 +34,7 @@ from .flood_api_services import (
 )
 logger = logging.getLogger(__name__)
 from .preset_layers import get_preset_layer_payload
+from .road_network import OverpassRoads, RoadNetworkError, network_bounds
 
 _HEAVY_OPERATION_LIMIT = max(1, int(required_env("SATGPT_HEAVY_CONCURRENCY")))
 _HEAVY_QUEUE_TIMEOUT_SECONDS = max(
@@ -131,14 +126,18 @@ async def lifespan(app: Starlette):
     global _HEAVY_OPERATION_SEMAPHORE
     _HEAVY_OPERATION_SEMAPHORE = asyncio.Semaphore(_HEAVY_OPERATION_LIMIT)
     await asyncio.to_thread(gee_service._initialize_ee)
-    app.state.basic_initialized = True
-    try:
-        yield
-    finally:
-        app.state.basic_initialized = False
-        gee_service.initialized = False
-        renderer.tile_service.initialized = False
-        TileProxyServer.get_instance().tile_registry.clear()
+    async with httpx.AsyncClient(headers={"User-Agent": "SatGPT/2.0"}, timeout=httpx.Timeout(10, connect=5)) as client:
+        roads = OverpassRoads(client, required_env("SATGPT_OVERPASS_URL"))
+        app.state.road_network = roads
+        app.state.basic_initialized = True
+        try:
+            yield
+        finally:
+            app.state.road_network = None
+            app.state.basic_initialized = False
+            gee_service.initialized = False
+            TileProxyServer.get_instance().tile_registry.clear()
+            await roads.close()
 
 
 router = APIRouter()
@@ -153,6 +152,10 @@ class GeoBounds(BaseModel):
     north: float
 
 
+class RoadNetworkRequest(BaseModel):
+    geojson: dict
+
+
 class FloodImageRequest(BaseModel):
     """洪水影像请求"""
     pre_date: Optional[str] = None
@@ -165,30 +168,6 @@ class FloodImageRequest(BaseModel):
     buffer_km: Optional[float] = 50
     bounds: Optional[GeoBounds] = None
     geojson: Optional[dict] = None
-
-
-class FloodState(BaseModel):
-    """洪水状态（用于前端共享）"""
-    event: Optional[str] = None
-    event_description: Optional[str] = None
-    flood_report: Optional[str] = None
-    pre_date: Optional[str] = None
-    after_date: Optional[str] = None
-    peek_date: Optional[str] = None
-    location: Optional[str] = None
-    longitude: Optional[float] = None
-    latitude: Optional[float] = None
-    bounds: Optional[GeoBounds] = None
-    geojson: Optional[dict] = None
-    resolved_aoi: Optional[dict] = None
-    aoi_resolution_meta: Optional[dict] = None
-    confirmed_aoi: Optional[dict] = None
-    recommended_layers: Optional[list[dict]] = None
-    selected_layer_ids: Optional[list[str]] = None
-    confirmation_version: Optional[int] = None
-    mentioned_layer_refs: Optional[list[dict]] = None
-    mentioned_aoi: Optional[dict] = None
-    mentioned_aoi_source: Optional[str] = None
 
 
 class BusinessLayerRecord(BaseModel):
@@ -219,14 +198,6 @@ class BusinessLayerResolveRequest(BaseModel):
     layer_ids: list[str]
 
 
-class ChatRequest(BaseModel):
-    message: str
-
-
-class ScriptPdfRequest(BaseModel):
-    script: str
-
-
 async def _get_request_payload(request: Request) -> dict:
     if request.method == "POST":
         payload = await request.json()
@@ -239,14 +210,6 @@ def _ensure_gee_ready() -> None:
         raise HTTPException(
             status_code=503,
             detail="GEE service is not initialized. Check your Earth Engine credentials.",
-        )
-
-
-def _ensure_openai_ready() -> None:
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(
-            status_code=503,
-            detail="OpenAI API key is not configured.",
         )
 
 
@@ -346,20 +309,6 @@ async def get_water_regime_change_map(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/agent-raster-layers")
-async def get_agent_raster_layers(request: Request):
-    _ensure_gee_ready()
-    try:
-        payload = await _get_request_payload(request)
-        return await _run_heavy_operation(get_agent_raster_layers_payload, payload)
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/api/preset-layers")
 async def get_preset_layer(request: Request):
     _ensure_gee_ready()
@@ -375,18 +324,17 @@ async def get_preset_layer(request: Request):
         raise HTTPException(status_code=502, detail='Unable to generate this layer. Check the study area and dates, then retry.')
 
 
-@router.post("/api/agent-raster-download")
-async def get_agent_raster_download(request: Request):
-    _ensure_gee_ready()
+@router.post("/api/road-network")
+async def get_road_network(payload: RoadNetworkRequest, request: Request):
+    roads = getattr(request.app.state, "road_network", None)
+    if roads is None:
+        raise HTTPException(503, detail={"code": "roads_unavailable", "message": "The road service is unavailable."})
     try:
-        payload = await _get_request_payload(request)
-        return await _run_heavy_operation(get_agent_raster_download_payload, payload)
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        bounds = network_bounds(payload.geojson)
+        result = await roads.get(bounds)
+    except RoadNetworkError as error:
+        raise HTTPException(error.status_code, detail={"code": error.code, "message": str(error)}) from error
+    return Response(content=result, media_type="application/geo+json")
 
 
 @router.post("/api/agent-raster-download-file")
@@ -411,36 +359,6 @@ async def download_agent_raster_file(request: Request):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/chat")
-async def chat(request: ChatRequest):
-    _ensure_openai_ready()
-    chatgpt_response = await run_in_threadpool(get_chatgpt_response, request.message)
-    if not chatgpt_response:
-        raise HTTPException(status_code=500, detail="Error with ChatGPT.")
-    return {"message": chatgpt_response}
-
-
-@router.post("/api/scripts/gee")
-async def get_script(request: ChatRequest):
-    _ensure_openai_ready()
-    code_snippet = await run_in_threadpool(get_code_response, request.message)
-    if not code_snippet:
-        raise HTTPException(status_code=500, detail="Error with ChatGPT.")
-    return {"message": code_snippet}
-
-
-@router.post("/api/scripts/pdf")
-async def get_pdf(request: ScriptPdfRequest):
-    if not request.script.strip():
-        raise HTTPException(status_code=400, detail="Script content is required.")
-    pdf_bytes = await run_in_threadpool(build_script_pdf, request.script)
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename=GEE_Script.pdf'},
-    )
 
 
 @router.post("/api/flood-images")
@@ -623,30 +541,6 @@ class FloodImpactRequest(BaseModel):
     geojson: Optional[dict] = None
 
 
-class FloodConfirmationRefreshRequest(BaseModel):
-    event: Optional[str] = None
-    event_description: Optional[str] = None
-    location: Optional[str] = None
-    pre_date: Optional[str] = None
-    peek_date: Optional[str] = None
-    after_date: Optional[str] = None
-    confirmation_version: Optional[int] = 1
-
-
-class RecommendedLayerRenderRequest(BaseModel):
-    layer_id: str
-    recommended_layers: list[dict]
-    confirmed_aoi: dict
-    pre_date: Optional[str] = None
-    peek_date: Optional[str] = None
-    after_date: Optional[str] = None
-
-
-class LocationSearchRequest(BaseModel):
-    query: str
-    limit: Optional[int] = 5
-
-
 @router.post("/api/flood-impact")
 async def get_flood_impact(request: FloodImpactRequest):
     """
@@ -707,65 +601,6 @@ async def get_flood_impact(request: FloodImpactRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/flood-confirmation/refresh")
-async def refresh_flood_confirmation(request: FloodConfirmationRefreshRequest):
-    try:
-        context = await run_in_threadpool(
-            build_confirmation_context,
-            event=request.event,
-            event_description=request.event_description,
-            location=request.location,
-            pre_date=request.pre_date,
-            peek_date=request.peek_date,
-            after_date=request.after_date,
-            confirmation_version=request.confirmation_version or 1,
-        )
-        return {"success": True, "data": context}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/flood-layer-catalog")
-async def get_flood_layer_catalog():
-    try:
-        catalog = await run_in_threadpool(get_default_flood_layer_catalog)
-        return {"success": True, "data": catalog}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/recommended-layer-render")
-async def render_recommended_layer(request: RecommendedLayerRenderRequest):
-    try:
-        rendered = await _run_heavy_operation(
-            renderer.render_layer,
-            layer_id=request.layer_id,
-            recommended_layers=request.recommended_layers,
-            confirmed_aoi=request.confirmed_aoi,
-            pre_date=request.pre_date,
-            peek_date=request.peek_date,
-            after_date=request.after_date,
-        )
-        return {"success": True, "data": rendered}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/location-search")
-async def search_location(request: LocationSearchRequest):
-    try:
-        candidates = await run_in_threadpool(
-            search_location_candidates,
-            location_name=request.query,
-            limit=request.limit or 5,
-        )
-        return {"success": True, "data": candidates}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/api/business-layers/upsert")
 async def upsert_business_layer_records(request: BusinessLayerUpsertRequest, http_request: Request):
     saved_layers = upsert_business_layers(
@@ -806,15 +641,3 @@ async def batch_resolve_business_layers(request: BusinessLayerResolveRequest, ht
     if len(layers) != len(request.layer_ids):
         raise HTTPException(status_code=404, detail="Business layer not found.")
     return {"success": True, "data": layers}
-
-
-@router.post("/api/state")
-async def update_state(state: FloodState):
-    """
-    更新/同步 Basic 地图状态。
-    """
-    # 这里可以添加状态持久化逻辑
-    return {
-        "success": True,
-        "state": state.model_dump()
-    }

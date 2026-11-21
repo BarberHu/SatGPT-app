@@ -11,7 +11,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULTS = {
     'GOOGLE_APPLICATION_CREDENTIALS': '.private-key.json',
     'REACT_APP_MAPBOX_STYLE_URL': 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp',
-    'OPENAI_API_BASE': 'https://api.openai.com/v1', 'LLM_MODEL': 'gpt-4o-mini',
     'DSH_PROVIDER': 'deepseek-official', 'DSH_MODEL': 'deepseek-v4-flash',
     'DSH_REASONING_EFFORT': 'high', 'DSH_MAX_TOKENS': '32768',
     'AIHUBMIX_BASE_URL': 'https://aihubmix.com/v1',
@@ -102,9 +101,6 @@ def validate_config(component='all'):
         if not valid:
             invalid('GOOGLE_APPLICATION_CREDENTIALS', 'must contain a service-account JSON credential')
     if component in {'all', 'backend', 'basic'}:
-        required_env('OPENAI_API_KEY')
-        required_env('LLM_MODEL')
-        validate_url('OPENAI_API_BASE')
         integer('SATGPT_HEAVY_CONCURRENCY', 1, 1024)
         integer('SATGPT_HEAVY_QUEUE_TIMEOUT_SECONDS', 1, 3600)
     if component in {'all', 'backend', 'harness'}:

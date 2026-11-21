@@ -1,6 +1,6 @@
 # SatGPT 生产部署
 
-统一填写根目录 `.env`（从唯一模板 `.env.example` 复制）。环境变量优先于 `.env`，未设置的高级参数使用程序默认值；凭据路径相对项目根目录，与启动目录无关。Basic 和 Agent 的模型密钥独立；仅需所选 Agent 服务商的密钥。不读取前端环境文件或其他项目的 local-config JSON。
+统一填写根目录 `.env`（从唯一模板 `.env.example` 复制）。环境变量优先于 `.env`，未设置的高级参数使用程序默认值；凭据路径相对项目根目录，与启动目录无关。模型密钥只需填写所选 Agent 服务商的一项。不读取前端环境文件或其他项目的 local-config JSON。
 
 ## Windows / Node 网关
 
@@ -44,7 +44,7 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 - 服务端口：重启 API 与前端/网关。Compose 使用同一命令 `up -d --build` 重新应用。
 - Mapbox：开发模式重启 Vite；生产模式必须重新构建前端/镜像，随后重启网关。其他后端配置无需重新构建浏览器文件。
 
-`/readyz` 验证网关能访问统一后端并读取两模块的本地初始化状态，任一未初始化返回 503；后端和 Vite 也提供同一路径。`/health` 保留 Basic 字段，并增加 Harness 兼容字段及独立的 `basic`/`harness` 对象；Harness 原健康信息见 `/api/harness/health`。就绪检查只表示本地生命周期完成，不要求模型调用成功或 GEE 可用。`configured` 字段只表示填入配置，`model_authentication=not_checked` 和 Harness 的 `gee_authentication=not_checked` 不代表认证成功。Basic 的 `gee_initialized` 是初始化结果；实际调用 Basic 问答、Harness 对话和 `gee_status` 才验证模型/远端 GEE 通路。
+`/readyz` 验证网关能访问统一后端并读取两模块的本地初始化状态，任一未初始化返回 503；后端和 Vite 也提供同一路径。`/health` 保留 Basic 字段，并增加 Harness 兼容字段及独立的 `basic`/`harness` 对象；Harness 原健康信息见 `/api/harness/health`。就绪检查只表示本地生命周期完成，不要求模型调用成功或 GEE 可用。`configured` 字段只表示填入配置，`model_authentication=not_checked` 和 Harness 的 `gee_authentication=not_checked` 不代表认证成功。Basic 的 `gee_initialized` 是初始化结果；通过实际的 Harness 对话和 `gee_status` 工具验证模型和远端 GEE 通路。
 
 ## 发布范围
 
@@ -74,9 +74,9 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 
 ## 运行边界
 
-Python 组件统一直接使用 `satgpt_config.py`，瓦片组件也遵循同一配置优先级、禁止变量展开及根目录相对路径规则，不再单独解析 `.env`。两份 `server.py` 只导出 `APIRouter`、处理函数及生命周期钩子；`satgpt_backend.py` 是唯一创建 FastAPI 应用的位置。统一后端通过两个模块的路由和显式组合生命周期集成，各模块初始化一次、按相反顺序关闭；初始化失败会反向清理已进入的生命周期，关闭时取消 Agent 任务、关闭 SDK/工具进程并等待线程池退出。SDK/工具 worker 在首次任务/工具调用时按需启动；就绪检查不能据此声称它们已通过外部认证。Basic 的 GEE 初始化在线程内进行，失败时健康为 degraded，问答仍可使用其独立模型。
+Python 组件统一通过 `satgpt_config.py` 加载配置，按根目录解析相对路径。两份 `server.py` 只导出 `APIRouter`、处理函数及生命周期钩子；`satgpt_backend.py` 是唯一创建 FastAPI 应用的位置。统一后端通过两个模块的路由和显式组合生命周期集成，各模块初始化一次、按相反顺序关闭；初始化失败会反向清理已进入的生命周期，关闭时取消 Agent 任务、关闭 SDK/工具进程并等待线程池退出。SDK/工具 worker 在首次任务/工具调用时按需启动；就绪检查不能据此声称它们已通过外部认证。Basic 的 GEE 初始化在线程内进行，失败时健康状态为 degraded。
 
-Basic 的重任务信号量保留，主要限制同步 GEE 请求与瓦片获取的并发，遥感计算在 GEE 云端。目录组件原有的随机端口瓦片 HTTP 服务改为统一 `/api/ee-tiles/...`，保留响应中的 URL 字段。两个模式共享 HTTP 进程、资源和故障范围；Basic 的线程请求、Harness 的同步 HTTP 操作及 SSE 等待仍会竞争线程/连接资源。工具代码继续在独立进程执行，未引入数据库、消息队列或分布式任务框架。
+Basic 的重任务信号量保留，主要限制同步 GEE 请求与瓦片获取的并发，遥感计算在 GEE 云端。兼容瓦片代理由统一后端的 `/api/ee-tiles/...` 提供。两个模式共享 HTTP 进程、资源和故障范围；Basic 的线程请求、Harness 的同步 HTTP 操作及 SSE 等待仍会竞争线程/连接资源。工具代码继续在独立进程执行，未引入数据库、消息队列或分布式任务框架。
 
 仅支持单 worker、单后端副本。任务和业务图层缓存仍在内存，重启会丢失这些状态；已有会话文件继续保存在原位置。两边不再可以独立重启。本次合并不承诺模型速度、GEE 计算速度或内存占用改善。
 
@@ -93,4 +93,4 @@ node --test scripts/tests/gateway.test.cjs harness/tests/worker-client.test.mjs 
 .\scripts\windows\satgpt.bat build
 ```
 
-集成测试使用临时会话目录，替换外部模型/GEE 调用，覆盖单轮问答、历史/热点接口传输和错误、Agent 对话/任务/取消/SSE、后台执行时 Basic 响应、重任务限流、生命周期失败清理及独立 Python worker；它们不证明真实模型或 GEE 数据产品正确。网关测试需要已有前端 build，Windows 测试需要可用的本机回环套接字。
+集成测试使用临时会话目录，替换外部模型/GEE 调用，覆盖已退役接口返回 404、历史和热点接口传输及错误、Agent 对话/任务/取消/SSE、后台执行时 Basic 响应、重任务限流、生命周期失败清理及独立 Python worker；它们不证明真实模型或 GEE 数据产品正确。网关测试需要已有前端 build，Windows 测试需要可用的本机回环套接字。

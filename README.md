@@ -59,7 +59,7 @@ Place the service account JSON at `.private-key.json` in the repository root, or
 
 ### 3. Configure credentials and models
 
-Set the shared GEE and map configuration, followed by the separate Basic and Agent model settings:
+Set the shared GEE and map configuration, then configure the Agent model:
 
 ```dotenv
 GOOGLE_APPLICATION_CREDENTIALS=.private-key.json
@@ -67,10 +67,6 @@ GEE_PROJECT_ID=your-google-cloud-project-id
 
 REACT_APP_MAPBOX_ACCESS_TOKEN=your-mapbox-public-token
 REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp
-
-OPENAI_API_KEY=your-basic-model-key
-OPENAI_API_BASE=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
 
 DSH_PROVIDER=deepseek-official
 DSH_MODEL=deepseek-v4-flash
@@ -86,7 +82,7 @@ AIHUBMIX_API_KEY=your-aihubmix-key
 AIHUBMIX_BASE_URL=https://aihubmix.com/v1
 ```
 
-Basic and Agent model settings are independent. `OPENAI_API_KEY` is used for Basic question answering, location resolution, and dataset recommendations. The Agent requires only the selected provider's key; leave the unused provider's key empty. Use a browser public Mapbox token, not a secret token.
+The backend requires only the selected Agent model provider's key; leave the unused provider's key empty. Use a browser public Mapbox token, not a secret token.
 
 For optional reasoning, output-length, port, and network settings, see [`.env.example`](.env.example).
 
@@ -156,7 +152,6 @@ Keep `--project-directory .` so build and credential paths resolve correctly. On
 
 | Changed setting | Required action |
 | --- | --- |
-| Basic model | Restart the unified backend. |
 | Agent model | Restart the unified backend, including its SDK and worker processes. |
 | GEE configuration or credentials | Restart the unified backend. |
 | Service ports | Restart the backend and frontend/gateway. |
@@ -193,7 +188,7 @@ Vite and the production gateway each use one backend upstream. `/readyz` checks 
 
 ```text
 frontend/             React frontend, shared map, Basic/Agent views, and charts
-basic/                Basic router, single-turn chat, map services and GEE components
+basic/                Basic router, map services and GEE components
 harness/app/          Agent API, controller, SDK adapter, and Python worker
 harness/integrations/ GEE tools and streaming integration
 scripts/windows/      Windows setup, development, and production commands
@@ -216,7 +211,7 @@ The canonical backend command is `harness\.venv\Scripts\python.exe satgpt_config
 
 Existing `.env`, credentials, `harness/state/`, browser layer records and `basic-venv/` are preserved. After stopping all old services and verifying the unified setup, you may remove only the obsolete `basic-venv/` directory yourself. Keep `harness/.venv/` and `harness/state/`. For Compose upgrades, stop the old stack first without `-v`, then use the same project name and `harness_state` volume; see [PRODUCTION.md](PRODUCTION.md).
 
-The legacy Basic question endpoint remains single-turn and uses its own model/provider configuration. Harness keeps multi-turn local sessions, one background task executor and an independent Python tool process using the same interpreter. Basic's semaphore still limits synchronous GEE request construction/tile retrieval off the event loop; remote sensing calculations run in GEE. The former random-port tile proxy is now `/api/ee-tiles/...` in the same API. No additional HTTP listener is opened for it.
+Harness keeps multi-turn local sessions, one background task executor and an independent Python tool process using the same interpreter. Basic's semaphore still limits synchronous GEE request construction/tile retrieval off the event loop; remote sensing calculations run in GEE. The former random-port tile proxy is now `/api/ee-tiles/...` in the same API. No additional HTTP listener is opened for it.
 
 The HTTP process, thread resources, memory and failure boundary are now shared. A backend restart interrupts both modes; local task state and business-layer caches remain in memory. One worker and one backend replica are required; local conversation files are not multi-process storage. This consolidation does not promise faster model/GEE responses or lower memory usage.
 

@@ -59,7 +59,7 @@ Copy-Item .env.example .env
 
 ### 3. 配置凭据与模型
 
-填写共用的 GEE 和地图配置，再分别填写 Basic 和 Agent 模型配置：
+填写共用的 GEE 和地图配置，再填写 Agent 模型配置：
 
 ```dotenv
 GOOGLE_APPLICATION_CREDENTIALS=.private-key.json
@@ -67,10 +67,6 @@ GEE_PROJECT_ID=your-google-cloud-project-id
 
 REACT_APP_MAPBOX_ACCESS_TOKEN=your-mapbox-public-token
 REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp
-
-OPENAI_API_KEY=your-basic-model-key
-OPENAI_API_BASE=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
 
 DSH_PROVIDER=deepseek-official
 DSH_MODEL=deepseek-v4-flash
@@ -86,7 +82,7 @@ AIHUBMIX_API_KEY=your-aihubmix-key
 AIHUBMIX_BASE_URL=https://aihubmix.com/v1
 ```
 
-Basic 与 Agent 的模型配置相互独立。`OPENAI_API_KEY` 用于 Basic 问答、位置解析和数据集推荐。Agent 仅要求所选服务商的密钥，未使用的服务商密钥留空。Mapbox 使用浏览器公开 token，不使用 secret token。
+后端仅要求所选 Agent 服务商的密钥，未使用的服务商密钥留空。Mapbox 使用浏览器公开 token，不使用 secret token。
 
 推理强度、输出长度、端口和网络等可选设置见 [`.env.example`](.env.example)。
 
@@ -156,7 +152,6 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 
 | 修改的设置 | 所需操作 |
 | --- | --- |
-| Basic 模型 | 重启统一后端。 |
 | Agent 模型 | 重启统一后端，包括其 SDK 与 worker 进程。 |
 | GEE 配置或凭据 | 重启统一后端。 |
 | 服务端口 | 重启后端与前端/网关。 |
@@ -216,7 +211,7 @@ Basic 包目录已改名为 `basic/`，Python 导入统一使用 `basic`。现�
 
 现有 `.env`、凭据、`harness/state/`、浏览器图层记录及 `basic-venv/` 均保留。停止旧服务并验证新启动流程后，可自行删除仅包含旧 Python 环境的 `basic-venv/`；保留 `harness/.venv/` 和 `harness/state/`。Compose 迁移先停止旧栈，不加 `-v`，继续使用原项目名及 `harness_state` 卷，详见 [PRODUCTION.md](PRODUCTION.md)。
 
-Basic 保持单轮语义及独立模型配置；Harness 保留多轮本地会话、后台任务线程池和使用同一解释器的独立 Python 工具进程。Basic 并发信号量继续限制同步 GEE 请求构建、瓦片获取等操作，并在线程中执行；主要遥感计算仍在 GEE 云端。原来随机端口的瓦片代理并入 `/api/ee-tiles/...`，不再额外监听 HTTP 端口。
+Harness 保留多轮本地会话、后台任务线程池和使用同一解释器的独立 Python 工具进程。Basic 并发信号量继续限制同步 GEE 请求构建、瓦片获取等操作，并在线程中执行；主要遥感计算仍在 GEE 云端。原来随机端口的瓦片代理并入 `/api/ee-tiles/...`，不再额外监听 HTTP 端口。
 
 两个模式共享 HTTP 进程、线程资源、内存和故障范围，重启后端会同时中断两边。任务状态与业务图层缓存仍在内存；必须采用单 worker、单后端副本，本地会话文件不支持多进程一致性。本次合并不承诺模型/GEE 响应或内存占用一定改善。
 

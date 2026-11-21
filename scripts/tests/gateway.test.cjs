@@ -111,11 +111,11 @@ test('production gateway preserves Basic and Harness contracts', { timeout: 2000
   });
 
   await t.test('forwards Basic API requests', async () => {
-    const body = JSON.stringify({ message: 'hello' });
-    const response = await fetch(`${base}/api/chat`, {
+    const body = JSON.stringify({ preset_id: 'singleInundationEvent' });
+    const response = await fetch(`${base}/api/preset-layers`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
     });
-    assert.deepEqual(await response.json(), { method: 'POST', url: '/api/chat', body });
+    assert.deepEqual(await response.json(), { method: 'POST', url: '/api/preset-layers', body });
   });
 
   await t.test('forwards SSE incrementally and preserves the reconnect cursor', async () => {

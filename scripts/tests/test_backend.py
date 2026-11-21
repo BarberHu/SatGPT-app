@@ -52,7 +52,7 @@ class UnifiedBackendTests(unittest.TestCase):
             patch.object(harness, 'ROOT', Path(self.temp.name)),
             patch.object(harness, 'TaskController',
                          side_effect=lambda root: TaskController(root, runtime_factory=lambda *a: SimulatedRuntime(*a, run=HoldingSession.run))),
-            patch.dict(os.environ, {'OPENAI_API_KEY': 'offline-basic', 'DEEPSEEK_API_KEY': 'offline-agent',
+            patch.dict(os.environ, {'OPENAI_API_KEY': '', 'DEEPSEEK_API_KEY': 'offline-agent',
                                     'DSH_PROVIDER': 'deepseek-official'}),
         ]
         for p in self.patches:
@@ -84,17 +84,9 @@ class UnifiedBackendTests(unittest.TestCase):
         self.assertEqual(self.client.get('/readyz').status_code, 503)
 
     def test_basic_contracts_and_error_behavior(self):
-        result = {'event': 'offline event', 'pre_date': '2020-01-01', 'location': 'test'}
-        with self.client as client, patch.object(basic, 'get_chatgpt_response', return_value=json.dumps(result)) as chat:
-            for message in ('first', 'second'):
-                response = client.post('/api/chat', json={'message': message})
-                self.assertEqual(response.json(), {'message': json.dumps(result)})
-            self.assertEqual([c.args for c in chat.call_args_list], [('first',), ('second',)])
+        with self.client as client:
             self.assertEqual(client.get('/api/harness/session').status_code, 200)
             self.assertEqual(client.get('/api/harness/conversation').json()['messages'], [])
-            self.assertEqual(client.post('/api/chat', json={}).status_code, 422)
-            chat.return_value = None
-            self.assertEqual(client.post('/api/chat', json={'message': 'fail'}).json(), {'detail': 'Error with ChatGPT.'})
             for path, function in [('/api/maps/historical', 'get_historical_map_payload'),
                                    ('/api/maps/flood-hotspot', 'get_flood_hotspot_map_payload')]:
                 payload = {'longitude': 100, 'latitude': 10, 'year': 2020, 'start_date': '2020-01-01'}
@@ -110,6 +102,46 @@ class UnifiedBackendTests(unittest.TestCase):
                 self.assertEqual(client.post(path, json=payload).status_code, 503)
                 basic.gee_service.initialized = True
 
+    def test_legacy_location_routes_are_removed(self):
+        with self.client as client:
+            for path, payload in (
+                ('/api/location-search', {'query': 'Zhengzhou'}),
+                ('/api/flood-confirmation/refresh', {'location': 'Zhengzhou'}),
+            ):
+                with self.subTest(path=path):
+                    self.assertEqual(client.post(path, json=payload).status_code, 404)
+
+    def test_retired_apis_are_absent_from_routing_and_openapi(self):
+        routes = (
+            ('POST', '/api/state'),
+            ('POST', '/api/chat'),
+            ('POST', '/api/scripts/gee'),
+            ('POST', '/api/scripts/pdf'),
+            ('GET', '/api/flood-layer-catalog'),
+            ('POST', '/api/recommended-layer-render'),
+            ('POST', '/api/agent-raster-layers'),
+            ('POST', '/api/agent-raster-download'),
+        )
+        with self.client as client:
+            client.get('/api/harness/session').raise_for_status()
+            schema = client.get('/openapi.json').json()
+            for method, path in routes:
+                with self.subTest(method=method, path=path):
+                    self.assertNotIn(path, schema['paths'])
+                    self.assertEqual(client.request(method, path).status_code, 404)
+
+    def test_raster_file_download_remains_available(self):
+        payload = {'layer_key': 'populationDensity'}
+        with self.client as client, patch.object(basic, 'get_agent_raster_download_file',
+                                               return_value=(b'tiff', 'population.tif', 1000)) as download:
+            response = client.post('/api/agent-raster-download-file', json=payload)
+        download.assert_called_once_with(payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'tiff')
+        self.assertEqual(response.headers['content-type'], 'image/tiff')
+        self.assertEqual(response.headers['content-disposition'], 'attachment; filename="population.tif"')
+        self.assertEqual(response.headers['x-satgpt-raster-scale'], '1000')
+
     def test_business_layers_are_bound_to_the_authenticated_cookie(self):
         from harness.tests.runtime_fixture import client_for
 
@@ -124,7 +156,7 @@ class UnifiedBackendTests(unittest.TestCase):
             self.assertEqual(client.get(path+'/layer?store_key=shared-name').json()['data']['label'], 'private')
 
     def test_task_concurrency_cancellation_and_sse(self):
-        with self.client as client, patch.object(basic, 'get_chatgpt_response', return_value='offline'):
+        with self.client as client, patch.object(basic, 'get_preset_layer_payload', return_value={'status': 'empty'}):
             client.get('/api/harness/session')
             response = client.post('/api/harness/tasks', json=task_body(None, 'Hold task'))
             self.assertEqual(response.status_code, 202)
@@ -132,7 +164,7 @@ class UnifiedBackendTests(unittest.TestCase):
             cid = response.json()['conversation_id']
             self.assertTrue(HoldingSession.arrived.wait(2))
             started = time.perf_counter()
-            self.assertEqual(client.post('/api/chat', json={'message': 'hello'}).json(), {'message': 'offline'})
+            self.assertEqual(client.post('/api/preset-layers', json={}).json(), {'status': 'empty'})
             self.assertEqual(client.get('/readyz').status_code, 200)
             self.assertLess(time.perf_counter() - started, 1)
             self.assertEqual(client.get(f'/api/harness/tasks/{job}').json()['status'], 'running')
@@ -252,17 +284,23 @@ class EnvironmentTests(unittest.TestCase):
             self.assertFalse(any(isinstance(value, FastAPI) for value in vars(module).values()),
                              f'{module.__name__} must export routes without creating an application')
 
-    def test_basic_resources_load_after_package_rename_without_network(self):
-        from basic import flood_api_services, flood_dataset_service
-        registry = flood_dataset_service._load_flood_registry()
-        self.assertEqual(registry['selection_mode'], 'curated_only')
-        self.assertTrue(registry['assets'])
-        builder = flood_dataset_service._build_catalog_builder()
-        with patch.object(builder, 'refresh', side_effect=AssertionError('Retained catalog must load locally')), \
-                patch.object(builder, '_write_cache_payload'), \
-                patch.object(builder, '_write_inventory_files'):
-            self.assertTrue(builder.load(force_refresh=False))
-        self.assertTrue(flood_api_services.get_basic_layer_catalog())
+    def test_basic_layer_catalog_loads_from_packaged_configuration(self):
+        from basic.flood_api_services import get_basic_layer_catalog
+        self.assertTrue(get_basic_layer_catalog())
+
+    def test_config_does_not_require_the_retired_basic_model(self):
+        from satgpt_config import DEFAULTS
+
+        with tempfile.TemporaryDirectory() as folder:
+            credential = Path(folder) / 'service-account.json'
+            credential.write_text(json.dumps({
+                'type': 'service_account', 'private_key': 'fixture', 'client_email': 'fixture@example.invalid',
+            }), encoding='utf-8')
+            with patch.dict(os.environ, {
+                **DEFAULTS, 'GOOGLE_APPLICATION_CREDENTIALS': str(credential), 'GEE_PROJECT_ID': 'test-project',
+                'DEEPSEEK_API_KEY': 'offline-agent', 'OPENAI_API_BASE': 'unused-invalid-url',
+            }, clear=True):
+                validate_config('backend')
 
     def test_launcher_keeps_agent_port_for_unified_app(self):
         import satgpt_config
@@ -287,22 +325,6 @@ class EnvironmentTests(unittest.TestCase):
         self.assertIn('COPY requirements.txt /app/', docker)
         self.assertIn('"backend"', docker)
         self.assertIn('/readyz', docker)
-
-    def test_tile_service_uses_shared_environment_precedence_and_literal_values(self):
-        from basic.water_assets.tile_service import GEETileService
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            (root / '.env').write_text(
-                "GEE_PROJECT_ID='${literal-project}'\nGOOGLE_APPLICATION_CREDENTIALS=relative.json\n",
-                encoding='utf-8',
-            )
-            with patch.dict(os.environ, {}, clear=True):
-                service = GEETileService(root)
-                self.assertEqual(service.project_id, '${literal-project}')
-                self.assertEqual(service.credentials_path, str((root / 'relative.json').resolve()))
-            with patch.dict(os.environ, {'GEE_PROJECT_ID': ''}, clear=True):
-                service = GEETileService(root)
-                self.assertIsNone(service.project_id, 'An explicit empty process value must not be overwritten')
 
     def test_worker_is_a_separate_process_using_same_interpreter(self):
         worker = Path(harness.__file__).with_name('gee_worker.py')
