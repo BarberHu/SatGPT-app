@@ -4,12 +4,16 @@ import { OsmFeatureInteraction } from './OsmFeatureInteraction';
 import { applyEnglishMapLabels } from '../utils/mapLanguage';
 import { publicPath } from '../utils/publicPath.js';
 
+const BASEMAP_LOAD_TIMEOUT = 15000;
+// Satellite Streets stores cable-car lines and labels in the same source-layer as roads.
+const AERIALWAY_LAYERS = new Set(['aerialway', 'ferry-aerialway-label']);
 const LAYER_SUFFIXES = ['', '-fill', '-line', '-point', ':label'];
 
 /** The only module that knows Mapbox GL JS source/layer APIs. */
 export class MapboxAdapter {
   constructor(container, { token, style, initialView }) {
     mapboxgl.accessToken = token;
+    this.basemap = { style, hideAdministrativeBoundaries: false, hideRoads: false };
     this.styleReady = false;
     this.tileErrors = new Set();
     this.map = new mapboxgl.Map({
@@ -30,6 +34,20 @@ export class MapboxAdapter {
 
   onStyleReady(callback) {
     const handleReady = () => {
+      const { hideAdministrativeBoundaries, hideRoads } = this.basemap;
+      if (hideAdministrativeBoundaries || hideRoads) {
+        for (const layer of this.map.getStyle()?.layers || []) {
+          const sourceLayer = layer['source-layer'];
+          const administrativeLine = hideAdministrativeBoundaries && layer.type === 'line' && sourceLayer === 'admin';
+          const basemapRoad = hideRoads && layer.source === 'composite' && (
+            (layer.type === 'symbol' && sourceLayer === 'motorway_junction') ||
+            ((layer.type === 'line' || layer.type === 'symbol') && sourceLayer === 'road' && !AERIALWAY_LAYERS.has(layer.id))
+          );
+          if (administrativeLine || basemapRoad) {
+            this.map.setLayoutProperty(layer.id, 'visibility', 'none');
+          }
+        }
+      }
       applyEnglishMapLabels(this.map);
       this.styleReady = true;
       this.basic.styleReady = true;
@@ -41,6 +59,53 @@ export class MapboxAdapter {
     this.map.on('styledata', labels);
     if (this.map.isStyleLoaded()) handleReady();
     return () => { this.map.off('style.load', handleReady); this.map.off('styledata', labels); };
+  }
+
+  async setBasemap(style, { hideAdministrativeBoundaries = false, hideRoads = false } = {}) {
+    if (this.disposed || this.switchingBasemap) throw new Error('The map cannot switch basemaps right now.');
+    const previous = this.basemap;
+    if (this.styleReady && style === previous.style && hideAdministrativeBoundaries === previous.hideAdministrativeBoundaries
+      && hideRoads === previous.hideRoads) return;
+
+    this.switchingBasemap = true;
+    try {
+      await this.loadBasemapStyle({ style, hideAdministrativeBoundaries, hideRoads });
+    } catch (error) {
+      if (!this.disposed) await this.loadBasemapStyle(previous);
+      throw error;
+    } finally {
+      this.switchingBasemap = false;
+    }
+  }
+
+  loadBasemapStyle(basemap) {
+    this.basemap = basemap;
+    this.osmFeatures.reset();
+    this.tileErrors.clear();
+    this.styleReady = false;
+    this.basic.styleReady = false;
+    this.agentDraw.styleReady = false;
+
+    return new Promise((resolve, reject) => {
+      const finish = error => {
+        clearTimeout(timeout);
+        this.map.off('style.load', loaded);
+        this.map.off('error', failed);
+        this.cancelStyleLoad = null;
+        if (error) reject(error);
+        else resolve();
+      };
+      const loaded = () => finish();
+      const failed = event => {
+        if (!this.styleReady && !event.sourceId) finish(event.error || new Error('Unable to load the basemap.'));
+      };
+      const timeout = setTimeout(() => finish(new Error('The basemap took too long to load.')), BASEMAP_LOAD_TIMEOUT);
+      this.cancelStyleLoad = () => finish(new Error('The map was closed.'));
+      this.map.on('style.load', loaded);
+      this.map.on('error', failed);
+      try { this.map.setStyle(basemap.style, { diff: false }); }
+      catch (error) { finish(error); }
+    });
   }
 
   onViewChange(callback) {
@@ -219,6 +284,7 @@ export class MapboxAdapter {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.cancelStyleLoad?.();
     this.osmFeatures.dispose();
     this.basic.dispose();
     this.agentDraw.dispose();

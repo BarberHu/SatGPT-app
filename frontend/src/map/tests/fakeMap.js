@@ -10,6 +10,7 @@ export class FakeMap {
     this.view = { center: [100, 15], zoom: 6, bearing: 23, pitch: 32 }; Object.assign(this.view, options.initialView || {});
     this.remove = vi.fn(() => { for (const c of [...this.controls]) this.removeControl(c); this.events = []; });
     this.resize = vi.fn(() => this.fire('resize'));
+    this.setStyle = vi.fn(() => { this.layers.clear(); this.sources.clear(); this.styleLoading = true; });
     this.fitBounds = vi.fn(); this.easeTo = vi.fn(); this.flyTo = vi.fn(); this.jumpTo = vi.fn();
     this.setTerrain = vi.fn();
     for (const name of ['boxZoom', 'doubleClickZoom', 'dragPan', 'dragRotate', 'scrollZoom', 'touchZoomRotate', 'keyboard']) {
@@ -25,7 +26,12 @@ export class FakeMap {
   hasControl(control) { return this.controls.includes(control); }
   getContainer() { return this.container; } getCanvas() { return this.canvas; } getCanvasContainer() { return this.container; }
   getStyle() { return { layers: [...this.layers.values()], sources: Object.fromEntries(this.sources) }; }
-  isStyleLoaded() { return true; } loaded() { return true; }
+  isStyleLoaded() { return !this.styleLoading; } loaded() { return !this.styleLoading; }
+  finishStyle() {
+    this.styleLoading = false;
+    this.fire('data', { dataType: 'style' });
+    this.fire('style.load');
+  }
   getCenter() { return { lng: this.view.center[0], lat: this.view.center[1] }; }
   getZoom() { return this.view.zoom; } getBearing() { return this.view.bearing; } getPitch() { return this.view.pitch; }
   getBounds() { return { getWest: () => 99, getSouth: () => 14, getEast: () => 101, getNorth: () => 16 }; }

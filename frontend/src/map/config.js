@@ -1,4 +1,15 @@
+const defaultStyle = import.meta.env.REACT_APP_MAPBOX_STYLE_URL;
+
 export const mapOptions = {
   token: import.meta.env.REACT_APP_MAPBOX_ACCESS_TOKEN,
-  style: import.meta.env.REACT_APP_MAPBOX_STYLE_URL,
+  style: defaultStyle,
+  basemaps: [
+    { id: 'default', label: 'Default', style: defaultStyle },
+    { id: 'light', label: 'Light', style: 'mapbox://styles/mapbox/light-v11', hideAdministrativeBoundaries: true },
+    {
+      id: 'satellite-streets', label: 'Satellite Streets', style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      hideAdministrativeBoundaries: true, hideRoads: true,
+    },
+    { id: 'outdoors', label: 'Outdoors', style: 'mapbox://styles/mapbox/outdoors-v12', hideAdministrativeBoundaries: true },
+  ],
 };

@@ -13,6 +13,7 @@ export class MapService {
   notify() { for (const listener of this.listeners) listener(this.listLayers()); }
   getCurrentView() { return this.engine.getView(); }
   setView(view) { this.engine.setView(view); }
+  setBasemap(style, options) { return this.engine.setBasemap(style, options); }
   captureSnapshot() { return this.engine.captureSnapshot(); }
   resize() { if (!this.disposed) this.engine.resize?.(); }
   subscribeView(listener) { return this.engine.onViewChange?.(() => listener(this.getCurrentView())) || (() => {}); }

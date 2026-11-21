@@ -2,7 +2,7 @@ import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import MapContainer from '../components/MapContainer';
 import { AppProvider, useAppContext } from '../context/AppContext';
-import { SharedMapProvider, SharedMapSurface } from './SharedMapContext';
+import { SharedMapProvider, SharedMapSurface, useSharedMap } from './SharedMapContext';
 import { basicSelectionKey } from '../aoi/snapshot';
 import usePresetLayers from '../hooks/usePresetLayers';
 import PresetMapController from '../presets/PresetMapController';
@@ -19,7 +19,7 @@ vi.mock('../utils/fishnetSelection',async original=>{
  }))};
  return {...helpers,loadFishnetData:()=>Promise.resolve({geojson,featuresByFid:helpers.indexFishnetFeatures(geojson)})};
 });
-function Probe({active}) { observed.context=useAppContext();const {rows,store}=usePresetLayers();observed.store=store;return <><MapContainer active={active}/><PresetMapController rows={rows} store={store}/></>; }
+function Probe({active}) { observed.context=useAppContext();observed.map=useSharedMap();const {rows,store}=usePresetLayers();observed.store=store;return <><MapContainer active={active}/><PresetMapController rows={rows} store={store}/></>; }
 function Workspace(){const [mode,setMode]=useState('basic');return <AppProvider><SharedMapProvider mode={mode}><div><SharedMapSurface/><button data-switch onClick={()=>setMode(v=>v==='basic'?'agent':'basic')}>Switch</button><Probe active={mode==='basic'}/></div></SharedMapProvider></AppProvider>;}
 
 test('the Basic grid switch controls selection across modes while late preset results stay in Basic',async()=>{
@@ -80,6 +80,18 @@ test('the Basic grid switch controls selection across modes while late preset re
   expect(selectionVisibility()).toEqual(['none','none','none']);
   expect(raw.getLayer(physical).layout.visibility).toBe('visible');
   await act(async()=>{observed.store.patch(id,{visible:false,opacity:.4});});
+  await act(async () => { observed.context.setIs3DEnabled(true); observed.context.setIsBuildingsEnabled(true); });
+  const beforeStyleSwitch = observed.context.selectedAOI;
+  const cameraCallsBeforeStyleSwitch = raw.fitBounds.mock.calls.length;
+  let styleSwitch;
+  await act(async () => { styleSwitch = observed.map.service.setBasemap('mapbox://styles/mapbox/light-v11'); });
+  await act(async () => { raw.finishStyle(); await styleSwitch; });
+  expect(selectionVisibility()).toEqual(['none','none','none']);
+  expect(observed.context.selectedAOI).toBe(beforeStyleSwitch);
+  expect(raw.getSource('satgpt-basic-aux:analysis-aoi').data).toEqual(beforeStyleSwitch.geojson);
+  expect(raw.getSource('satgpt-basic:mapbox-dem')).toMatchObject({ type: 'raster-dem' });
+  expect(raw.getLayer('satgpt-basic:3d-buildings')).toBeUndefined();
+  expect(raw.fitBounds).toHaveBeenCalledTimes(cameraCallsBeforeStyleSwitch);
   await act(async()=>node.querySelector('[data-switch]').click());await act(async()=>node.querySelector('[data-switch]').click());
   expect(raw.getLayer(physical).layout.visibility).toBe('none');expect(raw.getPaintProperty(physical,'raster-opacity')).toBe(.4);
   expect(FakeMap.instances).toHaveLength(1);expect(raw.remove).not.toHaveBeenCalled();expect(raw.controls).toHaveLength(2);

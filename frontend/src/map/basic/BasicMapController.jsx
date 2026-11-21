@@ -6,7 +6,7 @@ import { bindMapEvents, removeMapLayerAndSource } from '../../utils/mapLifecycle
 
 const AOI_SOURCE_ID = 'analysis-aoi';
 const AOI_LAYER_IDS = ['analysis-aoi-fill', 'analysis-aoi-outline'];
-function BasicMapController({ map }) {
+function BasicMapController({ map, styleRevision = 0 }) {
   const mapRef = useRef(map);
   const utilityControlRef = useRef(null);
   const gridClickButtonRef = useRef(null);
@@ -94,7 +94,7 @@ function BasicMapController({ map }) {
     });
 
     loadFishnetData().then((data) => {
-      if (disposed) return;
+      if (disposed || !map.isStyleLoaded()) return;
       featuresByFid = data.featuresByFid;
       map.getSource('grid_cell')?.setData(data.geojson);
     }).catch((error) => {
@@ -201,11 +201,7 @@ function BasicMapController({ map }) {
 
     map.addControl(utilityControl, 'top-right');
     utilityControlRef.current = utilityControl;
-    const cleanupGridEvents = loadGridLayer(map);
-    window.requestAnimationFrame(() => reconcileLayerOrder(map));
-
     return () => {
-      cleanupGridEvents?.();
       if (utilityControlRef.current === utilityControl) {
         try {
           map.removeControl(utilityControl);
@@ -216,7 +212,7 @@ function BasicMapController({ map }) {
       }
       setMapInstance(null);
     };
-  }, [loadGridLayer, reconcileLayerOrder, setGridClickEnabled, setMapInstance]);
+  }, [setGridClickEnabled, setMapInstance]);
 
   const handleMapStyleData = useCallback((map) => {
     window.requestAnimationFrame(() => reconcileLayerOrder(map));
@@ -231,6 +227,12 @@ function BasicMapController({ map }) {
     map.on('styledata', onStyle);
     return () => { map.off('styledata', onStyle); cleanup?.(); };
   }, [map]);
+
+  useEffect(() => {
+    const cleanup = loadGridLayer(map);
+    reconcileLayerOrder(map);
+    return cleanup;
+  }, [map, styleRevision, loadGridLayer, reconcileLayerOrder]);
 
   const fitAoiBounds = useCallback((aoi, { force = false, padding = 50, duration = 600 } = {}) => {
     const map = mapRef.current;
@@ -255,7 +257,7 @@ function BasicMapController({ map }) {
     if (!map || !map.isStyleLoaded()) return;
 
     if (is3DEnabled) {
-      map.addSource('mapbox-dem', {
+      if (!map.getSource('mapbox-dem')) map.addSource('mapbox-dem', {
         type: 'raster-dem',
         url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
         tileSize: 512,
@@ -268,7 +270,7 @@ function BasicMapController({ map }) {
         map.removeSource('mapbox-dem');
       }
     }
-  }, [is3DEnabled]);
+  }, [is3DEnabled, styleRevision]);
 
   // Handle 3D buildings
   useEffect(() => {
@@ -276,7 +278,8 @@ function BasicMapController({ map }) {
     if (!map || !map.isStyleLoaded()) return;
 
     if (isBuildingsEnabled) {
-      if (!map.getLayer('3d-buildings')) {
+      const buildingSource = map.getSource('composite');
+      if (buildingSource?.type === 'vector' && !map.getLayer('3d-buildings')) {
         map.addLayer({
           id: '3d-buildings',
           source: 'composite',
@@ -298,7 +301,7 @@ function BasicMapController({ map }) {
       }
     }
     reconcileLayerOrder(map);
-  }, [isBuildingsEnabled, reconcileLayerOrder]);
+  }, [isBuildingsEnabled, reconcileLayerOrder, styleRevision]);
 
   const displayedAoi = aoiOutlineVisible ? selectedAOI : null;
 
@@ -356,7 +359,7 @@ function BasicMapController({ map }) {
     if (displayedAoi.bounds && boundsKey !== lastFittedAoiRef.current) {
       fitAoiBounds(displayedAoi, { padding: 50, duration: 0 });
     }
-  }, [displayedAoi, fitAoiBounds, reconcileLayerOrder, removeAoiLayers]);
+  }, [displayedAoi, fitAoiBounds, reconcileLayerOrder, removeAoiLayers, styleRevision]);
 
   return null;
 }

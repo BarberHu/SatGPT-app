@@ -6,6 +6,7 @@ import { downloadMapSnapshot } from '../utils/mapSnapshot';
 
 const MapContext = createContext(null);
 const VIEW_KEY = 'satgpt:map-view:v1';
+const basemaps = mapOptions.basemaps || [];
 export function readWorkspaceView() {
   for (const key of [VIEW_KEY, 'satgpt:harness:map-view:v1']) {
     try {
@@ -39,8 +40,12 @@ export function SharedMapProvider({ mode, children }) {
   const resize = useRef(() => {});
   const [service, setService] = useState(null);
   const [ready, setReady] = useState(false);
+  const [styleRevision, setStyleRevision] = useState(0);
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState('');
+  const [basemapId, setBasemapId] = useState(basemaps[0]?.id);
+  const [basemapSwitching, setBasemapSwitching] = useState(false);
+  const [basemapError, setBasemapError] = useState('');
   if (currentMode.current !== mode) { currentMode.current = mode; epoch.current++; }
   useLayoutEffect(() => { instance.current?.setMode(mode); resize.current(); }, [mode]);
   useEffect(() => {
@@ -52,7 +57,11 @@ export function SharedMapProvider({ mode, children }) {
       map = new MapService(engine); map.setMode(currentMode.current);
       instance.current = map; setService(map);
       stopView = map.subscribeView(saveView);
-      stopReady = map.subscribeReady(() => { setReady(true); resize.current(); });
+      stopReady = map.subscribeReady(() => {
+        setReady(true);
+        setStyleRevision(revision => revision + 1);
+        resize.current();
+      });
     }).catch(() => { if (!disposed) setError('Unable to initialize the map. Check the root project configuration.'); });
     return () => {
       disposed = true; stopReady?.(); stopView?.();
@@ -99,12 +108,32 @@ export function SharedMapProvider({ mode, children }) {
     } };
   }, []);
   const snapshot = useCallback(() => downloadMapSnapshot(instance.current.captureSnapshot()), []);
+  const changeBasemap = useCallback(async id => {
+    const map = instance.current;
+    const option = basemaps.find(item => item.id === id);
+    if (!map || !ready || basemapSwitching || id === basemapId || !option?.style) return;
+    setBasemapSwitching(true);
+    setBasemapError('');
+    try {
+      await map.setBasemap(option.style, {
+        hideAdministrativeBoundaries: option.hideAdministrativeBoundaries,
+        hideRoads: option.hideRoads,
+      });
+      if (instance.current === map) setBasemapId(id);
+    } catch {
+      if (instance.current === map) setBasemapError('Unable to switch basemaps. Please try again.');
+    } finally {
+      if (instance.current === map) setBasemapSwitching(false);
+    }
+  }, [ready, basemapSwitching, basemapId]);
   const measureGroundDistance = useCallback((...args) => instance.current?.measureGroundDistance(...args), []);
   const subscribeViewport = useCallback(listener => instance.current?.subscribeViewport(listener) || (() => {}), []);
-  const value = useMemo(() => ({ container, surface, service, ready, visible, error, mode,
+  const value = useMemo(() => ({ container, surface, service, ready, styleRevision, visible, error, mode,
+    basemaps, basemapId, basemapSwitching, basemapError, changeBasemap,
     basicPort: service?.engine.getBasicPort(), agentDrawPort: service?.engine.getAgentDrawPort?.(), configured: Boolean(mapOptions.token && mapOptions.style),
     attachViewport, captureViewIntent, snapshot, measureGroundDistance, subscribeViewport }),
-  [service, ready, visible, error, mode, attachViewport, captureViewIntent, snapshot, measureGroundDistance, subscribeViewport]);
+  [service, ready, styleRevision, visible, error, mode, basemapId, basemapSwitching, basemapError, changeBasemap,
+    attachViewport, captureViewIntent, snapshot, measureGroundDistance, subscribeViewport]);
   return <MapContext.Provider value={value}>{children}</MapContext.Provider>;
 }
 export function SharedMapSurface() {

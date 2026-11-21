@@ -17,7 +17,7 @@ function Workspace({ mode, changeMode, agentVisited }) {
   const map = useSharedMap();
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState('');
-  const canCapture = map.ready && map.visible;
+  const canCapture = map.ready && map.visible && !map.basemapSwitching;
   const capture = async () => {
     if (!canCapture || capturing) return;
     setCapturing(true); setCaptureError('');
@@ -27,8 +27,10 @@ function Workspace({ mode, changeMode, agentVisited }) {
   };
   return <div className="satgpt-root" data-mode={mode}>
     <WorkspaceHeader mode={mode} onModeChange={changeMode} canCapture={canCapture} capturing={capturing} onCapture={capture}
+      basemaps={map.basemaps} basemapId={map.basemapId} canChangeBasemap={map.ready && !map.basemapSwitching}
+      basemapSwitching={map.basemapSwitching} onBasemapChange={map.changeBasemap}
       captureHint="Show the map workspace to capture an image" />
-    {captureError ? <div className="satgpt-capture-error" role="alert">{captureError}</div> : null}
+    {map.basemapError || captureError ? <div className="satgpt-capture-error" role="alert">{map.basemapError || captureError}</div> : null}
     <main className="satgpt-mode-content">
       <SharedMapSurface />
       <div className="satgpt-business-panel satgpt-basic-panel" hidden={mode !== 'basic'} role="tabpanel" id="satgpt-panel-basic" aria-labelledby="satgpt-tab-basic">

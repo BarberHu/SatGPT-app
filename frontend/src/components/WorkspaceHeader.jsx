@@ -3,7 +3,8 @@ import { Camera, Settings2, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 
 const modes = [{ id: 'basic', label: 'Static layers' }, { id: 'agent', label: 'Intelligent analysis' }];
-export default function WorkspaceHeader({ mode, onModeChange, canCapture, capturing, onCapture, captureHint }) {
+export default function WorkspaceHeader({ mode, onModeChange, canCapture, capturing, onCapture, captureHint,
+  basemaps, basemapId, canChangeBasemap, basemapSwitching, onBasemapChange }) {
   const navigate = event => {
     const index = modes.findIndex(item => item.id === mode);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? modes.length - 1
@@ -25,6 +26,13 @@ export default function WorkspaceHeader({ mode, onModeChange, canCapture, captur
         tabIndex={mode === item.id ? 0 : -1} onClick={() => onModeChange(item.id)}>{item.label}</button>)}
     </div>
     <div className="satgpt-topbar-actions">
+      {basemaps?.length > 1 ? <label className="satgpt-basemap">
+        <span>Basemap</span>
+        <select aria-label="Basemap" aria-busy={basemapSwitching} value={basemapId} disabled={!canChangeBasemap}
+          onChange={event => onBasemapChange(event.target.value)}>
+          {basemaps.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label> : null}
       <button type="button" className="satgpt-toolbar-button" aria-label="Save map image" title={canCapture ? 'Save current map image' : captureHint || 'Map capture will be available when the map is ready'}
         disabled={!canCapture || capturing} onClick={onCapture}><Camera size={20} strokeWidth={1.7} /></button>
       <Dialog.Root><Dialog.Trigger asChild>

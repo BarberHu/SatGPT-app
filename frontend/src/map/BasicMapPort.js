@@ -86,7 +86,7 @@ export class BasicMapPort {
     if (this.events.some(item => item.event === event && item.layer === layer && item.callback === callback)) return this.port;
     const item = { event, physicalEvent: this.eventName(event), layer, physicalLayer: layer ? this.layer(layer) : undefined, callback };
     item.wrapped = payload => {
-      if (this.disposed || (!this.active && interactive.test(event)) || this.foreign(payload?.sourceId)) return;
+      if (this.disposed || ((!this.active || !this.styleReady) && interactive.test(event)) || this.foreign(payload?.sourceId)) return;
       if (once) this.off(event, ...(layer ? [layer] : []), callback);
       callback({ ...payload, sourceId: this.logical(payload?.sourceId), target: this.port,
         ...(payload?.preventDefault ? { preventDefault: payload.preventDefault.bind(payload) } : {}),
@@ -111,7 +111,7 @@ export class BasicMapPort {
     if (!node || this.domPorts.has(node)) return this.domPorts.get(node) || node;
     const port = new Proxy(node, { get: (target, key) => {
       if (key === 'addEventListener') return (event, listener, options) => {
-        const wrapped = e => { if (this.active && !this.disposed) typeof listener === 'function' ? listener(e) : listener.handleEvent(e); };
+        const wrapped = e => { if (this.active && this.styleReady && !this.disposed) typeof listener === 'function' ? listener(e) : listener.handleEvent(e); };
         this.domEvents.push({ target, event, listener, wrapped, options }); target.addEventListener(event, wrapped, options);
       };
       if (key === 'removeEventListener') return (event, listener) => {
@@ -151,7 +151,10 @@ export class BasicMapPort {
     for (const [id, visible] of this.layers) if (this.map.getLayer(this.physical(id))) this.map.setLayoutProperty(this.physical(id), 'visibility', active ? visible : 'none');
     for (const wrapped of this.controls.values()) if (wrapped.node) wrapped.node.style.display = active ? '' : 'none';
     for (const [name, state] of this.gestures) this.map[name]?.[active && !state.enabled ? 'disable' : 'enable']?.();
-    if (this.map.isStyleLoaded()) this.map.setTerrain?.(active && this.terrain ? { ...this.terrain, source: this.source(this.terrain.source) } : null);
+    if (this.map.isStyleLoaded()) {
+      const source = active && this.terrain && this.source(this.terrain.source);
+      this.map.setTerrain?.(source && this.map.getSource(source) ? { ...this.terrain, source } : null);
+    }
     if (!active) this.map.getCanvas().style.cursor = '';
   }
   camera() { const center = this.map.getCenter(); return JSON.stringify([center.lng, center.lat, this.map.getZoom(), this.map.getBearing(), this.map.getPitch()]); }
