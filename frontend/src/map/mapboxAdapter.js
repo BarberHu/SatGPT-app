@@ -1,6 +1,9 @@
 import mapboxgl from 'mapbox-gl';
 import { BasicMapPort } from './BasicMapPort';
+import { MAPBOX_STREETS_V8 } from './layerSpec';
 import { OsmFeatureInteraction } from './OsmFeatureInteraction';
+import { ROAD_CLASSES, ROAD_LEVELS } from './roadLevels';
+import { RoadTileOverlay } from './RoadTileOverlay';
 import { applyEnglishMapLabels } from '../utils/mapLanguage';
 import { publicPath } from '../utils/publicPath.js';
 
@@ -16,6 +19,7 @@ export class MapboxAdapter {
     this.basemap = { style, hideAdministrativeBoundaries: false, hideRoads: false };
     this.styleReady = false;
     this.tileErrors = new Set();
+    this.gridOverlays = new Map();
     this.map = new mapboxgl.Map({
       container, style, center: initialView?.center || [102, 16.5], zoom: initialView?.zoom ?? 5,
       bearing: initialView?.bearing ?? 0, pitch: initialView?.pitch ?? 0,
@@ -81,6 +85,7 @@ export class MapboxAdapter {
   loadBasemapStyle(basemap) {
     this.basemap = basemap;
     this.osmFeatures.reset();
+    this.clearGridOverlays();
     this.tileErrors.clear();
     this.styleReady = false;
     this.basic.styleReady = false;
@@ -198,15 +203,27 @@ export class MapboxAdapter {
       return;
     }
     if (layer.kind === 'vector') {
-      this.map.addSource(sourceId, { type: 'vector', tiles: [layer.url] });
+      const streets = layer.url === MAPBOX_STREETS_V8;
+      const roads = streets && layer.sourceLayer === 'road';
+      const clippedRoads = roads && Array.isArray(layer.roadLevels);
+      this.map.addSource(sourceId, {
+        type: 'vector',
+        ...(streets ? { url: layer.url, bounds: layer.bounds } : { tiles: [layer.url] }),
+      });
       const paint = layer.renderAs === 'fill'
         ? { 'fill-color': '#1f83c7', 'fill-opacity': layer.opacity }
         : layer.renderAs === 'circle'
           ? { 'circle-color': '#1f83c7', 'circle-opacity': layer.opacity, 'circle-radius': 5 }
-          : { 'line-color': '#1f83c7', 'line-opacity': layer.opacity, 'line-width': 2 };
+          : { 'line-color': '#1f83c7', 'line-opacity': clippedRoads ? 0 : layer.opacity, 'line-width': 2 };
       this.map.addLayer({ id: layerId, source: sourceId, 'source-layer': layer.sourceLayer,
         type: layer.renderAs, layout: { visibility: layer.visible ? 'visible' : 'none' }, paint,
-      });
+        ...(roads && { filter: ['all', ['==', ['geometry-type'], 'LineString'],
+          ['in', ['get', 'class'], ['literal', clippedRoads ? ROAD_CLASSES : ROAD_LEVELS[0].classes]]] }),
+      }, this.overlayAnchor());
+      const overlayOptions = { layerId, sourceId, bounds: layer.bounds, visible: layer.visible, opacity: layer.opacity };
+      if (clippedRoads) {
+        this.gridOverlays.set(layer.id, new RoadTileOverlay(this.map, { ...overlayOptions, levels: layer.roadLevels }));
+      }
       return;
     }
     this.map.addSource(sourceId, { type: 'raster', tiles: [layer.url], tileSize: 256,
@@ -222,6 +239,8 @@ export class MapboxAdapter {
   }
 
   removeLayer(id) {
+    this.gridOverlays.get(id)?.dispose();
+    this.gridOverlays.delete(id);
     this.tileErrors.delete(id);
     const layerId = `satgpt-layer-${id}`;
     this.osmFeatures.remove(layerId);
@@ -235,6 +254,7 @@ export class MapboxAdapter {
   }
 
   setVisibility(id, visible) {
+    this.gridOverlays.get(id)?.setVisibility(visible);
     const layerId = `satgpt-layer-${id}`;
     if (!visible) this.osmFeatures.hide(layerId);
     for (const suffix of LAYER_SUFFIXES) {
@@ -246,6 +266,8 @@ export class MapboxAdapter {
   }
 
   setOpacity(id, opacity) {
+    const overlay = this.gridOverlays.get(id);
+    if (overlay) { overlay.setOpacity(opacity); return; }
     const layerId = `satgpt-layer-${id}`;
     if (opacity === 0) this.osmFeatures.hide(layerId);
     for (const suffix of LAYER_SUFFIXES) {
@@ -253,6 +275,7 @@ export class MapboxAdapter {
       if (layer) this.map.setPaintProperty(key, layer.type === 'symbol' ? 'text-opacity' : `${layer.type}-opacity`, opacity);
     }
   }
+  setRoadLevels(id, levels) { this.gridOverlays.get(id)?.setLevels?.(levels); }
   moveLayer(id) {
     for (const suffix of LAYER_SUFFIXES) {
       const key = `satgpt-layer-${id}${suffix}`;
@@ -271,7 +294,26 @@ export class MapboxAdapter {
     return () => { for (const name of ['sourcedataloading', 'sourcedata', 'error']) this.map.off(name, handle); };
   }
 
-  captureSnapshot() { return this.map.getCanvas().toDataURL('image/png'); }
+  captureSnapshot() {
+    const base = this.map.getCanvas();
+    const visibleOverlays = [...this.gridOverlays.values()].filter(overlay => overlay.image);
+    if (!visibleOverlays.length) return base.toDataURL('image/png');
+    const composite = document.createElement('canvas');
+    composite.width = base.width;
+    composite.height = base.height;
+    const ctx = composite.getContext('2d');
+    if (!ctx) return base.toDataURL('image/png');
+    ctx.drawImage(base, 0, 0);
+    for (const overlay of visibleOverlays) {
+      if (overlay.dirty) overlay.draw();
+      ctx.drawImage(overlay.image, 0, 0, base.width, base.height);
+    }
+    return composite.toDataURL('image/png');
+  }
+  clearGridOverlays() {
+    for (const overlay of this.gridOverlays.values()) overlay.dispose();
+    this.gridOverlays.clear();
+  }
   resize() { this.map.resize(); }
   getBasicPort() { return this.basic.port; }
   getAgentDrawPort() { return this.agentDraw.port; }
@@ -286,6 +328,7 @@ export class MapboxAdapter {
     this.disposed = true;
     this.cancelStyleLoad?.();
     this.osmFeatures.dispose();
+    this.clearGridOverlays();
     this.basic.dispose();
     this.agentDraw.dispose();
     this.map.removeControl(this.navigation);

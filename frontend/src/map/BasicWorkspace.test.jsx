@@ -7,6 +7,10 @@ import { basicSelectionKey } from '../aoi/snapshot';
 import usePresetLayers from '../hooks/usePresetLayers';
 import PresetMapController from '../presets/PresetMapController';
 import { FakeMap } from './tests/fakeMap';
+import { MapboxAdapter } from './mapboxAdapter';
+import { MapService } from './mapService';
+import { MAPBOX_STREETS_V8 } from './layerSpec';
+import { ROAD_LEVELS, ROAD_OUTLINE_COLOR } from './roadLevels';
 const observed=vi.hoisted(()=>({context:null,resolve:null}));
 vi.mock('mapbox-gl',async()=>{const {FakeMap}=await import('./tests/fakeMap');return {default:{Map:FakeMap,NavigationControl:class{onAdd(){return document.createElement('div');}onRemove(){}}}};});
 vi.mock('./config',()=>({mapOptions:{token:'pk.test',style:'mapbox://styles/test'}}));
@@ -97,4 +101,142 @@ test('the Basic grid switch controls selection across modes while late preset re
   expect(FakeMap.instances).toHaveLength(1);expect(raw.remove).not.toHaveBeenCalled();expect(raw.controls).toHaveLength(2);
   await act(async()=>root.unmount());expect(raw.remove).toHaveBeenCalledTimes(1);expect(raw.events).toHaveLength(0);
  }finally{await act(async()=>root.unmount());node.remove();vi.unstubAllGlobals();delete globalThis.IS_REACT_ACT_ENVIRONMENT;}
+});
+
+test('the Streets v8 grid overlays retain their bounds and levels across basemap and mode changes', async () => {
+  const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  const engine = new MapboxAdapter(document.createElement('div'), { token: 'pk.test', style: 'mapbox://styles/test' });
+  const service = new MapService(engine);
+  const group = 'basic:presets';
+  const scope = service.scope(group);
+  const physical = service.physical(group, 'roads');
+  const source = `satgpt-source-${physical}`;
+  const layer = `satgpt-layer-${physical}`;
+  const bounds = [113.504, 29.304, 115.254, 31.054];
+  const adjacent = service.physical(group, 'adjacent-roads');
+  const adjacentLayer = `satgpt-layer-${adjacent}`;
+  const adjacentSource = `satgpt-source-${adjacent}`;
+  const adjacentBounds = [115.254, 29.304, 117.004, 31.054];
+  const roadCanvases = () => [...engine.map.getContainer().querySelectorAll('.road-tiles-canvas')];
+  try {
+    scope.addLayer({ id: 'roads', kind: 'vector', url: MAPBOX_STREETS_V8, sourceLayer: 'road', bounds, roadLevels: ['major'] });
+    expect(engine.map.getSource(source)).toMatchObject({ type: 'vector', url: MAPBOX_STREETS_V8, bounds });
+    expect(engine.map.getSource(source)).not.toHaveProperty('tiles');
+    expect(engine.map.getLayer(layer)).toMatchObject({
+      source, 'source-layer': 'road', type: 'line',
+      paint: { 'line-opacity': 0 },
+      filter: ['all', ['==', ['geometry-type'], 'LineString'], ['in', ['get', 'class'], ['literal', [
+        'motorway', 'trunk', 'primary', 'secondary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link',
+        'tertiary', 'tertiary_link', 'street', 'street_limited', 'service', 'track',
+      ]]]],
+    });
+    let overlay = engine.map.getContainer().querySelector('.road-tiles-canvas');
+    expect(overlay.hidden).toBe(false);
+    const sourceBefore = engine.map.getSource(source);
+    scope.setRoadLevels('roads', ['secondary', 'local']);
+    expect(engine.map.getSource(source)).toBe(sourceBefore);
+    expect(scope.listLayers()[0].roadLevels).toEqual(['secondary', 'local']);
+    scope.addLayer({ id: 'adjacent-roads', kind: 'vector', url: MAPBOX_STREETS_V8, sourceLayer: 'road',
+      bounds: adjacentBounds, roadLevels: ['major'] });
+    expect(roadCanvases().map(canvas => canvas.hidden)).toEqual([false, false]);
+
+    const switchStyle = service.setBasemap('mapbox://styles/mapbox/satellite-streets-v12', { hideRoads: true });
+    engine.map.addLayer({ id: 'road-primary', type: 'line', source: 'composite', 'source-layer': 'road' });
+    engine.map.finishStyle();
+    await switchStyle;
+    expect(engine.map.getLayoutProperty('road-primary', 'visibility')).toBe('none');
+    expect(engine.map.getLayoutProperty(layer, 'visibility')).toBe('visible');
+    expect(engine.map.getLayoutProperty(adjacentLayer, 'visibility')).toBe('visible');
+    expect(engine.map.getSource(source)).toMatchObject({ type: 'vector', url: MAPBOX_STREETS_V8, bounds });
+    expect(engine.map.getSource(adjacentSource)).toMatchObject({ type: 'vector', url: MAPBOX_STREETS_V8, bounds: adjacentBounds });
+    expect(scope.listLayers().map(item => item.roadLevels)).toEqual([['secondary', 'local'], ['major']]);
+    expect(overlay.parentNode).toBeNull();
+    overlay = roadCanvases()[0];
+    expect(roadCanvases().map(canvas => canvas.hidden)).toEqual([false, false]);
+
+    service.setMode('agent');
+    expect(engine.map.getLayoutProperty(layer, 'visibility')).toBe('none');
+    expect(engine.map.getLayoutProperty(adjacentLayer, 'visibility')).toBe('none');
+    expect(roadCanvases().map(canvas => canvas.hidden)).toEqual([true, true]);
+    engine.map.fire('style.load');
+    expect(engine.map.getLayoutProperty(layer, 'visibility')).toBe('none');
+    expect(overlay.isConnected).toBe(false);
+    service.setMode('basic');
+    expect(engine.map.getLayoutProperty(layer, 'visibility')).toBe('visible');
+    expect(engine.map.getLayoutProperty(adjacentLayer, 'visibility')).toBe('visible');
+    expect(roadCanvases().map(canvas => canvas.hidden)).toEqual([false, false]);
+    scope.removeLayer('roads');
+    expect(engine.map.getSource(source)).toBeUndefined();
+    expect(engine.map.getLayer(layer)).toBeUndefined();
+    expect(engine.map.getLayer(adjacentLayer)).toBeDefined();
+    expect(roadCanvases().map(canvas => canvas.hidden)).toEqual([false]);
+  } finally {
+    service.dispose();
+    context.mockRestore();
+  }
+});
+
+test('the road canvas clips outlined lines, preserves road hierarchy and is exported', () => {
+  const strokes = [];
+  const roadStrokes = ({ width, outlineWidth, color }) => [
+    { width: outlineWidth, color: ROAD_OUTLINE_COLOR }, { width, color },
+  ];
+  const draw = Object.fromEntries([
+    'setTransform', 'clearRect', 'save', 'beginPath', 'moveTo', 'lineTo', 'closePath', 'clip', 'restore',
+  ].map(name => [name, vi.fn()]));
+  draw.stroke = vi.fn(() => strokes.push({ width: draw.lineWidth, color: draw.strokeStyle }));
+  const composite = { drawImage: vi.fn() };
+  const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function getContext() {
+    return this.classList.contains('road-tiles-canvas') ? draw : composite;
+  });
+  const png = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,roads');
+  const engine = new MapboxAdapter(document.createElement('div'), { token: 'pk.test', style: 'mapbox://styles/test' });
+  const service = new MapService(engine);
+  const group = 'basic:presets';
+  const scope = service.scope(group);
+  const physical = service.physical(group, 'roads');
+  const source = `satgpt-source-${physical}`;
+  const layer = `satgpt-layer-${physical}`;
+  const bounds = [100, 10, 102, 12];
+  const raw = engine.map;
+  let offset = 0;
+  raw.project = ([lng, lat]) => ({ x: Math.round(50 + (lng - 100) * 100) + offset, y: 100 - (lat - 10) * 40 });
+  raw.queryRenderedFeatures = vi.fn(() => ['motorway', 'tertiary_link', 'service', 'rail'].map(kind => ({
+    properties: { class: kind }, geometry: { type: 'LineString', coordinates: [[99.7, 11], [102.3, 11]] },
+  })));
+
+  try {
+    scope.addLayer({ id: 'roads', kind: 'vector', url: MAPBOX_STREETS_V8, sourceLayer: 'road', bounds, roadLevels: ['major'] });
+    raw.fire('render');
+    expect(raw.queryRenderedFeatures).toHaveBeenLastCalledWith([[50, 20], [250, 100]], { layers: [layer] });
+    expect(draw.moveTo.mock.calls).toEqual([[50, 100], [20, 60]]);
+    expect(draw.lineTo).toHaveBeenLastCalledWith(280, 60);
+    expect(draw.clip.mock.invocationCallOrder[0]).toBeLessThan(draw.stroke.mock.invocationCallOrder[0]);
+    expect(strokes).toEqual(roadStrokes(ROAD_LEVELS[0]));
+    raw.fire('render');
+    expect(raw.queryRenderedFeatures).toHaveBeenCalledTimes(1);
+    offset = 25;
+    raw.fire('move').fire('render');
+    expect(raw.queryRenderedFeatures).toHaveBeenLastCalledWith([[75, 20], [275, 100]], { layers: [layer] });
+    raw.fire('resize').fire('render');
+    raw.fire('sourcedata', { sourceId: source }).fire('render');
+    expect(raw.queryRenderedFeatures).toHaveBeenCalledTimes(4);
+
+    strokes.length = 0;
+    scope.setRoadLevels('roads', ['major', 'secondary', 'local']);
+    raw.fire('render');
+    expect(strokes).toEqual([...ROAD_LEVELS].reverse().flatMap(roadStrokes));
+    const overlay = raw.getContainer().querySelector('.road-tiles-canvas');
+    expect(service.captureSnapshot()).toBe('data:image/png;base64,roads');
+    expect(composite.drawImage.mock.calls).toEqual([
+      [raw.getCanvas(), 0, 0], [overlay, 0, 0, raw.getCanvas().width, raw.getCanvas().height],
+    ]);
+    scope.setRoadLevels('roads', []);
+    expect(overlay.hidden).toBe(true);
+    expect(service.captureSnapshot()).toBe('data:image/png;base64,AA==');
+  } finally {
+    service.dispose();
+    context.mockRestore();
+    png.mockRestore();
+  }
 });

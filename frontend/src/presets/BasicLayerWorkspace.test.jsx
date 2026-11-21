@@ -3,11 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { test, vi, expect, beforeEach, afterEach } from 'vitest';
 import { AppProvider, useAppContext } from '../context/AppContext';
 import BasicLayerWorkspace from './BasicLayerWorkspace';
+import httpClient from '../api/httpClient';
 import { writeBasicSelection } from '../aoi/snapshot';
 import { buildAoiFromBounds, buildAoiFromGridSelection } from '../utils/aoi';
+import { ROAD_LEVELS, ROAD_OUTLINE_COLOR } from '../map/roadLevels';
 
-const state=vi.hoisted(()=>({context:null,scope:null,request:null}));
-vi.mock('../map/SharedMapContext',()=>({useSharedMap:()=>({service:{scope:()=>state.scope}})}));
+const state=vi.hoisted(()=>({context:null,scope:null,service:null,request:null,tileListeners:null}));
+vi.mock('../map/SharedMapContext',()=>({useSharedMap:()=>({service:state.service})}));
 vi.mock('../api/presetLayers',()=>({requestPresetLayer:(...args)=>state.request(...args)}));
 vi.mock('../repositories/businessLayerRepository',async original=>({...await original(),default:{load:async()=>[],save:async()=>{}}}));
 let root,node;
@@ -20,7 +22,12 @@ const selectGrid = (west = 100) => act(async () => {
 });
 beforeEach(()=>{
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();
- state.scope={addLayer:vi.fn(),removeLayer:vi.fn(),setVisibility:vi.fn(),setOpacity:vi.fn(),setOrder:vi.fn(),setView:vi.fn(),subscribeTileStatus:()=>()=>{}};
+ state.tileListeners = new Set();
+ state.scope={addLayer:vi.fn(),removeLayer:vi.fn(),setVisibility:vi.fn(),setRoadLevels:vi.fn(),setOpacity:vi.fn(),setOrder:vi.fn(),setView:vi.fn(),subscribeTileStatus:listener=>{
+   state.tileListeners.add(listener);
+   return ()=>state.tileListeners.delete(listener);
+ }};
+ state.service={scope:()=>state.scope};
  state.request=vi.fn(async row=>({status:'ready',layer:{id:row.id,name:row.presetId,kind:'gee',url:'https://earthengine.googleapis.com/v1/projects/p/maps/m/tiles/{z}/{x}/{y}',metadata:{source:'Verified source',observedAt:'2021',description:'Verified method'},legend:{type:'continuous',colors:['#000000'],min:0,max:1},visible:true,opacity:.8}}));
  vi.stubGlobal('fetch',vi.fn(async()=>({json:async()=>({})})));
  node=document.createElement('div');document.body.appendChild(node);root=createRoot(node);
@@ -69,6 +76,117 @@ test('the layer library has no study area tools and enables loading after grid s
   await selectGrid();
   expect(loadButton.disabled).toBe(false);
   expect(state.request).not.toHaveBeenCalled();
+});
+
+const sendTileStatus = (id, stateName) => act(async () => {
+  for (const listener of state.tileListeners) {
+    listener({ id, url: 'mapbox://mapbox.mapbox-streets-v8', state: stateName });
+  }
+});
+const roadCard = longitude => node.querySelector(`[aria-label="Layer Road network, Grid 10.500° N, ${longitude}.500° E"]`);
+test('loads, toggles, and removes the selected grid road tiles without posting to the road API', async () => {
+  const post = vi.spyOn(httpClient, 'post');
+  try {
+    await act(async () => root.render(<AppProvider><Probe /></AppProvider>));
+    const load = [...node.querySelectorAll('button')].find(button => button.textContent === 'Load roads');
+    expect(load.disabled).toBe(true);
+    await selectGrid();
+    expect(load.disabled).toBe(false);
+    expect(state.scope.addLayer).not.toHaveBeenCalled();
+    await click('Load roads');
+    expect(post).not.toHaveBeenCalled();
+    expect(state.scope.addLayer).toHaveBeenCalledOnce();
+    expect(state.scope.addLayer).toHaveBeenCalledWith({
+      id: 'basic-road-network-1', name: 'Road network', kind: 'vector', renderAs: 'line', roadLevels: ['major'], visible: true,
+      url: 'mapbox://mapbox.mapbox-streets-v8', sourceLayer: 'road', bounds: [100, 10, 101, 11],
+    });
+    const card = roadCard(100);
+    expect(card.textContent).toContain('Mapbox Streets v8');
+    const swatches = [...card.querySelectorAll('.preset-road-levels [aria-hidden="true"]')];
+    expect(swatches.map(({ style }) => [
+      style.getPropertyValue('--road-swatch-color'),
+      style.getPropertyValue('--road-swatch-width'),
+      style.getPropertyValue('--road-swatch-outline-color'),
+      style.getPropertyValue('--road-swatch-outline-width'),
+    ])).toEqual(ROAD_LEVELS.map(({ color, width, outlineWidth }) => [color, `${width}px`, ROAD_OUTLINE_COLOR, `${outlineWidth}px`]));
+    const [major, secondary, local] = card.querySelectorAll('input');
+    expect([major.checked, secondary.checked, local.checked]).toEqual([true, false, false]);
+    await act(async () => { secondary.click(); local.click(); });
+    expect(state.scope.setRoadLevels).toHaveBeenLastCalledWith('basic-road-network-1', ['major', 'secondary', 'local']);
+    await act(async () => major.click());
+    expect([major.checked, secondary.checked, local.checked]).toEqual([false, true, true]);
+    expect(state.scope.setRoadLevels).toHaveBeenLastCalledWith('basic-road-network-1', ['secondary', 'local']);
+    expect(state.scope.addLayer).toHaveBeenCalledOnce();
+    expect(node.textContent).toContain('Loading road tiles');
+    await sendTileStatus('basic-road-network-1', 'ready');
+    expect(node.textContent).not.toContain('Loading road tiles');
+    await click('Hide Road network, Grid 10.500° N, 100.500° E');
+    expect(state.scope.setVisibility).toHaveBeenLastCalledWith('basic-road-network-1', false);
+    await click('Show Road network, Grid 10.500° N, 100.500° E');
+    expect(state.scope.setVisibility).toHaveBeenLastCalledWith('basic-road-network-1', true);
+    await click('Remove Road network, Grid 10.500° N, 100.500° E');
+    expect(state.scope.removeLayer).toHaveBeenCalledWith('basic-road-network-1');
+    expect(roadCard(100)).toBeNull();
+    expect(load.disabled).toBe(false);
+  } finally {
+    post.mockRestore();
+  }
+});
+
+test('adjacent grids append road tiles, deduplicate by grid and keep independent controls', async () => {
+  await act(async () => root.render(<AppProvider><Probe /></AppProvider>));
+  await selectGrid();
+  await click('Load roads');
+  await selectGrid(101);
+  expect(roadCard(100)).not.toBeNull();
+  expect(roadCard(101)).toBeNull();
+  expect(state.scope.addLayer).toHaveBeenCalledOnce();
+  await click('Load roads');
+  expect(state.scope.addLayer).toHaveBeenLastCalledWith(expect.objectContaining({ bounds: [101, 10, 102, 11] }));
+  expect(roadCard(101)).not.toBeNull();
+  expect(node.querySelector('.workspace-layer-count').textContent).toBe('2');
+  await sendTileStatus('basic-road-network-1', 'ready');
+  await selectGrid();
+  const load = [...node.querySelectorAll('button')].find(button => button.textContent === 'Load roads');
+  expect(load.disabled).toBe(true);
+  await click('Load roads');
+  expect(state.scope.addLayer).toHaveBeenCalledTimes(2);
+  expect(state.scope.removeLayer).not.toHaveBeenCalled();
+  await act(async () => roadCard(100).querySelectorAll('input')[1].click());
+  expect(state.scope.setRoadLevels).toHaveBeenCalledExactlyOnceWith('basic-road-network-1', ['major', 'secondary']);
+  expect(roadCard(101).querySelectorAll('input')[1].checked).toBe(false);
+  await click('Hide Road network, Grid 10.500° N, 100.500° E');
+  expect(state.scope.setVisibility).toHaveBeenCalledExactlyOnceWith('basic-road-network-1', false);
+  expect(roadCard(101).classList.contains('is-hidden')).toBe(false);
+  await click('Remove Road network, Grid 10.500° N, 100.500° E');
+  expect(state.scope.removeLayer).toHaveBeenCalledExactlyOnceWith('basic-road-network-1');
+  expect(roadCard(100)).toBeNull();
+  expect(roadCard(101)).not.toBeNull();
+  expect(load.disabled).toBe(false);
+  expect(node.querySelector('.workspace-layer-count').textContent).toBe('1');
+});
+
+test('retry uses the failed card’s original grid and ignores errors from its old source', async () => {
+  await act(async () => root.render(<AppProvider><Probe /></AppProvider>));
+  await selectGrid();
+  await click('Load roads');
+  await act(async () => roadCard(100).querySelectorAll('input')[1].click());
+  await selectGrid(101);
+  await click('Load roads');
+  await sendTileStatus('basic-road-network-2', 'ready');
+  await sendTileStatus('basic-road-network-1', 'error');
+  expect(roadCard(100).textContent).toContain('Mapbox road tiles failed to load.');
+  expect(roadCard(101).querySelector('[role="status"]')).toBeNull();
+  await act(async () => [...roadCard(100).querySelectorAll('button')].find(button => button.textContent === 'Retry').click());
+  expect(state.scope.removeLayer).toHaveBeenCalledExactlyOnceWith('basic-road-network-1');
+  expect(state.scope.addLayer).toHaveBeenLastCalledWith(expect.objectContaining({
+    id: 'basic-road-network-3', bounds: [100, 10, 101, 11], roadLevels: ['major', 'secondary'],
+  }));
+  expect(roadCard(101).querySelector('[role="status"]')).toBeNull();
+  await sendTileStatus('basic-road-network-3', 'ready');
+  await sendTileStatus('basic-road-network-1', 'error');
+  expect(roadCard(100).querySelector('[role="status"]')).toBeNull();
+  expect(roadCard(101).querySelector('[role="status"]')).toBeNull();
 });
 
 test('Apply captures the visible date fields and cloud threshold as one explicit request',async()=>{

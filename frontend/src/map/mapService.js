@@ -1,4 +1,5 @@
 import { normalizeLayer } from './layerSpec';
+import { normalizeRoadLevels } from './roadLevels';
 
 /** One engine, with explicit mode/session groups and independently saved visibility. */
 export class MapService {
@@ -60,6 +61,15 @@ export class MapService {
     row.layer = { ...row.layer, opacity: Math.max(0, Math.min(1, opacity)) };
     this.engine.setOpacity?.(this.physical(group, id), row.layer.opacity); this.notify(); return true;
   }
+  setRoadLevels(id, levels, group = 'default') {
+    const key = this.physical(group, id);
+    const row = this.layers.get(key);
+    if (!row?.layer.roadLevels) return false;
+    const next = normalizeRoadLevels(levels);
+    if (next.length === row.layer.roadLevels.length && next.every((level, index) => level === row.layer.roadLevels[index])) return true;
+    row.layer = { ...row.layer, roadLevels: next };
+    this.engine.setRoadLevels?.(key, next); this.notify(); return true;
+  }
   setOrder(ids, group = 'default') {
     // The public order is top first; engines paint bottom first.
     const rows = [...this.layers.values()].filter(row => row.group === group);
@@ -91,6 +101,7 @@ export class MapService {
       removeLayer: id => this.removeLayer(id, group), setVisibility: (id, visible) => this.setVisibility(id, visible, group),
       replaceLayer: (id, input) => this.replaceLayer(id, input, group),
       setOpacity: (id, opacity) => this.setOpacity(id, opacity, group), setOrder: ids => this.setOrder(ids, group),
+      setRoadLevels: (id, levels) => this.setRoadLevels(id, levels, group),
       subscribeTileStatus: listener => this.subscribeTileStatus(listener, group),
       subscribe: listener => this.subscribe(() => listener(this.listLayers(group))),
       getCurrentView: () => this.getCurrentView(), setView: view => { if (this.enabled(group)) this.setView(view); },
