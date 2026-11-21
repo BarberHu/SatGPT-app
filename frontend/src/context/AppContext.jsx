@@ -15,7 +15,6 @@ export const useAppContext = () => {
 export const AppProvider = ({ children }) => {
   // UI State
 
-  const [isLoading, setIsLoading] = useState(false);
   const { warning, setWarning, setOwnedWarning, clearOwnedWarning } = useWarningState();
 
   // Map State
@@ -49,23 +48,7 @@ export const AppProvider = ({ children }) => {
   const [is3DEnabled, setIs3DEnabled] = useState(false);
   const [isBuildingsEnabled, setIsBuildingsEnabled] = useState(false);
 
-  // Chat/GPT State
-  const [chatInput, setChatInput] = useState('');
-
-  const [resultText, setResultText] = useState('');
-  const [isResultVisible, setIsResultVisible] = useState(true);
-
-  const resetAskSession = useCallback(({ preserveResult = false } = {}) => {
-    if (!preserveResult) {
-      setResultText('');
-    }
-    setIsResultVisible(true);
-    setWarning('');
-  }, []);
-
   const value = {
-    isLoading,
-    setIsLoading,
     warning,
     setWarning,
     setOwnedWarning,
@@ -84,13 +67,6 @@ export const AppProvider = ({ children }) => {
     setIs3DEnabled,
     isBuildingsEnabled,
     setIsBuildingsEnabled,
-    chatInput,
-    setChatInput,
-    resultText,
-    setResultText,
-    isResultVisible,
-    setIsResultVisible,
-    resetAskSession,
     aoiOutlineVisible,
     aoiStorageError,
   };

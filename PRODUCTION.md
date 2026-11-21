@@ -29,13 +29,42 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 
 不要将不带 `--quiet` 的 Compose 展开配置写入日志或提交，它包含运行环境中的密钥。CI/系统环境注入通过 Compose 显式变量映射覆盖根目录 `.env`。若需要网络代理，容器内的 `127.0.0.1` 指向容器自身；通过系统环境覆盖为容器可达的代理地址。含 `$` 的密钥在 `.env` 中用单引号包裹，避免 Compose 插值。
 
-GEE 凭据使用 `GOOGLE_APPLICATION_CREDENTIALS` 指定的宿主机文件（默认 `.private-key.json`，也支持绝对路径），只读挂载到统一后端的 `/run/secrets/gee-service-account.json`。不存在时拒绝启动，不自动创建目录。容器内主机地址固定为 `0.0.0.0`；端口仍遵循 `.env`，仅前端端口发布到宿主机 `127.0.0.1`。网关通过 Compose 内部 `agent` 服务名访问 API，不使用宿主机地址。两种部署都使用 Node 网关，避免另一份固定端口的 Nginx 配置。
+GEE 凭据使用 `GOOGLE_APPLICATION_CREDENTIALS` 指定的宿主机文件（默认 `.private-key.json`，也支持绝对路径），只读挂载到统一后端的 `/run/secrets/gee-service-account.json`。不存在时拒绝启动，不自动创建目录。容器内主机地址固定为 `0.0.0.0`；端口仍遵循 `.env`，仅前端端口发布到宿主机。发布地址由 `SATGPT_FRONTEND_PUBLISH_HOST` 配置，默认 `127.0.0.1`。网关通过 Compose 内部 `agent` 服务名访问 API。
 
-前端镜像仅接收两个公开 Mapbox build args，既不接收模型密钥也不复制 `.env`。后端运行时注入凭据和所需模型配置。真实配置、服务账号 JSON、实验目录、测试运行结果、输出文件、运行历史和本地虚拟环境被构建上下文排除。`harness_state` 卷保存会话；停止命令不删除卷：
+前端镜像仅接收公开的 Mapbox 配置和 `SATGPT_BASE_PATH`，既不接收模型密钥也不复制 `.env`。后端运行时注入凭据和所需模型配置。真实配置、服务账号 JSON、实验目录、测试运行结果、输出文件、运行历史和本地虚拟环境被构建上下文排除。`harness_state` 卷保存会话；停止命令不删除卷：
 
 ```powershell
 docker compose --project-name satgpt --project-directory . --env-file .env -f scripts/docker/compose.harness.yml down
 ```
+
+## 共用 HTTPS 域名的临时子路径
+
+在测试用的根目录 `.env` 中设置 `SATGPT_BASE_PATH=/satgpt/`、`SATGPT_PUBLIC_ORIGIN=https://your-host.example` 和 `SATGPT_COOKIE_SECURE=true`。Vite 用第一项构建浏览器地址，公开 origin 只填写协议和域名。
+
+Nginx 与 SatGPT 分属两台机器时，Compose 将 `SATGPT_FRONTEND_PUBLISH_HOST` 设为 SatGPT 的内网接口地址。Windows 原生启动在临时 PowerShell 窗口中设置 `$env:FRONTEND_HOST` 为同一地址，并设 `$env:SATGPT_ALLOW_REMOTE_HARNESS = 'true'` 后从仓库根目录运行 `.\scripts\windows\satgpt.bat deploy`。宿主机防火墙仅允许 Nginx 来源访问前端端口，后端仍使用内部地址。
+
+将下面的配置放入共享 Nginx 上该域名已有的 HTTPS `server` 块，并替换 `SATGPT_LAN_IP` 和实际前端端口。SatGPT 的外部路由统一走 `/satgpt/`，内网 Node 网关和后端继续使用根路径。
+
+```nginx
+# BEGIN TEMP SATGPT SUBPATH TEST
+location = /satgpt {
+    return 308 /satgpt/$is_args$args;
+}
+
+location ^~ /satgpt/ {
+    proxy_pass http://SATGPT_LAN_IP:3000/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 300s;
+    proxy_cookie_path ~^/$ /satgpt/;
+}
+# END TEMP SATGPT SUBPATH TEST
+```
+
+测试结束后，删除 `.env` 的临时测试块，在无临时环境覆盖的窗口重新构建和重启 SatGPT。由 Nginx 管理员移除对应的临时测试块，运行 `nginx -t` 后重载。
 
 ## 修改配置与健康检查
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Camera, Settings2, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { publicPath } from '../utils/publicPath.js';
 import WorkspaceHelp from './WorkspaceHelp';
 
 const modes = [{ id: 'basic', label: 'Static layers' }, { id: 'agent', label: 'Intelligent analysis' }];
@@ -18,8 +19,8 @@ export default function WorkspaceHeader({ mode, onModeChange, canCapture, captur
   };
   return <header className="satgpt-topbar" aria-label="SatGPT workspace">
     <div className="satgpt-topbar-brand">
-      <img className="satgpt-topbar-mark" src="/assets/images/satgpt-avatar.png" width="30" height="30" alt="" aria-hidden="true" />
-      <img className="satgpt-topbar-wordmark" src="/assets/images/satgpt-wordmark.png" width="2954" height="369" alt="SatGPT Logo" />
+      <img className="satgpt-topbar-mark" src={publicPath('/assets/images/satgpt-avatar.png')} width="30" height="30" alt="" aria-hidden="true" />
+      <img className="satgpt-topbar-wordmark" src={publicPath('/assets/images/satgpt-wordmark.png')} width="2954" height="369" alt="SatGPT Logo" />
     </div>
     <div className="satgpt-mode-tabs" role="tablist" aria-label="Workspace mode" onKeyDown={navigate}>
       {modes.map(item => <button key={item.id} type="button" role="tab" id={`satgpt-tab-${item.id}`}

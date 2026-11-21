@@ -6,6 +6,7 @@ const { parseEnv } = require('node:util');
 const defaults = {
   FRONTEND_HOST: '127.0.0.1', FRONTEND_PORT: '3000',
   SATGPT_SERVICE_HOST: '127.0.0.1', AGENT_PORT: '8000',
+  SATGPT_BASE_PATH: '/',
   SATGPT_ALLOW_REMOTE_HARNESS: 'false', PROXY_TIMEOUT_MS: '300000', PROXY_MAX_SOCKETS: '256',
   GENERATE_SOURCEMAP: 'false',
   REACT_APP_MAPBOX_STYLE_URL: 'mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp',
@@ -30,6 +31,13 @@ function positive(env, name, maximum = Number.MAX_SAFE_INTEGER) {
   if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > maximum || !Number.isSafeInteger(Number(raw))) invalid(name, `must be an integer between 1 and ${maximum}`);
   return Number(raw);
 }
+function basePath(env) {
+  const value = env.SATGPT_BASE_PATH ?? defaults.SATGPT_BASE_PATH;
+  if (!/^\/(?:[a-zA-Z0-9_-]+\/)*$/.test(value)) {
+    invalid('SATGPT_BASE_PATH', 'must be / or a path such as /satgpt/ with leading and trailing slashes');
+  }
+  return value;
+}
 function validateFrontend(env, { map = true } = {}) {
   const ports = ['FRONTEND_PORT', 'AGENT_PORT'].map(name => port(env, name));
   if (new Set(ports).size !== ports.length) invalid('FRONTEND_PORT/AGENT_PORT', 'must use distinct ports');
@@ -46,4 +54,4 @@ function validateFrontend(env, { map = true } = {}) {
 function publicConfig(env) {
   return Object.fromEntries(publicNames.map(name => [`import.meta.env.${name}`, JSON.stringify(env[name] || '')]));
 }
-module.exports = { loadProjectEnv, validateFrontend, publicConfig, port, positive, defaults };
+module.exports = { loadProjectEnv, validateFrontend, publicConfig, basePath, port, positive, defaults };

@@ -98,6 +98,53 @@ test('hazard themes switch the layer list without repeating their names as headi
   }
 });
 
+test('Basic population cards use the same six count classes for multiple grids', async () => {
+  const dataset = 'JRC/GHSL/P2023A/GHS_POP/2020';
+  const previewUrl = 'https://earthengine.googleapis.com/v1/projects/p/thumbnails/preview:getPixels';
+  const labels = ['>0 to 1', '>1 to 5', '>5 to 20', '>20 to 100', '>100 to 500', '>500'];
+  const palette = ['ffffe7', 'ffc869', 'ffac1d', 'e17735', 'f2552c', '9f0c21'];
+  const post = vi.spyOn(httpClient, 'post').mockResolvedValue({ data: {
+    status: 'ready', effective_params: {}, layer: {
+      name: 'Population Count', kind: 'gee',
+      url: 'https://earthengine.googleapis.com/v1/projects/p/maps/m/tiles/{z}/{x}/{y}',
+      thumbnail: { url: previewUrl }, visualization: { min: 0, max: 5, palette },
+      legend: { type: 'categorical', labels, note: '0 is transparent' },
+      metadata: { source: 'JRC GHSL', dataset_id: dataset, observed_at: '2020', unit: 'people/pixel' },
+    },
+  } });
+  const { requestPresetLayer } = await vi.importActual('../api/presetLayers');
+  state.request.mockImplementation(requestPresetLayer);
+  try {
+    await act(async () => root.render(<AppProvider><Probe /></AppProvider>));
+    await click('Population Count');
+    expect(node.querySelector('.preset-parameters').textContent).toContain('2020 · 100 m');
+    await selectGrid();
+    await click('Load layer');
+    await flush();
+
+    expect(post).toHaveBeenCalledWith('/api/preset-layers', {
+      preset_id: 'populationDensity', aoi: expect.objectContaining({ geojson: state.context.selectedAOI.geojson }),
+    }, expect.any(Object));
+    await selectGrid(101);
+    await click('Load layer');
+    await flush();
+    const cards = [...node.querySelectorAll('[aria-label="Layer Population Count"]')];
+    expect(cards).toHaveLength(2);
+    for (const card of cards) {
+      expect(card.textContent).toContain('JRC GHSL');
+      expect(card.textContent).toContain('2020');
+      expect(card.textContent).toContain('people/pixel');
+      expect(card.textContent).toContain('0 is transparent');
+      expect([...card.querySelectorAll('.agent-layer-categories li > span:nth-child(2)')].map(item => item.textContent)).toEqual(labels);
+      expect(card.querySelector('img').getAttribute('src')).toBe(previewUrl);
+      expect(card.querySelector('.preset-method').textContent).toContain(dataset);
+    }
+    expect(cards[0].querySelector('.agent-layer-categories').innerHTML).toBe(cards[1].querySelector('.agent-layer-categories').innerHTML);
+  } finally {
+    post.mockRestore();
+  }
+});
+
 const sendTileStatus = (id, stateName) => act(async () => {
   for (const listener of state.tileListeners) {
     listener({ id, url: 'mapbox://mapbox.mapbox-streets-v8', state: stateName });

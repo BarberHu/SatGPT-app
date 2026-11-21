@@ -8,6 +8,7 @@ import usePresetLayers from '../hooks/usePresetLayers';
 import useGridTileLayers, { BUILDING_FOOTPRINTS, ROAD_NETWORK } from '../hooks/useGridTileLayers';
 import { BUILDING_FOOTPRINT_MIN_ZOOM } from '../map/layerSpec';
 import { ROAD_LEVELS, ROAD_OUTLINE_COLOR } from '../map/roadLevels';
+import { publicPath } from '../utils/publicPath.js';
 import PresetMapController from './PresetMapController';
 import PresetParameterForm from './PresetParameterForm';
 import PresetLayerCard from './PresetLayerCard';
@@ -81,7 +82,7 @@ export default function BasicLayerWorkspace() {
   const [notice, setNotice] = useState('');
   const layerCount = rows.length + roads.rows.length + buildings.rows.length;
   useEffect(() => {
-    fetch('/assets/data/countries.json').then(response => response.json()).then(setCountries).catch(() => {});
+    fetch(publicPath('/assets/data/countries.json')).then(response => response.json()).then(setCountries).catch(() => {});
   }, [setCountries]);
   const selectPreset = id => { setSelected(id); setEditing(null); setNotice(''); };
   const apply = params => {

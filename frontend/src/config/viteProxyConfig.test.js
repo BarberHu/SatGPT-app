@@ -16,4 +16,16 @@ describe('Vite proxy configuration', () => {
     expect(proxy['/api'].changeOrigin).toBe(false);
     expect(proxy['/health'].changeOrigin).toBe(true);
   });
+
+  test('scopes dev proxy routes to the public base and preserves the internal query string', () => {
+    const proxy = createProxyConfig({ SATGPT_BASE_PATH: '/satgpt/' });
+    expect(Object.keys(proxy)).toEqual(['/satgpt/api', '/satgpt/health', '/satgpt/readyz']);
+    expect(proxy['/satgpt/api'].rewrite('/satgpt/api/harness/tasks/task/events?after=7'))
+      .toBe('/api/harness/tasks/task/events?after=7');
+    expect(proxy['/satgpt/readyz'].rewrite('/satgpt/readyz')).toBe('/readyz');
+  });
+
+  test.each(['satgpt/', '/satgpt', '//satgpt/', '/satgpt/../'])('rejects an invalid public base %s', base => {
+    expect(() => createProxyConfig({ SATGPT_BASE_PATH: base })).toThrow('SATGPT_BASE_PATH');
+  });
 });

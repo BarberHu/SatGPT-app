@@ -1,5 +1,5 @@
 .basic-preset-workspace { --library-width: var(--basic-library-width, 330px); color: var(--satgpt-ui-text); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; pointer-events: none; }
-.basic-preset-workspace button, .preset-chat-toggle { font: inherit; cursor: pointer; color: inherit; }
+.basic-preset-workspace button { font: inherit; cursor: pointer; color: inherit; }
 .basic-preset-workspace button:disabled { cursor: default; opacity: .45; }
 .basic-preset-workspace button:focus-visible, .basic-preset-workspace summary:focus-visible, .basic-preset-workspace input:focus-visible { outline: 2px solid var(--satgpt-ui-accent); outline-offset: 2px; }
 .basic-preset-workspace button { border: 1px solid var(--satgpt-ui-border); border-radius: 6px; background: #fff; padding: 5px 8px; }
@@ -81,11 +81,6 @@
 .basic-preset-workspace .agent-layer-categories li, .basic-preset-workspace .agent-layer-composite-key { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; }
 .basic-preset-workspace .agent-layer-categories small { display: none; }
 .basic-preset-workspace .agent-layer-swatch { display: inline-block; width: 9px; height: 9px; flex-shrink: 0; border-radius: 2px; }
-.satgpt-root .water .preset-ask-dock { pointer-events: auto; top: auto; bottom: 76px; left: calc(50% + var(--basic-map-inset, 0px) / 2); transform: translateX(-50%); right: auto; width: max-content; max-width: min(410px, calc(100% - var(--basic-map-inset, 0px) - 32px)); z-index: 6; }
-.preset-chat-toggle { border: 1px solid #d7e0ed; background: #fff; border-radius: 8px; padding: 8px 12px; box-shadow: 0 3px 15px #18324b12; }
-.satgpt-root .water .preset-ask-dock.is-open { width: 410px; background: #fff; border: 1px solid #d7e0ed; border-radius: 10px; padding: 10px; max-height: min(35%, calc(54% - 108px)); overflow-y: auto; }
-.preset-ask-dock .ask-dock-composer { width: 100%; }
-.preset-ask-dock .result-container { position: static; }
 .harness-portal:has(.basic-preview-dialog) { display: block !important; font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #334155; }
 .harness-portal:has(.basic-preview-dialog) > [data-state="open"]:not([role="dialog"]) { position: fixed; inset: 0; background: #15233b66; z-index: 90; }
 .harness-portal .basic-preview-dialog { position: fixed; z-index: 91; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(90vw, 680px); padding: 24px; background: white; border-radius: 12px; box-shadow: 0 20px 60px #132a4e44; }
@@ -105,7 +100,6 @@
   .preset-legend-cell { grid-column: 2; grid-row: 2; }
   .preset-layer-controls { grid-column: 3; grid-row: 1; }
   .basic-preset-workspace .agent-layer-thumbnail { width: 42px; height: 42px; }
-  .preset-ask-dock:not(.is-open) .preset-chat-toggle { font-size: 11px; padding: 7px; }
 }
 
 .preset-current-layers { width: min(360px, calc(100% - var(--library-width) - 72px)); }

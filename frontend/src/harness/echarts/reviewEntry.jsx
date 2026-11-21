@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import ChatMessage from '../components/ChatMessage';
+import { publicPath } from '../../utils/publicPath.js';
 import '../app.css';
 import '../../styles/theme.css';
 import './review.css';
@@ -38,7 +39,7 @@ function Review() {
       ? '### Invalid chart configuration\nAn invalid chart retains its original source and an explanatory error.\n\n```echarts\n{"series": [}\n```'
       : '### Monthly comparison\nSynthetic demonstration data only. May–October rainfall (mm) and flooded area (km²) illustrate a dual-axis chart; they are not actual satellite observations.\n\n' + fence(monthly) + '\nHover for values, click a legend to hide a series, or drag the lower slider to zoom.';
   return <main className="harness-app chart-review">
-    <header className="chart-review-header"><div><span>SatGPT · Integration review</span><h1>Charts in conversation</h1><p>Sample data · Uses the Agent chat renderer</p></div><a href="/">Back to SatGPT</a></header>
+    <header className="chart-review-header"><div><span>SatGPT · Integration review</span><h1>Charts in conversation</h1><p>Sample data · Uses the Agent chat renderer</p></div><a href={publicPath('/')}>Back to SatGPT</a></header>
     <nav className="chart-review-controls" aria-label="Chart examples">
       {[['combined', 'Rainfall & flood'], ['pie', 'Land cover'], ['invalid', 'Error handling']].map(([key, label]) => <button type="button" aria-pressed={example === key} key={key} onClick={() => { setExample(key); setStreaming(false); }}>{label}</button>)}
       <button type="button" aria-pressed={streaming} onClick={() => setStreaming(value => !value)}>{streaming ? 'Finish response' : 'Simulate streaming'}</button>

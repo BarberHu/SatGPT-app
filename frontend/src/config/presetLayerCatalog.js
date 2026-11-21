@@ -13,6 +13,12 @@ export const presetLayerCatalog = Object.entries({ flood: FLOOD_RASTER_LAYER_CON
       : entry.key === 'lclu' ? 'Land Cover' : entry.title,
     infoText: entry.key === 'singleInundationEvent'
       ? 'Historical permanent and seasonal water classes from JRC yearly history (1984–2021). Seasonal water is not an extracted flood event.' : entry.infoText,
+    ...(entry.key === 'populationDensity' && {
+      title: 'Population Count',
+      dataset: 'JRC/GHSL/P2023A/GHS_POP/2020',
+      detailText: 'JRC GHSL · 2020 · 100 m',
+      infoText: 'JRC GHSL 2020 estimated resident count per 100 m pixel.',
+    }),
     model: ['wildfireRisk', 'landslideRisk'].includes(entry.key),
     form: ['singleInundationEvent', 'inundationHotspot'].includes(entry.key) ? 'years'
       : entry.hasRecentWindowControl ? 'dates' : 'fixed',

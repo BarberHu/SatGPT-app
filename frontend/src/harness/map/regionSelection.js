@@ -4,7 +4,6 @@ import { agentRegionError } from '../../aoi/agentValidation.js';
 
 export const regionKey = id => `satgpt:agent:analysis-region:v1:${id}`;
 export const selectionKey = id => `satgpt:agent:analysis-region:v2:${id}`;
-export const drawnRegionError = agentRegionError;
 
 /** Session-local selection and edit transaction; every send captures detached geometry. */
 export class RegionSelection {

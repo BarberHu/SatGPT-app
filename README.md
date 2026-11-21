@@ -10,7 +10,7 @@ The application has two modes: **Static layers (Basic)** and **Intelligent analy
 
 | Area | Capabilities |
 | --- | --- |
-| Basic analysis | Map exploration, flood-related layers, and grid selection. The deprecated Basic questions panel is hidden. |
+| Basic analysis | Map exploration, flood-related layers, and grid selection. |
 | Agent analysis | GEE dataset search, coverage and statistics queries, image previews, and interactive result layers through the DeepSeek Harness SDK. |
 | Conversations | Streamed answers, an ordered run timeline, saved conversation history, switching during a run, and stopping running or queued tasks. |
 | Result layers | Per-conversation layer isolation, thumbnails, observation dates, sources, legends, visibility controls, location, and removal. |

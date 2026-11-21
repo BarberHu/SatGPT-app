@@ -1,4 +1,5 @@
 import { ensureBrowserSession } from './browserSession.js';
+import { publicPath } from '../utils/publicPath.js';
 
 const SELECTION = 'satgpt:harness:current-tab';
 const DRAFT = 'draft';
@@ -25,7 +26,7 @@ function requestId() {
 
 async function request(path, { signal, ...options } = {}) {
   await ensureBrowserSession();
-  const response = await fetch('/api/harness' + path, { signal, credentials: 'same-origin', ...options });
+  const response = await fetch(publicPath('/api/harness' + path), { signal, credentials: 'same-origin', ...options });
   const data = await response.json().catch(error => {
     if (response.ok) throw error;
     return {};
@@ -78,5 +79,6 @@ export const chatApi = {
   },
   cancel: (id, signal) => request(taskPath(id) + '/cancel', { method: 'POST', signal }),
   reloadLayer: (cid, layerId) => request(conversationPath(cid) + '/layers/' + encodeURIComponent(layerId) + '/reload', { method: 'POST' }),
-  subscribe: id => new EventSource('/api/harness' + taskPath(id) + '/events'),
+  layerThumbnails: (cid, ids, signal) => request(conversationPath(cid) + '/layer-thumbnails?ids=' + encodeURIComponent(ids), { signal }),
+  subscribe: id => new EventSource(publicPath('/api/harness' + taskPath(id) + '/events')),
 };

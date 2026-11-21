@@ -1,5 +1,6 @@
 import React from 'react';
 import AreaControls from '../../aoi/AreaControls';
+import { publicPath } from '../../utils/publicPath.js';
 import Markdown from './Markdown';
 import RunTimeline from './RunTimeline';
 import ResultCards from './ResultCards';
@@ -13,7 +14,7 @@ export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
     </div> : <>
       <RunTimeline rows={message.timeline} run={message.run} pending={message.pending} reconnecting={reconnecting}
         assistantLabel={<>
-          <img className="agent-assistant-avatar" src="/assets/images/satgpt-avatar.png" width="22" height="22" alt="" aria-hidden="true" />
+          <img className="agent-assistant-avatar" src={publicPath('/assets/images/satgpt-avatar.png')} width="22" height="22" alt="" aria-hidden="true" />
           <span>SatGPT</span>
         </>} />
       {message.replyParts?.map(part => <div key={part.id} className="agent-reply-part" data-event-id={part.id}>

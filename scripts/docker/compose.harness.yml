@@ -57,6 +57,7 @@ services:
         REACT_APP_MAPBOX_ACCESS_TOKEN: ${REACT_APP_MAPBOX_ACCESS_TOKEN:?Set REACT_APP_MAPBOX_ACCESS_TOKEN in root .env}
         REACT_APP_MAPBOX_STYLE_URL: ${REACT_APP_MAPBOX_STYLE_URL-mapbox://styles/unuinweh/clsmw8jm201f201ql5wdgcifp}
     # No env_file here: model and GEE credentials never enter the frontend image/service.
+        SATGPT_BASE_PATH: ${SATGPT_BASE_PATH:-/}
     environment:
       FRONTEND_HOST: 0.0.0.0
       FRONTEND_PORT: ${FRONTEND_PORT-3000}
@@ -69,7 +70,7 @@ services:
       agent:
         condition: service_healthy
     ports:
-      - '127.0.0.1:${FRONTEND_PORT-3000}:${FRONTEND_PORT-3000}'
+      - '${SATGPT_FRONTEND_PUBLISH_HOST:-127.0.0.1}:${FRONTEND_PORT-3000}:${FRONTEND_PORT-3000}'
     restart: unless-stopped
     init: true
 

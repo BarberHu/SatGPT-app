@@ -30,33 +30,12 @@ export const getFloodHotspotMap = (params, options = {}) => responseData(httpCli
   { fallbackMessage: 'Failed to load flood hotspot data.', ...options }
 ));
 
-export const sendChatMessage = (message, options = {}) => responseData(httpClient.post(
-  '/api/chat',
-  { message },
-  { fallbackMessage: 'Failed to send the Ask request.', ...options }
-));
-
-export const getGEEScript = (message, options = {}) => responseData(httpClient.post(
-  '/api/scripts/gee',
-  { message },
-  { fallbackMessage: 'Failed to generate the GEE script.', ...options }
-));
-
-export const getPDF = (script, options = {}) => responseData(httpClient.post(
-  '/api/scripts/pdf',
-  { script },
-  { fallbackMessage: 'Failed to generate the PDF.', responseType: 'blob', ...options }
-));
-
 const apiService = {
   healthCheck,
   getDefaultMap,
   getHistoricalMap,
   getUnsupervisedMap,
   getFloodHotspotMap,
-  sendChatMessage,
-  getGEEScript,
-  getPDF,
 };
 
 export default apiService;

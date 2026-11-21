@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSharedMap } from '../../map/SharedMapContext';
 import { latestLayerBounds, messageLayerBounds } from '../map/viewState';
-import { messageLayerPresentation } from '../../map/layerPresentation';
+import { messageLayerPresentation, previewUrl } from '../../map/layerPresentation';
 import { chatApi } from '../chatApi';
 
 const choicesKey = id => `satgpt:harness:layers:${id}`;
+const thumbnailKey = (cid, id, version) => `${cid}:${id}:${version}`;
 function readLayerChoices(id) {
   try {
     const saved = JSON.parse(localStorage.getItem(choicesKey(id)));
@@ -21,6 +22,7 @@ export function useAgentMap(conversationId, messages) {
   const [layers, setLayers] = useState([]);
   const [error, setError] = useState('');
   const [layerStatus, setLayerStatus] = useState({});
+  const [thumbnails, setThumbnails] = useState({});
   const reloading = useRef(new Set());
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -71,6 +73,32 @@ export function useAgentMap(conversationId, messages) {
       focusIntent.current = null;
     }
   }, [shared.service, shared.ready, conversationId, messages]);
+  const pendingThumbnails = layers.filter(layer => layer.thumbnailStatus === 'pending'
+    && !thumbnails[thumbnailKey(conversationId, layer.id, layer.reloadVersion)]).slice(0, 24).map(layer => layer.id).join(',');
+  useEffect(() => {
+    if (!conversationId || !pendingThumbnails) return undefined;
+    const abort = new AbortController();
+    let timer;
+    const poll = async () => {
+      try {
+        const result = await chatApi.layerThumbnails(conversationId, pendingThumbnails, abort.signal);
+        if (abort.signal.aborted || current.current == null || choices.current.id !== conversationId) return;
+        const currentVersions = new Map(current.current.listLayers().map(layer => [layer.id, layer.reloadVersion]));
+        const updates = {};
+        for (const row of result.layers) {
+          if (currentVersions.get(row.layer_id) !== row.reload_version || row.thumbnail_status === 'pending') continue;
+          const url = previewUrl(row.thumbnail?.url);
+          updates[thumbnailKey(conversationId, row.layer_id, row.reload_version)] = {
+            thumbnailStatus: url ? 'ready' : 'unavailable', thumbnail: url ? { url } : null,
+          };
+        }
+        if (Object.keys(updates).length) setThumbnails(previous => ({ ...previous, ...updates }));
+      } catch { /* Retry temporary failures while this chat is open. */ }
+      if (!abort.signal.aborted) timer = setTimeout(poll, 1200);
+    };
+    timer = setTimeout(poll, 300);
+    return () => { abort.abort(); clearTimeout(timer); };
+  }, [conversationId, pendingThumbnails]);
   const prepareConversationChange = focus => { focusIntent.current = focus ? shared.captureViewIntent('agent', true) : null; };
   const forgetConversation = id => {
     const scope = shared.service?.scope(`agent:${id}`);
@@ -104,6 +132,8 @@ export function useAgentMap(conversationId, messages) {
     } finally { reloading.current.delete(key); }
   };
   const bounds = useCallback(() => shared.service?.getCurrentView().bounds, [shared.service]);
-  return { ready: shared.ready, layers: layers.map(layer => ({ ...layer, reload: layerStatus[`${conversationId}:${layer.id}`] || {} })), error, configured: shared.configured,
+  return { ready: shared.ready, layers: layers.map(layer => ({ ...layer,
+    ...thumbnails[thumbnailKey(conversationId, layer.id, layer.reloadVersion)],
+    reload: layerStatus[`${conversationId}:${layer.id}`] || {} })), error, configured: shared.configured,
     toggleLayer, removeLayer, focusLayer, reloadLayer, bounds, prepareConversationChange, forgetConversation };
 }

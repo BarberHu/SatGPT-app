@@ -23,8 +23,7 @@
 .satgpt-root .water { position: relative; height: 100%; }
 .satgpt-root .water .ui { bottom: var(--satgpt-panel-gap); }
 .satgpt-root .water .panel { height: 100%; max-height: 100% !important; }
-.satgpt-root .water .settings-button, .satgpt-root .water .ask-dock { position: absolute; }
-.satgpt-root .water .ask-dock { max-height: calc(100% - 28px); }
+.satgpt-root .water .settings-button { position: absolute; }
 .satgpt-root .water .control-panel-title { font-size: 14px; font-weight: 600; color: var(--satgpt-ui-text); }
 .satgpt-mode-loading { padding: 32px; color: var(--satgpt-ui-muted); font-size: 13px; }
 .satgpt-capture-error { position: absolute; top: 64px; right: 18px; z-index: 45; border: 1px solid #efd9cf; border-radius: 8px; padding: 10px 14px; font-size: 12px; background: #fff8f3; color: #a4664b; }
@@ -87,12 +86,10 @@
 .satgpt-osm-popup { z-index: 3; overflow-wrap: anywhere; }
 .satgpt-osm-popup strong { display: block; padding-right: 14px; }
 .satgpt-map-canvas { position: absolute; inset: 0; }
-.satgpt-root[data-mode="agent"] .mapboxgl-canvas { cursor: grab; }
-.satgpt-root[data-mode="agent"] .mapboxgl-canvas:active { cursor: grabbing; }
 .satgpt-map-viewport { position: absolute; inset: 0; pointer-events: none; }
 .satgpt-business-panel { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
 .satgpt-basic-panel .water { pointer-events: none; }
-.satgpt-basic-panel :is(.warnings, .ask-dock, .settings-button, .spinner-overlay) { pointer-events: auto; }
+.satgpt-basic-panel :is(.warnings, .settings-button) { pointer-events: auto; }
 .satgpt-business-panel .harness-app.harness-shell { height: 100%; min-height: 0; background: transparent; }
 .satgpt-agent-panel :is(.agent-history, .agent-chat, .agent-chat-reopen, .agent-mobile-tabs, .agent-resize-handle, .agent-map-layers, .agent-map-error) { pointer-events: auto; }
 .satgpt-business-panel.satgpt-agent-panel .agent-map-workspace { background: transparent; }

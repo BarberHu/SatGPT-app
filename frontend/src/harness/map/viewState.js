@@ -1,4 +1,4 @@
-export function normalizeBounds(value) {
+function normalizeBounds(value) {
   if (!Array.isArray(value) || value.length !== 4) return null;
   const bounds = value.map(Number);
   const [west, south, east, north] = bounds;

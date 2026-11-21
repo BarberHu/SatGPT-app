@@ -62,7 +62,7 @@ export function useAgentRegion(conversationId, messages, active, draftKey) {
     if (!active && selection.editing) { selection.cancel(); draw.current?.restore(); update(); }
   }, [active, selection]);
   const begin = (input) => {
-    if (!active || current.current !== selection || !draw.current) return false;
+    if (!active || shared.basemapSwitching || current.current !== selection || !draw.current) return false;
     selection.begin(input);
     const control = draw.current;
     const features = getDrawFeaturesFromAoi({ geojson: selection.draft });
@@ -80,7 +80,7 @@ export function useAgentRegion(conversationId, messages, active, draftKey) {
     aoi: selection.aoi, label: selection.aoi?.label, outlineVisible: selection.outlineVisible, persistenceError: selection.persistenceError,
     confirmed: selection.confirmed, editing: selection.editing, error: selection.error,
     canConfirm: selection.editing && selection.complete && !selection.error,
-    ready: shared.ready && Boolean(draw.current),
+    ready: shared.ready && !shared.basemapSwitching && Boolean(draw.current),
     begin,
     use: aoi => { if (current.current !== selection || !isActive.current) return; selection.use(aoi); draw.current?.restore(); update(); },
     toggleOutline: () => { selection.toggleOutline(); draw.current?.restore(); update(); },

@@ -1,8 +1,10 @@
+import { publicPath } from '../utils/publicPath.js';
+
 // Serialize the first Cookie exchange across tabs on HTTPS and local HTTP.
 let ready;
 
 async function initialize() {
-  const response = await fetch('/api/harness/session', {
+  const response = await fetch(publicPath('/api/harness/session'), {
     credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) throw new Error('Unable to initialize the browser session.');

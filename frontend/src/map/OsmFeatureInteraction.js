@@ -4,17 +4,32 @@ const UNNAMED = {
   fill: 'Unnamed building',
 };
 const TAP_TOLERANCE = 8;
+const COVERAGE = { complete: 'Complete', partial: 'Partial', none: 'No data' };
+const measurement = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 5 });
+
+function metric(value, unit = '') {
+  return Number.isFinite(value) ? `${measurement.format(value)}${unit}` : '—';
+}
 
 function featureContent(properties, renderAs) {
   const content = document.createElement('div');
   const name = document.createElement('strong');
   name.textContent = (typeof properties.name === 'string' && properties.name.trim()) || UNNAMED[renderAs];
   content.append(name);
-  for (const [label, value] of [
+  const rows = [
     ['Category', properties.category],
     ['OSM type', properties.osm_type],
     ['OSM ID', properties.osm_id],
-  ]) {
+  ];
+  if (Object.hasOwn(COVERAGE, properties.coverage)) {
+    rows.push(['Raster coverage', COVERAGE[properties.coverage]]);
+    if (renderAs === 'circle') rows.push(['Raster value', metric(properties.sample_value)]);
+    if (renderAs === 'fill') {
+      rows.push(['Flood overlap', metric(properties.flood_area_m2, ' m²')],
+        ['Observed area', metric(properties.observed_area_m2, ' m²')]);
+    }
+  }
+  for (const [label, value] of rows) {
     const row = document.createElement('div');
     row.textContent = `${label}: ${value ?? '—'}`;
     content.append(row);

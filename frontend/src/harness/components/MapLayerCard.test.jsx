@@ -99,3 +99,24 @@ test('preserves a server-issued conversation and task scoped thumbnail path', ()
   expect(layerPresentation({ thumbnail: { url } }).thumbnail).toEqual({ url });
   expect(layerPresentation({ thumbnail: { url: '/api/previews/../unsafe.png' } }).thumbnail).toBeNull();
 });
+
+test('a new layer stays usable while its preview changes from pending to ready', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const node = document.createElement('div');
+  const root = createRoot(node);
+  const onToggle = vi.fn();
+  const pending = normalizeLayer({ ...raw, thumbnail: undefined, thumbnail_status: 'pending' });
+  try {
+    await act(async () => root.render(<MapLayerCard layer={pending} onToggle={onToggle} />));
+    expect(node.querySelector('[aria-label="Generating static preview"]')).not.toBeNull();
+    expect(node.querySelector('img')).toBeNull();
+    await act(async () => node.querySelector('input').click());
+    expect(onToggle).toHaveBeenCalledWith(pending.id, false);
+    await act(async () => root.render(<MapLayerCard layer={normalizeLayer({ ...raw, thumbnail_status: 'ready' })} onToggle={onToggle} />));
+    expect(node.querySelector('[aria-label="Generating static preview"]')).toBeNull();
+    expect(node.querySelector('img').getAttribute('src')).toBe('/api/previews/test.png');
+  } finally {
+    await act(async () => root.unmount());
+    delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  }
+});

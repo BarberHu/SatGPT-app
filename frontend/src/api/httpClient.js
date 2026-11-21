@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { publicPath } from '../utils/publicPath.js';
 
 const axiosClient = axios.create({
   baseURL: '',
@@ -109,7 +110,7 @@ export const request = async (config, {
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      return await axiosClient.request(config);
+      return await axiosClient.request({ ...config, url: publicPath(config.url) });
     } catch (error) {
       lastError = await normalizeHttpError(error, fallbackMessage);
       const canRetry = (

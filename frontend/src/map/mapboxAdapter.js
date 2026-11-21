@@ -160,11 +160,13 @@ export class MapboxAdapter {
           fill: { color: '#d58620', 'fill-outline-color': '#9c5d12' },
         }[layer.renderAs];
         const { color, ...paint } = style;
+        const featureColor = layer.renderAs === 'line' ? color
+          : ['match', ['get', 'analysis_status'], 'hit', '#c53d24', 'no_data', '#757575', color];
         const geometry = { line: 'LineString', circle: 'Point', fill: 'Polygon' }[layer.renderAs];
         this.map.addLayer({ id: layerId, source: sourceId, type: layer.renderAs,
           filter: ['==', ['geometry-type'], geometry],
           layout: { visibility: layer.visible ? 'visible' : 'none' },
-          paint: { ...paint, [layer.renderAs + '-color']: color, [layer.renderAs + '-opacity']: layer.opacity },
+          paint: { ...paint, [layer.renderAs + '-color']: featureColor, [layer.renderAs + '-opacity']: layer.opacity },
         }, this.overlayAnchor());
         if (layer.osmInteractive) {
           this.osmFeatures.layers.set(layerId, layer.renderAs);
@@ -190,17 +192,17 @@ export class MapboxAdapter {
         filter: ['==', ['geometry-type'], 'Polygon'],
         layout: { visibility: layer.visible ? 'visible' : 'none' },
         paint: { 'fill-color': '#1f83c7', 'fill-opacity': layer.opacity },
-      });
+      }, this.overlayAnchor());
       this.map.addLayer({ id: `${layerId}-line`, source: sourceId, type: 'line',
         filter: ['==', ['geometry-type'], 'LineString'],
         layout: { visibility: layer.visible ? 'visible' : 'none' },
         paint: { 'line-color': '#1f83c7', 'line-opacity': layer.opacity, 'line-width': 2 },
-      });
+      }, this.overlayAnchor());
       this.map.addLayer({ id: `${layerId}-point`, source: sourceId, type: 'circle',
         filter: ['==', ['geometry-type'], 'Point'],
         layout: { visibility: layer.visible ? 'visible' : 'none' },
         paint: { 'circle-color': '#1f83c7', 'circle-opacity': layer.opacity, 'circle-radius': 5 },
-      });
+      }, this.overlayAnchor());
       return;
     }
     if (layer.kind === 'vector') {
@@ -211,7 +213,7 @@ export class MapboxAdapter {
       const clippedBuildings = buildings && layer.bounds;
       this.map.addSource(sourceId, {
         type: 'vector',
-        ...(streets ? { url: layer.url, bounds: layer.bounds } : { tiles: [layer.url] }),
+        ...(streets ? { url: layer.url, bounds: layer.bounds } : { tiles: [publicPath(layer.url)] }),
       });
       const paint = layer.renderAs === 'fill'
         ? { 'fill-color': '#1f83c7', 'fill-opacity': clippedBuildings ? 0 : layer.opacity }
@@ -235,7 +237,7 @@ export class MapboxAdapter {
       }
       return;
     }
-    this.map.addSource(sourceId, { type: 'raster', tiles: [layer.url], tileSize: 256,
+    this.map.addSource(sourceId, { type: 'raster', tiles: [publicPath(layer.url)], tileSize: 256,
       ...(layer.bounds ? { bounds: layer.bounds } : {}) });
     this.map.addLayer({ id: layerId, source: sourceId, type: 'raster',
       layout: { visibility: layer.visible ? 'visible' : 'none' },

@@ -8,7 +8,10 @@ import CodeBlock from './CodeBlock';
 
 export function Thumbnail({ layer, basic = false }) {
   const [failedUrl, setFailedUrl] = useState(null);
-  const url = layer.thumbnail?.url;
+  const url = publicPath(layer.thumbnail?.url);
+  if (layer.thumbnailStatus === 'pending' && !url) return <div className="agent-layer-thumbnail agent-layer-no-preview" role="status" aria-label="Generating static preview">
+    <Loader2 size={19} strokeWidth={1.4} /><span>Generating preview</span>
+  </div>;
   if (!url || failedUrl === url) return <div className="agent-layer-thumbnail agent-layer-no-preview" aria-label="Static preview unavailable" title="Static preview unavailable">
     <ImageOff size={19} strokeWidth={1.4} /><span>{url ? 'Preview unavailable' : 'No preview'}</span>
   </div>;

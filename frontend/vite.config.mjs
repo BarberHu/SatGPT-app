@@ -24,31 +24,37 @@ function getPort(env, name, fallback) {
 export function createProxyConfig(env) {
   const serviceHost = env.SATGPT_SERVICE_HOST || '127.0.0.1';
   const target = `http://${serviceHost}:${getPort(env, 'AGENT_PORT', 8000)}`;
+  const prefix = config.basePath(env).slice(0, -1);
+  // Vite's development proxy sees the public path before Vite strips the base.
+  const rewrite = prefix ? url => url.slice(prefix.length) : undefined;
 
   return {
-    '/api': {
+    [`${prefix}/api`]: {
       target,
+      rewrite,
       changeOrigin: false,
       configure: proxy => proxy.on('proxyReq', (proxyRequest, request) => {
         proxyRequest.removeHeader('x-forwarded-for');
         proxyRequest.setHeader('x-forwarded-proto', request.socket.encrypted ? 'https' : 'http');
       }),
     },
-    '/health': { target, changeOrigin: true },
-    '/readyz': { target, changeOrigin: true },
+    [`${prefix}/health`]: { target, rewrite, changeOrigin: true },
+    [`${prefix}/readyz`]: { target, rewrite, changeOrigin: true },
   };
 }
 
 export default defineConfig(({ mode }) => {
   const env = config.loadProjectEnv(projectRoot);
   config.validateFrontend(env, { map: mode !== 'test' });
+  const base = config.basePath(env);
 
   return {
     root: frontendRoot,
+    base,
     plugins: [react(), productionEntry],
     envDir: false,
     envPrefix: [],
-    define: config.publicConfig(env),
+    define: { ...config.publicConfig(env), __SATGPT_BASE_PATH__: JSON.stringify(base) },
     resolve: {
       alias: {
         '@': path.resolve(frontendRoot, 'src'),

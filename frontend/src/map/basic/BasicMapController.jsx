@@ -15,7 +15,7 @@ function BasicMapController({ map, styleRevision = 0 }) {
   const {
     setMapInstance, setSelectedGridCords, setSelectedAOI, selectedAOI,
     gridClickEnabled, setGridClickEnabled, aoiOutlineVisible, setWarning,
-    resetAskSession, is3DEnabled, isBuildingsEnabled,
+    is3DEnabled, isBuildingsEnabled,
   } = useAppContext();
 
   useEffect(() => {
@@ -129,8 +129,6 @@ function BasicMapController({ map, styleRevision = 0 }) {
           return;
         }
 
-        // Keep the answer while selecting the study area for a preset.
-        resetAskSession({ preserveResult: true });
         setSelectedGridCords(aoi.geojson.geometry.coordinates[0]);
         setSelectedAOI(aoi);
         setWarning('');
@@ -159,7 +157,7 @@ function BasicMapController({ map, styleRevision = 0 }) {
       // replay. Release the grid layer before its source so setup can run again.
       removeMapLayerAndSource(map, 'grid_cell-layer', 'grid_cell');
     };
-  }, [reconcileLayerOrder, resetAskSession, setSelectedAOI, setSelectedGridCords, setWarning]);
+  }, [reconcileLayerOrder, setSelectedAOI, setSelectedGridCords, setWarning]);
 
   const initializeLoadedMap = useCallback((map) => {
     setMapInstance(map);

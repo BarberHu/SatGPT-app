@@ -1,9 +1,6 @@
-import React, { Profiler, useEffect, useMemo, useState } from 'react';
+import React, { Profiler, useEffect, useMemo } from 'react';
 import MapContainer from './components/MapContainer';
 import BasicLayerWorkspace from './presets/BasicLayerWorkspace';
-import ChatBox from './components/ChatBox';
-import ResultBox from './components/ResultBox';
-import Spinner from './components/Spinner';
 import { useAppContext } from './context/AppContext';
 import {
   createReactProfilerHandler,
@@ -11,12 +8,7 @@ import {
   updateAgentDiagnosticsContext,
 } from './utils/agentDiagnostics';
 
-// Deprecated. Keep the implementation until the Basic questions cleanup.
-const SHOW_BASIC_QUESTIONS = false;
-
 function App({ active = true }) {
-  const { resultText } = useAppContext();
-  const [chatOpen, setChatOpen] = useState(false);
   const mapProfiler = useMemo(
     () => createReactProfilerHandler('MapContainer', () => ({ mode: 'basic' })),
     []
@@ -35,13 +27,6 @@ function App({ active = true }) {
       <div className="ui">
         <Warnings />
       </div>
-      {SHOW_BASIC_QUESTIONS && (
-        <div className={`ask-dock preset-ask-dock${chatOpen ? ' is-open' : ''}`}>
-          <button className="preset-chat-toggle" type="button" aria-expanded={chatOpen} onClick={() => setChatOpen(!chatOpen)}>Basic questions {chatOpen ? '−' : '+'}</button>
-          <div hidden={!chatOpen}><ResultBox /><div className="ask-dock-composer" hidden={Boolean(resultText)}><ChatBox /></div></div>
-        </div>
-      )}
-      <Spinner />
     </div>
   );
 }

@@ -1,12 +1,13 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUpRight, Globe2, ScanLine, Waves } from 'lucide-react';
+import { ArrowDown, ArrowUpRight, Droplets, Globe2, ScanLine, Waves } from 'lucide-react';
 import ChatMessage from './ChatMessage';
 import { Button } from '../ui/button';
 
-export const isNearBottom = node => node.scrollHeight - node.scrollTop - node.clientHeight < 96;
+const isNearBottom = node => node.scrollHeight - node.scrollTop - node.clientHeight < 96;
 const suggestions = [
   { icon: Waves, title: 'Explore rainfall changes', prompt: 'Analyze rainfall changes in the current map area over the past week. Include data sources and observation dates.' },
   { icon: ScanLine, title: 'Explore satellite imagery', prompt: 'Find the latest available Sentinel-2 imagery for the current map area and display a true-color layer.' },
+  { icon: Droplets, title: 'Map recent flooding', prompt: 'Map potential flooding in the selected analysis area over the past week. If no analysis area is selected, use the current map view. Include the data sources and observation dates, and note any coverage gaps.' },
 ];
 export default function MessageList({ items, loading, reconnecting, onSuggest, onFocusLayer }) {
   const scroll = useRef(null);
@@ -34,26 +35,26 @@ export default function MessageList({ items, loading, reconnecting, onSuggest, o
       onWheel={event => { if (event.deltaY < 0) { follow.current = false; setAtBottom(false); } }}
       onScroll={() => {
         const node = scroll.current;
-        if (node.scrollTop < previousTop.current || !isNearBottom(node)) follow.current = false;
-        else if (isNearBottom(node)) follow.current = true;
+        follow.current = node.scrollTop >= previousTop.current && isNearBottom(node);
         previousTop.current = node.scrollTop;
         setAtBottom(follow.current);
       }}>
       <div className="agent-message-content" ref={content}>
         {loading ? <p className="agent-loading" role="status">Loading conversation…</p> : null}
         {!loading && !items.length ? <div className="agent-welcome">
-          <div className="agent-welcome-icon"><Globe2 size={26} strokeWidth={1.4} /></div>
-          <p className="agent-eyebrow">Explore Earth, one question at a time</p><h1>Where would you like to explore?</h1>
-          <p>Move the map to your area of interest.<br />Explore satellite data, environmental change, and geospatial analysis.</p>
+          <div className="agent-welcome-heading">
+            <Globe2 className="agent-welcome-icon" size={26} strokeWidth={1.4} aria-hidden="true" />
+            <h1>Where would you like to explore?</h1>
+          </div>
+          <p>Move the map to your area of interest.<br />Analyze natural hazards such as floods, wildfires, and landslides with AI, satellite data, and cloud computing.</p>
           <div className="agent-suggestions">{suggestions.map(item => <button key={item.title} type="button" onClick={() => onSuggest(item.prompt)}>
             <item.icon size={18} strokeWidth={1.5} /><span>{item.title}</span><ArrowUpRight size={14} />
           </button>)}</div>
-          {import.meta.env.DEV ? <p style={{ marginTop: 16 }}><a href="/?review=echarts">Preview interactive charts</a></p> : null}
         </div> : null}
         {items.map(message => <ChatMessage key={message.role === 'assistant' && message.jobId ? `run-${message.jobId}` : message.id}
           message={message} reconnecting={reconnecting} onFocusLayer={onFocusLayer} />)}
       </div>
     </div>
-    {!atBottom ? <Button type="button" variant="outline" size="sm" className="agent-jump" onClick={jump}><ArrowDown />Jump to latest</Button> : null}
+    {!atBottom && items.length > 0 ? <Button type="button" variant="outline" size="sm" className="agent-jump" onClick={jump}><ArrowDown />Jump to latest</Button> : null}
   </div>;
 }

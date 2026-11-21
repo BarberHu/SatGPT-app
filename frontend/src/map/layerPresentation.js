@@ -20,11 +20,16 @@ export function layerLegend(visualization = {}, declared = {}) {
   if (raw.length && colors.every(Boolean)) {
     const min = visualization.min, max = visualization.max;
     const range = finite(min) && finite(max) && min <= max;
+    if (declared?.type === 'constant' && range && min === max && colors.length === 1) {
+      return { type: 'constant', colors, min, max };
+    }
     const labels = declared?.labels || (declared?.items?.every((item, i) => item.color === colors[i] && item.value === min + i) ? declared.items.map(item => item.label) : null);
     if (declared?.type === 'categorical' && Array.isArray(labels)
         && labels.length === colors.length && range && Number.isInteger(min)
         && max - min === colors.length - 1 && labels.every(label => text(label))) {
-      return { type: 'categorical', items: colors.map((color, i) => ({ color, value: min + i, label: text(labels[i], 100) })) };
+      const note = text(declared.note, 100);
+      return { type: 'categorical', items: colors.map((color, i) => ({ color, value: min + i, label: text(labels[i], 100) })),
+        ...(note && { note }) };
     }
     const swatches = declared?.type === 'composite' && Array.isArray(declared.swatches)
       ? declared.swatches.slice(0, 12).filter(item => legendColor(item.color) && text(item.label)).map(item => ({ label: text(item.label), color: legendColor(item.color) })) : [];
@@ -39,6 +44,7 @@ export function layerPresentation(spec) {
   const metadata = spec.metadata || {};
   return {
     thumbnail: previewUrl(spec.thumbnail?.url) ? { url: previewUrl(spec.thumbnail.url) } : null,
+    thumbnailStatus: spec.thumbnail_status ?? spec.thumbnailStatus ?? null,
     metadata: { source: text(metadata.source) || 'Google Earth Engine', datasetId: text(metadata.dataset_id || metadata.datasetId, 240),
       observedAt: text(metadata.observed_at || metadata.observedAt, 100), unit: text(metadata.unit, 40),
       description: text(metadata.description, 2400), createdAt: text(metadata.created_at || metadata.createdAt, 100) },

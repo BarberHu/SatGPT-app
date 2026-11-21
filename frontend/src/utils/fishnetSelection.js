@@ -1,4 +1,6 @@
-export const FISHNET_DATA_URL = '/assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson';
+import { publicPath } from './publicPath.js';
+
+export const FISHNET_DATA_URL = publicPath('/assets/data/HFMT_Fishnet_3_FeaturesToJSO.geojson');
 
 export const indexFishnetFeatures = (geojson) => new Map(
   geojson.features

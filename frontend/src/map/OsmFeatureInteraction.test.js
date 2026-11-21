@@ -102,6 +102,28 @@ test('uses Mapbox paint order and excludes hidden, transparent, and out-of-sessi
   expect(map.queryRenderedFeatures).not.toHaveBeenCalled();
 });
 
+test('shows annotated raster metrics and distinguishes a valid zero from missing data', () => {
+  const poi = physical('pois');
+  const building = physical('buildings');
+  hit.set(poi, { name: 'Hospital', coverage: 'complete', sample_value: 0 });
+  hit.set(building, { coverage: 'partial', flood_area_m2: 21.25, observed_area_m2: 42.5 });
+  stacking = [poi];
+  map.fire('click', click);
+  expect(popup().textContent).toContain('Raster value: 0');
+  hit.set(poi, { name: 'Hospital', coverage: 'none' });
+  map.fire('click', click);
+  expect(popup().textContent).toContain('Raster coverage: No data');
+  expect(popup().textContent).toContain('Raster value: —');
+  stacking = [building];
+  map.fire('click', click);
+  expect(popup().textContent).toContain('Raster coverage: Partial');
+  expect(popup().textContent).toContain('Flood overlap: 21.25 m²');
+  expect(popup().textContent).toContain('Observed area: 42.5 m²');
+  expect(map.getPaintProperty(building, 'fill-color')).toEqual([
+    'match', ['get', 'analysis_status'], 'hit', '#c53d24', 'no_data', '#757575', '#d58620',
+  ]);
+});
+
 test('moves labels with geometry, restores them after a style change and cleans up on removal and teardown', () => {
   const move = vi.spyOn(map, 'moveLayer');
   scope.setOrder(['roads', 'pois', 'buildings']);
