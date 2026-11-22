@@ -5,8 +5,8 @@ const MAX_RESPONSE = 20_000_000;
 
 /** A resident JSON-lines worker. A slot is reusable only once its old child exits. */
 export class WorkerClient {
-  constructor({ python, worker, cwd, service = 'GEE', endpoint, geocodingLockFile }) {
-    Object.assign(this, { python, worker, cwd, service, endpoint, geocodingLockFile });
+  constructor({ python, worker, cwd, service = 'GEE', endpoint, geocodingLockFile, roadSnapshot, osmSnapshotDir }) {
+    Object.assign(this, { python, worker, cwd, service, endpoint, geocodingLockFile, roadSnapshot, osmSnapshotDir });
     this.child = null;
     this.pending = null;
     this.buffer = '';
@@ -19,6 +19,8 @@ export class WorkerClient {
     if (this.service === 'OSM') {
       delete env.GOOGLE_APPLICATION_CREDENTIALS;
       env.SATGPT_OVERPASS_URL = this.endpoint;
+      if (this.roadSnapshot) env.SATGPT_ROAD_SNAPSHOT = this.roadSnapshot;
+      if (this.osmSnapshotDir) env.SATGPT_OSM_SNAPSHOT_DIR = this.osmSnapshotDir;
     }
     if (this.service === 'Geocoding') {
       delete env.GOOGLE_APPLICATION_CREDENTIALS;

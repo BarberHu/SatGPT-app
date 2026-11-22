@@ -36,6 +36,9 @@ def load_project_env(root: Path = PROJECT_ROOT) -> Path:
     if raw:
         candidate = Path(raw)
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = str(candidate if candidate.is_absolute() else (root / candidate).resolve())
+    snapshot_dir = os.getenv('SATGPT_OSM_SNAPSHOT_DIR', '').strip()
+    if snapshot_dir:
+        os.environ['SATGPT_OSM_SNAPSHOT_DIR'] = str((root / snapshot_dir).resolve())
     return env_file
 
 

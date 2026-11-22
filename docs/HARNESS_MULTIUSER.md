@@ -97,7 +97,28 @@ HTTPS 网关设置 `SATGPT_PUBLIC_ORIGIN` 为浏览器实际访问的 origin，�
 
 收到 runtime 不可用时查看 `/readyz`，再对整个后端做进程级恢复。该操作影响进程内全部活动任务。清理不能确认的任务持续占用自己的名额，进程重启后可查看其结果状态。
 
-Agent 的 OSM 查询、Overpass 客户端和快照读取位于 harness/app，由 DSH 工具调用。Basic 的道路和建筑预览使用 Mapbox Streets v8 矢量瓦片。
+Agent 的道路、建筑和 POI 优先通过 `SATGPT_OVERPASS_URL` 查询。超时、限流或上游响应异常时，道路和建筑可回退到覆盖整个选区的本地快照。在线查询成功返回空结果时保留该结果。建筑在线超限时也可回退，但须得到满足本地限制的非空结果。POI 只使用在线数据源。Basic 的道路和建筑预览使用 Mapbox Streets v8 矢量瓦片。
+
+可通过 `SATGPT_ROAD_SNAPSHOT` 配置单文件道路快照，作为区域快照不可用时的道路回退。文件须包含 `coverage` 多边形、`category`、`source`、`source_sha256`、`osm_data_time`、`skipped_geometry`、以及带 `osm_type`、`osm_id` 和 `category` 的道路线要素。单文件须覆盖完整选区且类别匹配。
+
+### 斐济和汤加道路、建筑快照
+
+从 [Geofabrik 斐济](https://download.geofabrik.de/australia-oceania/fiji/) 和 [Geofabrik 汤加](https://download.geofabrik.de/australia-oceania/tonga.html) 分别取得固定版本的 PBF 与配套 `.poly` 提取范围。按发布方校验值验证 PBF，并保留原文件。使用已安装 `osmium` 的 Python 环境离线导入。SatGPT 查询服务只需要现有的 Python、SQLite 和 Shapely。
+
+```powershell
+.\harness\.venv\Scripts\python.exe scripts/import_osm_snapshot.py `
+  harness/state/osm-inputs/fiji-261119.osm.pbf `
+  harness/state/osm-inputs/fiji-261119.poly `
+  harness/state/osm-snapshots/fiji.sqlite3 `
+  --source 'Geofabrik OpenStreetMap Fiji' `
+  --source-url 'https://download.geofabrik.de/australia-oceania/fiji/fiji-261119.osm.pbf'
+```
+
+用汤加的输入及来源重复导入，输出 `tonga.sqlite3`。每个区域文件保存 PBF 数据时点、文件与边界的 SHA‑256，以及覆盖多边形。重新导入同一输出路径时，验证完成后替换旧文件。运行目录中的每个 `.sqlite3` 文件应对应一个不同区域。
+
+本地运行时设置 `SATGPT_OSM_TOOLS=1` 和 `SATGPT_OSM_SNAPSHOT_DIR=harness/state/osm-snapshots` 后启动后端。在线失败且快照无覆盖或无法读取时，保留在线错误并说明本地原因。结果摘要标明实际来源、快照时间及回退原因，保存 © OpenStreetMap contributors 署名。快照建筑最多返回 10,000 个裁剪并去重的对象，输出上限为 4 MB。在线建筑候选上限为 4,000。跨 180° 经线的单次选区仍受现有范围校验限制，可在两侧分别选区。
+
+Compose 部署在原配置后追加 `-f scripts/docker/compose.osm-snapshots.yml`，用 `SATGPT_OSM_SNAPSHOT_HOST_DIR` 指定已生成的快照目录，容器以只读方式挂载。
 
 用回执中的任务 ID 和 Harness 原生工具 `call_id` 对齐诊断日志。后台缩略图沿用所属图层的工具调用 ID，可按 `operation` 区分。`enqueued` 到 `claimed` 是 worker 等待，立即领取的调用没有入队事件。`worker_stage` 的 `duration_ms` 来自 Python 的单调时钟，涵盖校验、Earth Engine 初始化或复用、脚本、结果取回、地图 ID、缩略图生成、下载与产物写入。`returned.worker_stages_reported=false` 表示没有收到内部阶段，常见于取消、超时或进程退出。`http_requests` 独立记录 worker 观察到的 Requests 发送和 PNG 下载尝试，涵盖脚本内的 GEE 请求，范围限于 Python worker 的这两个入口。STAC、浏览器瓦片和传输层自动重试的次数不在此列。
 

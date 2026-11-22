@@ -51,7 +51,7 @@ export function registerTools(ctx, pool, bindingFor = readBinding) {
         const { owner_id, task_id, run_id, analysis_region, bounds, artifact_dir } = binding;
         const category = args.category ?? (kind === 'roads' ? 'major' : null);
         const value = await pool.run(owner_id, { kind, category, analysis_region, bounds, artifact_dir },
-          { signal: exec.signal, timeout: 16_000 });
+          { signal: exec.signal, timeout: 22_000 });
         if (exec.signal?.aborted) throw new Error('Tool call cancelled');
         if (value.error) return { summary: { status: value.error.code, message: value.error.message } };
         if (!value.artifact_ref) return { summary: value.summary };
@@ -59,8 +59,8 @@ export function registerTools(ctx, pool, bindingFor = readBinding) {
         return {
           summary: { ...value.summary, map_layer: visible ? 'show_on_completion' : 'available' },
           layer: { kind: 'geojson', renderAs, name: category ? title + ' · ' + category.replaceAll('_', ' ') : title,
-            artifact_ref: value.artifact_ref, bounds, visible,
-            metadata: { source: value.summary.attribution, observed_at: value.summary.osm_data_time,
+            artifact_ref: value.artifact_ref, bounds: value.bounds ?? bounds, visible,
+            metadata: { source: [value.summary.source, value.summary.attribution].filter(Boolean).join(' · '), observed_at: value.summary.osm_data_time,
               description: `${value.summary.count} OSM objects in the task area.` } },
           reference: { task_id, run_id },
         };
@@ -71,12 +71,14 @@ export function registerTools(ctx, pool, bindingFor = readBinding) {
 
 export function apply(ctx) {
   if (process.env.SATGPT_OSM_TOOLS !== '1') return;
-  const endpoint = process.env.SATGPT_OVERPASS_URL;
-  if (!endpoint) throw new Error('SatGPT OSM tools require a configured Overpass endpoint.');
+  const endpoint = process.env.SATGPT_OVERPASS_URL || '';
+  const osmSnapshotDir = process.env.SATGPT_OSM_SNAPSHOT_DIR;
+  const roadSnapshot = process.env.SATGPT_ROAD_SNAPSHOT;
+  if (!endpoint && !osmSnapshotDir && !roadSnapshot) throw new Error('SatGPT OSM tools require a configured data source.');
   const pool = new WorkerPool({
     python: process.env.SATGPT_HARNESS_PYTHON || 'python',
     worker: path.join(root, 'app', 'osm_worker.py'),
-    cwd: root, service: 'OSM', endpoint,
+    cwd: root, service: 'OSM', endpoint, osmSnapshotDir, roadSnapshot,
   }, 1, 12);
   registerTools(ctx, pool);
   ctx.on('dispose', () => pool.close());

@@ -237,12 +237,16 @@ def _convert(kind, category, candidates, timestamp, area):
     return summary, payload
 
 
+def validate_category(kind, category):
+    categories = {"roads": ROAD_FILTERS, "pois": POI_FILTERS, "buildings": {None}}
+    if (not isinstance(kind, str) or kind not in categories or not isinstance(category, (str, type(None)))
+            or category not in categories[kind]):
+        raise RoadNetworkError(422, "invalid_category", "Select a supported OSM query category.")
+
+
 class OverpassQueries(OverpassClient):
     async def query(self, kind, category, region, bounds):
-        categories = {"roads": ROAD_FILTERS, "pois": POI_FILTERS, "buildings": {None}}
-        if (not isinstance(kind, str) or kind not in categories or not isinstance(category, (str, type(None)))
-                or category not in categories[kind]):
-            raise RoadNetworkError(422, "invalid_category", "Select a supported OSM query category.")
+        validate_category(kind, category)
         area = query_scope(region, bounds, kind)
         candidates, timestamp = await self.get((kind, category, area.bounds))
         return await asyncio.to_thread(_convert, kind, category, candidates, timestamp, area)

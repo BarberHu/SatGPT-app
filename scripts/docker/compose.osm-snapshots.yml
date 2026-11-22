@@ -1,0 +1,12 @@
+# Add after compose.harness.yml to enable local OSM snapshots for Agent roads and buildings.
+services:
+  agent:
+    environment:
+      SATGPT_OSM_SNAPSHOT_DIR: /app/osm-snapshots
+    volumes:
+      - type: bind
+        source: ${SATGPT_OSM_SNAPSHOT_HOST_DIR-./harness/state/osm-snapshots}
+        target: /app/osm-snapshots
+        read_only: true
+        bind:
+          create_host_path: false
