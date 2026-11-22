@@ -91,14 +91,18 @@ class LayerReloadTests(unittest.TestCase):
                     self.controller.reload_layer(self.owner,self.cid,self.layer_id)
                 with self.assertRaisesRegex(RuntimeError, 'busy'):
                     self.controller.delete_conversation(self.owner,self.cid)
-                draft = self.client.post('/api/harness/conversation/new').json()
-                # Opening a draft does not make a background reload safe to delete.
+                response = self.client.post('/api/harness/tasks', json=task_body(None, analysis_region=POLYGON))
+                response.raise_for_status()
+                other = wait_for_task(self.client, response.json()['id'])
+                self.assertEqual(other['status'], 'completed')
+                self.assertNotEqual(other['conversation_id'], self.cid)
+                other_before = self.controller.conversation(self.owner, other['conversation_id'])
                 with self.assertRaisesRegex(RuntimeError, 'busy'):
                     self.controller.delete_conversation(self.owner,self.cid)
             finally: released.set()
             result = future.result(3)
         self.assertEqual(result['conversation_id'],self.cid)
-        self.assertIsNone(draft['conversation_id'])
+        self.assertEqual(self.controller.conversation(self.owner, other['conversation_id']), other_before)
         self.assertEqual(self.controller.conversation(self.owner,self.cid)['messages'][-1]['layers'][0]['reload_version'],1)
         self.controller.delete_conversation(self.owner,self.cid)
         with self.assertRaises(FileNotFoundError): self.controller.conversation(self.owner,self.cid)

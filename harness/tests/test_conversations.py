@@ -38,7 +38,6 @@ class ConversationTests(unittest.TestCase):
         empty = {'conversation_id': None, 'messages': [], 'active_task': None}
         for _ in range(3):
             self.assertEqual(self.a.get(API+'/conversation').json(), empty)
-            self.assertEqual(self.a.post(API+'/conversation/new').json(), empty)
         for body in (task_body(None, '   '), task_body(None, bounds=[1, 0, 0, 1]),
                      task_body(None, analysis_region={'type': 'Point', 'coordinates': [1, 1]})):
             self.assertEqual(self.a.post(API+'/tasks', json=body).status_code, 422)
@@ -221,7 +220,7 @@ class ConversationTests(unittest.TestCase):
         self.assertTrue(restarted.runtime.opens[0][1])
 
     def test_rejects_cross_origin_mutation_and_ignores_spoofed_proxy_scheme(self):
-        forbidden = self.a.post(API+'/conversation/new', headers={'Origin':'http://untrusted.test'})
+        forbidden = self.a.post(API+'/tasks', json=task_body(None), headers={'Origin':'http://untrusted.test'})
         self.assertEqual(forbidden.status_code, 403)
         self.b.cookies.clear()
         response = self.b.get(API+'/session', headers={'X-Forwarded-Proto':'https'})

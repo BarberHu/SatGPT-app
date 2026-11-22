@@ -122,6 +122,7 @@ class UnifiedBackendTests(unittest.TestCase):
             ('POST', '/api/scripts/pdf'),
             ('GET', '/api/flood-layer-catalog'),
             ('POST', '/api/recommended-layer-render'),
+            ('POST', '/api/harness/conversation/new'),
             ('POST', '/api/agent-raster-layers'),
             ('POST', '/api/agent-raster-download'),
             ('POST', '/api/road-network'),
@@ -190,8 +191,7 @@ class UnifiedBackendTests(unittest.TestCase):
             self.assertNotIn('id: ', client.get(f'/api/harness/tasks/{job}/events?after={max(ids)}').text)
             self.assertEqual(client.get('/api/harness/tasks/absent').status_code, 404)
             self.assertEqual(client.post('/api/harness/tasks/absent/cancel').status_code, 404)
-            new = client.post('/api/harness/conversation/new').json()
-            self.assertIsNone(new['conversation_id'])
+            self.assertEqual(client.get('/api/harness/conversation').json()['conversation_id'], cid)
             self.assertEqual(client.get('/api/harness/conversations').status_code, 200)
             self.assertEqual(client.post(f'/api/harness/conversations/{cid}/activate').status_code, 200)
 

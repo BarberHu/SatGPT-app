@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.applications import Starlette
 
-from .controller import AdmissionError, TaskController, empty_conversation
+from .controller import AdmissionError, TaskController
 from .identity import owner_for, session_response
 from .model_config import model_key_configured
 from .shared_runtime import RuntimeUnavailable
@@ -92,11 +92,6 @@ def reasoning(request: Request, owner: Owner):
 @router.get('/api/harness/conversation')
 def conversation(request: Request, owner: Owner):
     return request.app.state.controller.current(owner)
-
-
-@router.post('/api/harness/conversation/new')
-def new_conversation(owner: Owner):
-    return empty_conversation()
 
 
 @router.get('/api/harness/conversations')
