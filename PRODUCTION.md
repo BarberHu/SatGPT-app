@@ -68,7 +68,7 @@ location ^~ /satgpt/ {
 
 ## 修改配置与健康检查
 
-- Basic 或 Agent 模型：重启统一后端（包含 DSH 与 Python worker），各自模型与密钥仍独立。
+- Agent 模型变更后重启统一后端（包含 DSH 与 Python worker）。
 - GEE 配置或凭据：重启统一后端；网络代理修改也需要重启相关进程。
 - 服务端口：重启 API 与前端/网关。Compose 使用同一命令 `up -d --build` 重新应用。
 - Mapbox：开发模式重启 Vite；生产模式必须重新构建前端/镜像，随后重启网关。其他后端配置无需重新构建浏览器文件。

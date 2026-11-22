@@ -35,7 +35,7 @@ The current baseline does not register experimental Skills. Agent tasks execute 
 - **Python 3.12**. Check that `python --version` reports 3.12.
 - **Node.js 22.12 or later** and npm. The setup script also accepts the supported Node.js 20.19+ release line.
 - A Mapbox browser public token with access to the configured map style.
-- Model API keys for Basic and the selected Agent provider.
+- A model API key for the selected Agent provider.
 - A Google Cloud project registered for Earth Engine with the Earth Engine API enabled, and **service account JSON credentials** authorized to access the project and required GEE data.
 
 Run the Windows commands below from PowerShell in the repository root.

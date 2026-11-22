@@ -35,7 +35,7 @@ SatGPT 是基于 Google Earth Engine（GEE）的遥感分析应用，将交互�
 - **Python 3.12**，确保 `python --version` 显示 3.12。
 - **Node.js 22.12 或以上**及 npm；安装脚本也接受受支持的 Node.js 20.19+ 版本系列。
 - 有权访问所配置底图样式的 Mapbox 浏览器公开 token。
-- Basic 和所选 Agent 服务商的模型 API 密钥。
+- 所选 Agent 服务商的模型 API 密钥。
 - 已完成 Earth Engine 注册、启用 Earth Engine API 的 Google Cloud 项目，以及有权访问该项目和所需 GEE 数据的 **service account JSON 凭据**。
 
 下列 Windows 命令均在项目根目录的 PowerShell 中执行。
