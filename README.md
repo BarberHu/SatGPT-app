@@ -11,7 +11,8 @@ The application has two modes: **Static layers (Basic)** and **Intelligent analy
 | Area | Capabilities |
 | --- | --- |
 | Basic analysis | Map exploration, flood-related layers, and grid selection. |
-| Agent analysis | GEE dataset search, coverage and statistics queries, image previews, and interactive result layers through the DeepSeek Harness SDK. |
+| Agent analysis | GEE dataset search, coverage and statistics queries, image previews, and interactive result layers through the DeepSeek Harness SDK and four bundled Skills. |
+| Spatial context | Optional OSM road, building, and POI queries, flood exposure analysis, reusable indexed GeoJSON results, and location geocoding. |
 | Conversations | Streamed answers, an ordered run timeline, saved conversation history, switching during a run, and stopping running or queued tasks. |
 | Result layers | Per-conversation layer isolation, thumbnails, observation dates, sources, legends, visibility controls, location, and removal. |
 | Charts | Interactive ECharts charts rendered after a response finishes, with configuration copying and PNG export. |
@@ -25,10 +26,10 @@ Grid selection resolves the clicked feature's `FID` against the original GeoJSON
 | --- | --- |
 | `frontend/` | React, Vite, Mapbox GL JS, Streamdown, and ECharts; shared map and Basic/Agent interfaces. |
 | `basic/` | Basic Python module for analysis and question answering, integrated into the unified API. |
-| `harness/` | Python FastAPI backend, DeepSeek Harness SDK, GEE tool plugin, Python worker, and server-sent events (SSE). |
+| `harness/` | Python FastAPI backend, shared DeepSeek Harness runtime, durable SQLite task queue, GEE/OSM/geocoding tools and workers, and server-sent events (SSE). |
 | `scripts/` | Windows setup and startup scripts, plus Docker Compose deployment. |
 
-The current baseline does not register experimental Skills. Agent tasks execute in one queue; switching conversations leaves the original task running in the background and saves its results to the original conversation.
+The backend installs the bundled `flood-extent`, `flood-exposure`, `sentinel2-latest`, and `rainfall-analysis` Skills. Agent tasks enter a durable SQLite queue and run up to the configured execution-slot limit; switching conversations leaves the original task running in the background and saves its results to the original conversation.
 
 ## Prerequisites
 
@@ -84,7 +85,7 @@ AIHUBMIX_BASE_URL=https://aihubmix.com/v1
 
 The backend requires only the selected Agent model provider's key; leave the unused provider's key empty. Use a browser public Mapbox token, not a secret token.
 
-For optional reasoning, output-length, port, and network settings, see [`.env.example`](.env.example).
+For optional reasoning, output-length, port, network, OSM, local snapshot, and geocoding settings, see [`.env.example`](.env.example). OSM tools are disabled by default; enabling `SATGPT_OSM_TOOLS` uses the configured Overpass endpoint, while road/building snapshots and a Nominatim-compatible geocoding endpoint remain optional.
 
 ### 4. Install, validate, and start
 
@@ -130,6 +131,7 @@ The interface uses English, `en-US` dates and numbers, and `m` / `km` distances.
 - Relative credential paths resolve from the repository root regardless of the startup directory.
 - Model keys and service account JSON remain on the backend. Git and Docker builds exclude real configuration. Vite exposes only the two explicitly selected `REACT_APP_MAPBOX_*` public settings.
 - Agent conversations, session data, and previews are stored in `harness/state/`. Back up this directory to preserve history.
+- Optional OSM and geocoding behavior is controlled by `SATGPT_OSM_TOOLS`, `SATGPT_OVERPASS_URL`, `SATGPT_ROAD_SNAPSHOT`, `SATGPT_OSM_SNAPSHOT_DIR`, and `SATGPT_GEOCODING_URL` in [`.env.example`](.env.example). Online OSM is tried first; configured road/building snapshots provide classified-failure fallback, while POIs have no snapshot fallback.
 
 ## Production deployment
 
@@ -171,7 +173,7 @@ Invoke-RestMethod http://127.0.0.1:3001/readyz
 Invoke-RestMethod http://127.0.0.1:3000/readyz
 ```
 
-Vite and the production gateway each use one backend upstream. `/readyz` checks both modules' local initialization; it returns 503 if either lifecycle is incomplete. `/health` retains Basic fields, adds Harness fields and separate `basic`/`harness` details. Readiness can be true while GEE is unavailable: external model authentication remains `not_checked`, and `gee_initialized` reports the result of Basic's GEE initialization. Harness initializes its SDK/tool process lazily on a task; its health does not claim those external calls succeeded.
+Vite and the production gateway each use one backend upstream. `/readyz` checks both modules' local initialization; it returns 503 if either lifecycle is incomplete. `/health` retains Basic fields, adds Harness fields and separate `basic`/`harness` details. Readiness can be true while GEE is unavailable: external model authentication remains `not_checked`, and `gee_initialized` reports the result of Basic's GEE initialization. Harness initializes the shared SDK runtime during backend startup; GEE workers start on demand when a tool is called. Health does not claim those external calls succeeded. See [Harness multi-user runtime](docs/HARNESS_MULTIUSER.md) for ownership, concurrency, and cancellation semantics.
 
 | Symptom | Check |
 | --- | --- |
@@ -211,14 +213,15 @@ The canonical backend command is `harness\.venv\Scripts\python.exe satgpt_config
 
 Existing `.env`, credentials, `harness/state/`, browser layer records and `basic-venv/` are preserved. After stopping all old services and verifying the unified setup, you may remove only the obsolete `basic-venv/` directory yourself. Keep `harness/.venv/` and `harness/state/`. For Compose upgrades, stop the old stack first without `-v`, then use the same project name and `harness_state` volume; see [PRODUCTION.md](PRODUCTION.md).
 
-Harness keeps multi-turn local sessions, one background task executor and an independent Python tool process using the same interpreter. Basic limits synchronous GEE requests and runs them off the HTTP event loop. The browser loads rendered preset tiles from Earth Engine and road and building tiles from Mapbox.
+Harness keeps multi-turn local sessions and uses a durable SQLite queue with `SATGPT_AGENT_TASKS` concurrent execution slots. One shared runtime keeps up to `SATGPT_AGENT_RESIDENT_SESSIONS` native sessions resident. GEE tool calls use the on-demand worker pool configured by `SATGPT_GEE_WORKERS` and `SATGPT_GEE_QUEUE_LIMIT`; catalog refresh and thumbnail work use their own bounded background resources. Basic limits synchronous GEE requests and runs them off the HTTP event loop. The browser loads rendered preset tiles from Earth Engine and road and building tiles from Mapbox.
 
-The HTTP process, thread resources, memory and failure boundary are now shared. A backend restart interrupts both modes; local task state and business-layer caches remain in memory. One worker and one backend replica are required; local conversation files are not multi-process storage. This consolidation does not promise faster model/GEE responses or lower memory usage.
+The HTTP process, thread resources, memory, and failure boundary are shared. A backend restart interrupts both modes; accepted task receipts and conversation records are stored in SQLite, while active runtime work and business-layer caches remain process-local. One HTTP worker and one backend replica are required because the local runtime and state are not coordinated across processes. This consolidation does not promise faster model/GEE responses or lower memory usage.
 
 ## Further documentation
 
 - [Production deployment and public-hosting requirements](PRODUCTION.md) (Chinese).
 - [Deployment scripts](scripts/README.md) (Chinese).
+- [Harness multi-user runtime, queue, tools, and diagnostics](docs/HARNESS_MULTIUSER.md) (Chinese).
 - [Shared map architecture](frontend/src/map/README.md) (English).
 - [Chart integration and third-party attribution](frontend/src/harness/echarts/README.md) (English).
 

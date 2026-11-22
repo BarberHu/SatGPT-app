@@ -11,7 +11,8 @@ SatGPT 是基于 Google Earth Engine（GEE）的遥感分析应用，将交互�
 | 领域 | 能力 |
 | --- | --- |
 | Basic 分析 | 地图浏览、洪水相关图层和渔网选区。 |
-| Agent 分析 | 通过 DeepSeek Harness SDK 搜索 GEE 数据集、查询覆盖范围和统计值、生成影像预览及交互结果图层。 |
+| Agent 分析 | 通过 DeepSeek Harness SDK 和四个内置 Skill 搜索 GEE 数据集、查询覆盖范围和统计值、生成影像预览及交互结果图层。 |
+| 空间上下文 | 可选查询 OSM 道路、建筑和兴趣点，执行洪水暴露分析，并复用已索引的 GeoJSON 结果及地点地理编码。 |
 | 对话 | 流式回答、有序运行时间线、历史会话保存、运行中切换对话，以及停止运行中或排队中的任务。 |
 | 结果图层 | 按对话隔离图层，提供缩略图、观测日期、来源、图例、显隐控制、定位与移除。 |
 | 图表 | 回答完成后渲染交互式 ECharts 图表，支持复制配置和导出 PNG。 |
@@ -25,10 +26,10 @@ SatGPT 是基于 Google Earth Engine（GEE）的遥感分析应用，将交互�
 | --- | --- |
 | `frontend/` | React、Vite、Mapbox GL JS、Streamdown 和 ECharts；提供共享地图及 Basic/Agent 界面。 |
 | `basic/` | Basic Python 业务模块，负责分析与问答，由统一 API 集成。 |
-| `harness/` | Python FastAPI 后端、DeepSeek Harness SDK、GEE 工具插件、Python worker 和服务器发送事件（SSE）。 |
+| `harness/` | Python FastAPI 后端、共享 DeepSeek Harness runtime、持久化 SQLite 任务队列、GEE/OSM/地理编码工具与 worker，以及服务器发送事件（SSE）。 |
 | `scripts/` | Windows 安装与启动脚本，以及 Docker Compose 部署配置。 |
 
-当前基线未注册实验性 Skill。Agent 任务通过一个队列执行；切换对话后，原任务在后台继续，并将结果保存到原对话。
+后端安装内置的 `flood-extent`、`flood-exposure`、`sentinel2-latest` 和 `rainfall-analysis` Skill。Agent 任务进入持久化 SQLite 队列，并在配置的执行名额范围内并发运行；切换对话后，原任务在后台继续，并将结果保存到原对话。
 
 ## 环境要求
 
@@ -84,7 +85,7 @@ AIHUBMIX_BASE_URL=https://aihubmix.com/v1
 
 后端仅要求所选 Agent 服务商的密钥，未使用的服务商密钥留空。Mapbox 使用浏览器公开 token，不使用 secret token。
 
-推理强度、输出长度、端口和网络等可选设置见 [`.env.example`](.env.example)。
+推理强度、输出长度、端口、网络、OSM、本地快照和地理编码等可选设置见 [`.env.example`](.env.example)。OSM 工具默认关闭；启用 `SATGPT_OSM_TOOLS` 后使用配置的 Overpass 地址，道路/建筑快照及兼容 Nominatim 的地理编码地址仍为可选项。
 
 ### 4. 安装、校验并启动
 
@@ -130,6 +131,7 @@ Windows 的 `dev` 命令在 `127.0.0.1` 上启动 Vite（`3001`）和独立开�
 - 相对凭据路径始终以项目根目录解析，与启动目录无关。
 - 模型密钥和服务账号 JSON 仅在后端使用，Git 与 Docker 构建排除真实配置。Vite 仅公开显式选定的两个 `REACT_APP_MAPBOX_*` 字段。
 - Agent 对话、会话数据和预览保存在 `harness/state/`，保留历史时请备份该目录。
+- 可选 OSM 与地理编码行为由 [`.env.example`](.env.example) 中的 `SATGPT_OSM_TOOLS`、`SATGPT_OVERPASS_URL`、`SATGPT_ROAD_SNAPSHOT`、`SATGPT_OSM_SNAPSHOT_DIR` 和 `SATGPT_GEOCODING_URL` 控制。OSM 优先在线查询；配置的道路/建筑快照用于已分类故障的回退，兴趣点没有快照回退。
 
 ## 生产部署
 
@@ -211,14 +213,15 @@ Basic 包目录已改名为 `basic/`，Python 导入统一使用 `basic`。现�
 
 现有 `.env`、凭据、`harness/state/`、浏览器图层记录及 `basic-venv/` 均保留。停止旧服务并验证新启动流程后，可自行删除仅包含旧 Python 环境的 `basic-venv/`；保留 `harness/.venv/` 和 `harness/state/`。Compose 迁移先停止旧栈，不加 `-v`，继续使用原项目名及 `harness_state` 卷，详见 [PRODUCTION.md](PRODUCTION.md)。
 
-Harness 保留多轮本地会话、后台任务线程池和使用同一解释器的独立 Python 工具进程。Basic 限制同步 GEE 请求的并发，并在线程中执行这些请求。浏览器从 Earth Engine 加载预设瓦片，从 Mapbox 加载道路和建筑瓦片。
+Harness 保留多轮本地会话，并通过持久化 SQLite 队列按 `SATGPT_AGENT_TASKS` 的执行名额并发运行任务。一个共享 runtime 最多常驻 `SATGPT_AGENT_RESIDENT_SESSIONS` 个原生会话。GEE 工具调用使用由 `SATGPT_GEE_WORKERS` 和 `SATGPT_GEE_QUEUE_LIMIT` 控制的按需 worker 池；目录刷新和缩略图任务使用各自有界的后台资源。Basic 限制同步 GEE 请求的并发，并在线程中执行这些请求。浏览器从 Earth Engine 加载预设瓦片，从 Mapbox 加载道路和建筑瓦片。
 
-两个模式共享 HTTP 进程、线程资源、内存和故障范围，重启后端会同时中断两边。任务状态与业务图层缓存仍在内存；必须采用单 worker、单后端副本，本地会话文件不支持多进程一致性。本次合并不承诺模型/GEE 响应或内存占用一定改善。
+两个模式共享 HTTP 进程、线程资源、内存和故障范围，重启后端会同时中断两边。已接纳任务的回执和对话记录存入 SQLite，正在执行的 runtime 工作及业务图层缓存仍属于当前进程。由于本地 runtime 与状态不在多进程间协调，必须采用单 HTTP worker、单后端副本。本次合并不承诺模型/GEE 响应或内存占用一定改善。
 
 ## 更多文档
 
 - [生产部署与公开托管要求](PRODUCTION.md)（中文）。
 - [部署脚本](scripts/README.md)（中文）。
+- [Harness 多用户 runtime、队列、工具与诊断说明](docs/HARNESS_MULTIUSER.md)（中文）。
 - [共享地图架构](frontend/src/map/README.md)（英文）。
 - [图表集成与第三方归属说明](frontend/src/harness/echarts/README.md)（英文）。
 

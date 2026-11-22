@@ -1,10 +1,8 @@
 # Harness 匿名多用户
 
-## 实施基线
+## 文档范围
 
-GitHub 的 `pro2.0` 已拉取。本次使用 `14fd5d951d2c1f79f7cf5fe7bbe4d607b53d203b` 作为基线，实施目录是 `E:GMSFloodSatGPT-app-native-multiuser`，分支为 `wy/shared-harness-20261119`。独立工作区修改前为空。未提交、推送或部署本次实现。
-
-原工作区 `E:GMSFloodSatGPT-app` 在 `wy/agent-multiuser-20261119`，已有实现位于 `ffb4a060`。开始时其已跟踪文件无差异，共有 55 个未跟踪文件，集中在 `.codex-tmp/`、`.workbuddy/`、`_doc_imgs/`、根目录的文本和探查脚本，以及 `docs/` 下的本地工作文档。此次未改动原工作区及其服务。
+本文说明当前 `pro2.0` 的匿名多用户 Harness 运行架构，包括浏览器身份与会话归属、SQLite 任务队列、共享 SDK runtime、GEE/OSM/地理编码工具、可选本地快照，以及诊断与验证方法。文中的运行行为以当前仓库配置和实现为准；历史实施工作树、临时分支与本地路径不是部署前提。
 
 ## 运行关系
 
