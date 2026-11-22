@@ -5,8 +5,8 @@ const MAX_RESPONSE = 20_000_000;
 
 /** A resident JSON-lines worker. A slot is reusable only once its old child exits. */
 export class WorkerClient {
-  constructor({ python, worker, cwd, service = 'GEE', endpoint }) {
-    Object.assign(this, { python, worker, cwd, service, endpoint });
+  constructor({ python, worker, cwd, service = 'GEE', endpoint, geocodingLockFile }) {
+    Object.assign(this, { python, worker, cwd, service, endpoint, geocodingLockFile });
     this.child = null;
     this.pending = null;
     this.buffer = '';
@@ -19,6 +19,15 @@ export class WorkerClient {
     if (this.service === 'OSM') {
       delete env.GOOGLE_APPLICATION_CREDENTIALS;
       env.SATGPT_OVERPASS_URL = this.endpoint;
+    }
+    if (this.service === 'Geocoding') {
+      delete env.GOOGLE_APPLICATION_CREDENTIALS;
+      env.SATGPT_GEOCODING_URL = this.endpoint;
+      if (this.geocodingLockFile) env.SATGPT_GEOCODING_LOCK_FILE = this.geocodingLockFile;
+      // DSH may add bracketed IPv6 literals to NO_PROXY. HTTPX expects them bare.
+      for (const key of Object.keys(env).filter(key => key.toUpperCase() === 'NO_PROXY')) {
+        env[key] = env[key].replace(/(^|,)\s*\[([\da-f:.]*:[\da-f:.]*)\]\s*(?=,|$)/gi, '$1$2');
+      }
     }
     const child = spawn(this.python, ['-X', 'utf8', '-I', this.worker], {
       cwd: this.cwd, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env,

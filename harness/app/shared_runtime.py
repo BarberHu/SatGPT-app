@@ -71,6 +71,8 @@ class SharedRuntime:
                      'SATGPT_GEE_QUEUE_LIMIT': str(integer('SATGPT_GEE_QUEUE_LIMIT')),
                      'SATGPT_OSM_TOOLS': os.environ.get('SATGPT_OSM_TOOLS', '0'),
                      'SATGPT_OVERPASS_URL': os.environ.get('SATGPT_OVERPASS_URL', ''),
+                     'SATGPT_GEOCODING_URL': os.environ.get('SATGPT_GEOCODING_URL', '').strip(),
+                     'SATGPT_GEOCODING_LOCK_FILE': str(self.root / 'state' / 'nominatim-rate.sqlite3'),
                      'SATGPT_HARNESS_TIMING_LOG': os.environ.get('SATGPT_HARNESS_TIMING_LOG', ''),
                      'SATGPT_CATALOG_CACHE': str(self.home.parent / 'catalog'),
                      'SATGPT_CONTROL_TOKEN': self.token, 'SATGPT_CONTROL_PORT_FILE': str(port_file),

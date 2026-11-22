@@ -1,0 +1,3 @@
+- insert:
+    - id: satgpt-geocoding-tools
+      name: '@local/satgpt-geocoding-tools'

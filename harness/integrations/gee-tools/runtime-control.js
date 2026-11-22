@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 
 export const OSM_TOOL_NAMES = Object.freeze(['osm_roads', 'osm_pois', 'osm_buildings']);
+export const GEOCODE_TOOL_NAME = 'geocode_place';
 
 export function readBinding(sessionId) {
   if (!/^satgpt-[a-f0-9]{32}$/.test(sessionId) || !process.env.SATGPT_RUN_BINDINGS) return null;

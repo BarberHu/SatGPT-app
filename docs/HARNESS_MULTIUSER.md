@@ -81,6 +81,15 @@ GitHub 的 `pro2.0` 已拉取。本次使用 `14fd5d951d2c1f79f7cf5fe7bbe4d607b5
 | `SATGPT_AGENT_DEADLINE_SECONDS` | 7200 秒，可设为 1–7200，从执行器领取任务起计时 |
 
 128 个执行槽表示调度配置。已验证默认 128 通过启动校验，129 被拒绝。模拟 runtime 中 128 个任务重叠执行，第 129 个任务排队后完成，同一聊天重复提交返回 409。真实模型与 GEE 的实测并发见下方验证记录。显式设置 `.env` 或进程环境变量会覆盖默认值。
+| `SATGPT_GEOCODING_URL` | 默认留空。填写自托管或经授权的 Nominatim 兼容搜索端点后，DSH 可调用 `geocode_place`，独立于 OSM Overpass 开关 |
+
+`geocode_place` 将用户明确提到的地名和可选国家、语言过滤条件发送给配置的服务。候选包含地名、行政区、WGS84 位置、可用的包围盒及 OSM 归属。单个 worker 处理请求并缓存成功和无匹配结果，工具结果可随会话保存。配置的服务需允许这些用途。
+
+如选择 OSMF 公共服务，在部署环境中将 `SATGPT_GEOCODING_URL` 设置为 `https://nominatim.openstreetmap.org/search`。公共服务仅用于用户明确请求的公开地名查询。避免发送私人地址或保密信息，也不要用于自动补全、批量或系统性查询。缓存未命中时，共用同一 `harness/state/nominatim-rate.sqlite3` 的 DSH 进程串行访问公共服务。每次取得锁后等待至少 1.1 秒，请求结束后释放锁。使用独立状态卷的多实例或多主机部署，需要先统一公共请求出口，再启用这个端点。 [Nominatim 使用政策](https://operations.osmfoundation.org/policies/nominatim/)
+
+地理编码可用于定位和澄清同名地点。遇到地名与已选区域冲突时，Agent 应先请用户确认范围，再执行分析。包围盒用于定位，精确分析使用确认后的研究区几何。
+
+128 个执行槽表示调度配置。已验证默认 128 通过启动校验，129 被拒绝。模拟 runtime 中 128 个任务重叠执行，第 129 个任务排队后完成，同一聊天重复提交返回 409。真实模型与 GEE 的实测并发见下方验证记录。显式设置 `.env` 或进程环境变量会覆盖默认值。
 
 HTTPS 网关设置 `SATGPT_PUBLIC_ORIGIN` 为浏览器实际访问的 origin，启用 `SATGPT_COOKIE_SECURE=true`。网关应保留浏览器 Host，后端的 Uvicorn 转发头信任范围限定为实际代理。调试时使用同源前端端口。API 脚本先访问 `/api/harness/session`，在后续请求带回 Cookie，同源写请求附带 Origin，提交附带 conversation_id 和 request_id。
 

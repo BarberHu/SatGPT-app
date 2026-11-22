@@ -9,7 +9,8 @@ from pathlib import Path
 
 BUNDLES = {"@local/webgis-gee-tools": "gee-tools",
            "@local/satgpt-assistant-stream": "assistant-stream",
-           "@local/satgpt-osm-tools": "osm-tools"}
+           "@local/satgpt-osm-tools": "osm-tools",
+           "@local/satgpt-geocoding-tools": "geocoding-tools"}
 
 
 def ensure_plugin(home: Path) -> None:

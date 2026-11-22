@@ -115,6 +115,8 @@ def validate_config(component='all'):
             validate_url('SATGPT_PUBLIC_ORIGIN')
             if urlsplit(os.environ['SATGPT_PUBLIC_ORIGIN']).path:
                 invalid('SATGPT_PUBLIC_ORIGIN', 'must be an origin without a path or trailing slash')
+        if os.getenv('SATGPT_GEOCODING_URL', '').strip():
+            validate_url('SATGPT_GEOCODING_URL')
         provider = required_env('DSH_PROVIDER')
         if provider not in {'deepseek-official', 'aihubmix'}:
             invalid('DSH_PROVIDER', 'must be deepseek-official or aihubmix')

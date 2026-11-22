@@ -4,7 +4,7 @@ import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkerPool } from './worker-pool.js';
-import { mountControl, OSM_TOOL_NAMES, readBinding } from './runtime-control.js';
+import { GEOCODE_TOOL_NAME, mountControl, OSM_TOOL_NAMES, readBinding } from './runtime-control.js';
 
 export const name = 'webgis-gee-tools';
 export const inject = ['agents', 'llm', 'tools'];
@@ -20,7 +20,8 @@ const timingLog = process.env.SATGPT_HARNESS_TIMING_LOG;
 let timingWriteFailed = false;
 
 const TOOL_NAMES = ['gee_check', 'gee_status', 'gee_catalog', 'gee_eval', 'gee_preview', 'gee_layer',
-  ...(process.env.SATGPT_OSM_TOOLS === '1' ? OSM_TOOL_NAMES : [])];
+  ...(process.env.SATGPT_OSM_TOOLS === '1' ? OSM_TOOL_NAMES : []),
+  ...(process.env.SATGPT_GEOCODING_URL?.trim() ? [GEOCODE_TOOL_NAME] : [])];
 const CODE_PARAMETER = {
   type: 'string',
   description: 'Restricted Python script. Write result = expression (e.g. result = {"count": collection.size()}). A bare final expression or dictionary does not return a value. Use preloaded ee and analysis_region. No import, print, or def.',
