@@ -9,12 +9,14 @@ from __future__ import annotations
 import ast
 import builtins
 from collections import Counter
+from contextvars import ContextVar
 import json
 import math
 import re
 import sys
 import uuid
 from pathlib import Path
+from time import perf_counter_ns
 from types import SimpleNamespace
 from urllib.request import urlopen
 
@@ -41,13 +43,55 @@ COLLECTION_TYPES = {"ImageCollection": "ee.Image", "FeatureCollection": "ee.Feat
 COLLECTION_CHAIN_METHODS = {"filter", "filterBounds", "filterDate", "limit", "select", "sort"}
 _SESSION = None
 _PROJECT = None
+_TIMINGS = ContextVar('worker_timings', default=None)
+_HTTP_REQUESTS = ContextVar('gee_http_requests', default=None)
+_HTTP_COUNTER_INSTALLED = False
+THUMBNAIL_RECIPE_LIMIT = 2_000_000
 # Isolated Python startup does not add the worker directory to the import path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def measured(stage, function, *args, **kwargs):
+    timings = _TIMINGS.get()
+    if timings is None:
+        return function(*args, **kwargs)
+    start = perf_counter_ns()
+    try:
+        value = function(*args, **kwargs)
+    except Exception:
+        timings.append({'stage': stage, 'duration_ms': (perf_counter_ns() - start) / 1e6, 'outcome': 'error'})
+        raise
+    timings.append({'stage': stage, 'duration_ms': (perf_counter_ns() - start) / 1e6, 'outcome': 'ok'})
+    return value
+
+
+def count_http_request():
+    counter = _HTTP_REQUESTS.get()
+    if counter is not None:
+        counter[0] += 1
+
+
+def install_http_counter():
+    """Count Requests sends in this worker without changing the EE transport."""
+    global _HTTP_COUNTER_INSTALLED
+    if _HTTP_COUNTER_INSTALLED or _HTTP_REQUESTS.get() is None:
+        return
+    from requests import Session
+
+    send = Session.send
+
+    def counted_send(session, request, **kwargs):
+        count_http_request()
+        return send(session, request, **kwargs)
+
+    Session.send = counted_send
+    _HTTP_COUNTER_INSTALLED = True
 
 
 def earth_engine(project: str):
     """Keep one authenticated Earth Engine client for the worker lifetime."""
     global _SESSION, _PROJECT
+    install_http_counter()
     if _SESSION is not None and _PROJECT == project:
         return _SESSION
     import ee
@@ -217,7 +261,8 @@ def run_code(ee, code: str, analysis_context=None):
             geometry = {'type': 'Polygon', 'coordinates': [[[w,s], [e,s], [e,n], [w,n], [w,s]]]}
         scope['analysis_region_geojson'] = geometry
         scope['analysis_region'] = ee.Geometry(geometry)
-    exec(checked_code(code), scope)
+    compiled = measured('validate', checked_code, code)
+    measured('script', exec, compiled, scope)
     if "result" not in scope:
         raise ValueError("Code must assign a value to result")
     return scope["result"]
@@ -232,7 +277,7 @@ def jsonable(value):
         return [jsonable(item) for item in value]
     get_info = getattr(value, "getInfo", None)
     if callable(get_info):
-        return jsonable(get_info())
+        return jsonable(measured('result_get_info', get_info))
     raise TypeError(f"Cannot serialize result type: {type(value).__name__}")
 
 
@@ -242,34 +287,45 @@ def execute(payload: dict) -> dict:
         from gee_catalog import read_cached, rebuild, search
         cache_dir = Path(payload['catalog_dir']) if payload.get('catalog_dir') else None
         if operation == "catalog_refresh":
-            return rebuild(cache_dir)
+            return measured('catalog_refresh', rebuild, cache_dir)
         query = (payload.get("query", ""), payload.get("limit", 20), payload.get("type"))
         if operation == "catalog_read":
-            return read_cached(*query, cache_dir=cache_dir)
-        return search(*query, bool(payload.get("refresh")), cache_dir=cache_dir)
+            return measured('catalog_read', read_cached, *query, cache_dir=cache_dir)
+        return measured('catalog_search', search, *query, bool(payload.get("refresh")), cache_dir=cache_dir)
     if operation == "check":
         code = payload.get("code")
         try:
-            checked_code(code, check_eval_arguments=True)
+            measured('validate', checked_code, code, check_eval_arguments=True)
         except ValueError as exc:
             return {"valid": False, "errors": [str(exc)], "warnings": []}
         return {"valid": True, "errors": [], "warnings": code_warnings(code)}
     # Reject local Python errors before credentials, ee.Initialize, or a GEE request.
     if operation in {"eval", "preview"}:
-        checked_code(payload.get("code"), check_eval_arguments=operation == "eval")
-    elif operation != "status":
-        checked_code(payload.get("layer_code"))
+        measured('validate', checked_code, payload.get("code"), check_eval_arguments=operation == "eval")
+    elif operation not in {"status", "layer_thumbnail", "layer_thumbnail_warmup"}:
+        measured('validate', checked_code, payload.get("layer_code"))
         analysis_code = payload.get("analysis_code")
         if isinstance(analysis_code, str) and analysis_code.strip():
-            checked_code(analysis_code)
+            measured('validate', checked_code, analysis_code)
     project = payload.get("project")
     if not project:
         raise ValueError("Missing GEE_PROJECT_ID. Set it in the project root .env.")
-    ee = earth_engine(project)
+    ee = measured('ee_reuse' if _SESSION is not None and _PROJECT == project else 'ee_initialize', earth_engine, project)
+    if operation == 'layer_thumbnail_warmup':
+        return {'initialized': True}
     if operation == "status":
         return {"python": sys.version.split()[0], "ee_version": getattr(ee, "__version__", "unknown"),
                 "project": project, "credential_type": "service_account",
-                "initialized": True, "server_round_trip": ee.Number(1).add(1).getInfo() == 2}
+                "initialized": True, "server_round_trip": measured('result_get_info', ee.Number(1).add(1).getInfo) == 2}
+    if operation == 'layer_thumbnail':
+        ref = payload.get('thumbnail_ref')
+        with thumbnail_recipe_path(payload['artifact_dir'], ref).open('rb') as stream:
+            raw = stream.read(THUMBNAIL_RECIPE_LIMIT + 1)
+        if len(raw) > THUMBNAIL_RECIPE_LIMIT:
+            raise ValueError('Layer thumbnail recipe is too large')
+        recipe = json.loads(raw)
+        image = measured('thumbnail_restore', restore_thumbnail_image, ee, recipe['image'])
+        return {'thumbnail': save_thumbnail(image, recipe['visualization'], recipe['bounds'], ee, payload)}
     if operation == "eval":
         return {"result": jsonable(run_code(ee, payload["code"], payload.get('analysis_context')))}
     if operation == "preview":
@@ -288,12 +344,11 @@ def execute(payload: dict) -> dict:
                     or not all(isinstance(value, (int, float)) for value in region)):
                 raise ValueError("region must be [west,south,east,north]")
             vis["region"] = region
-        url = image.getThumbURL(vis)
-        with urlopen(url, timeout=120) as response:
-            png = response.read(12_000_001)
+        url = measured('preview_url', image.getThumbURL, vis)
+        png = measured('preview_download', download_png, url, 120, 12_000_001)
         if len(png) > 12_000_000 or not png.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("The GEE preview is not a valid PNG or exceeds 12 MB")
-        preview_url = save_png(png, payload)
+        preview_url = measured('artifact_write', save_png, png, payload)
         return {"preview": {"name": str(payload.get("name") or "GEE image preview")[:100],
                             "url": preview_url, "bytes": len(png),
                             "width": int.from_bytes(png[16:20], "big"),
@@ -303,7 +358,7 @@ def execute(payload: dict) -> dict:
         raise TypeError("layer_code must assign an ee.Image to result")
     vis = payload.get("visualization") or {}
     options = {key: vis[key] for key in ("bands", "min", "max", "palette") if key in vis}
-    map_name = image.getMapId(options)["mapid"]
+    map_name = measured('map_id', image.getMapId, options)["mapid"]
     if not isinstance(map_name, str) or not map_name.startswith("projects/"):
         raise ValueError("Earth Engine did not return a valid map ID")
     output = {
@@ -322,11 +377,18 @@ def execute(payload: dict) -> dict:
     bounds = payload.get('bounds')
     if bounds is not None:
         output['layer']['bounds'] = bounds
-        try:
-            output['layer']['thumbnail'] = save_thumbnail(image, options, bounds, ee, payload)
-        except Exception:
-            # A failed optional preview must not discard an already-created map.
-            output['layer']['thumbnail_status'] = 'unavailable'
+        if payload.get('defer_thumbnail'):
+            try:
+                output['thumbnail_ref'] = measured('thumbnail_recipe', save_thumbnail_recipe, image, options, bounds, ee, payload)
+                output['layer']['thumbnail_status'] = 'pending'
+            except Exception:
+                output['layer']['thumbnail_fallback'] = 'recipe_unavailable'
+        if 'thumbnail_ref' not in output:
+            try:
+                output['layer']['thumbnail'] = save_thumbnail(image, options, bounds, ee, payload)
+            except Exception:
+                # A failed optional preview must not discard an already-created map.
+                output['layer']['thumbnail_status'] = 'unavailable'
     else:
         output['layer']['thumbnail_status'] = 'missing_bounds'
     analysis_code = payload.get("analysis_code")
@@ -335,14 +397,55 @@ def execute(payload: dict) -> dict:
     return output
 
 
+def thumbnail_recipe_path(directory, ref):
+    if not isinstance(ref, str) or not re.fullmatch(r'[a-f0-9]{32}', ref):
+        raise ValueError('Invalid layer thumbnail reference')
+    return Path(directory) / f'thumbnail-{ref}.json'
+
+
+def restore_thumbnail_image(ee, serialized):
+    return ee.Image(ee.deserializer.fromCloudApiJSON(serialized))
+
+
+def save_thumbnail_recipe(image, visualization, bounds, ee, payload):
+    serialized = image.serialize()
+    raw = json.dumps({'image': serialized, 'visualization': visualization, 'bounds': bounds},
+                     allow_nan=False).encode('utf-8')
+    if len(raw) > THUMBNAIL_RECIPE_LIMIT:
+        raise ValueError('Layer thumbnail recipe is too large')
+    restore_thumbnail_image(ee, serialized)
+    ref = uuid.uuid4().hex
+    target = thumbnail_recipe_path(payload['artifact_dir'], ref)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix('.tmp')
+    try:
+        temporary.write_bytes(raw)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return ref
+
+
 def save_png(png, payload):
     directory = Path(payload['artifact_dir'])
     directory.mkdir(parents=True, exist_ok=True)
-    filename = f'{uuid.uuid4().hex}.png'
-    temporary = directory / (filename + '.tmp')
-    temporary.write_bytes(png)
-    temporary.replace(directory / filename)
+    ref = payload.get('thumbnail_ref')
+    if ref is not None:
+        thumbnail_recipe_path(directory, ref)  # Validate the opaque filename component.
+    filename = f'{ref or uuid.uuid4().hex}.png'
+    temporary = directory / f'{filename}-{uuid.uuid4().hex}.tmp'
+    try:
+        temporary.write_bytes(png)
+        temporary.replace(directory / filename)
+    finally:
+        temporary.unlink(missing_ok=True)
     return f"{payload['artifact_url']}/{filename}"
+
+
+def download_png(url, timeout, limit):
+    count_http_request()
+    with urlopen(url, timeout=timeout) as response:
+        return response.read(limit)
 
 
 def save_thumbnail(image, visualization, bounds, ee, payload):
@@ -350,29 +453,49 @@ def save_thumbnail(image, visualization, bounds, ee, payload):
             or not all(isinstance(v, (int, float)) for v in bounds)
             or not (-180 <= bounds[0] < bounds[2] <= 180 and -85 <= bounds[1] < bounds[3] <= 85)):
         raise ValueError('Invalid layer thumbnail bounds')
-    url = image.getThumbURL({**visualization, 'format': 'png', 'dimensions': 256,
-                             'region': ee.Geometry.Rectangle(bounds)})
-    with urlopen(url, timeout=20) as response:
-        png = response.read(4_000_001)
+    url = measured('thumbnail_url', image.getThumbURL, {**visualization, 'format': 'png', 'dimensions': 256,
+                   'region': ee.Geometry.Rectangle(bounds)})
+    png = measured('thumbnail_download', download_png, url, 20, 4_000_001)
     if len(png) > 4_000_000 or len(png) < 24 or not png.startswith(b'\x89PNG\r\n\x1a\n'):
         raise ValueError('Invalid layer thumbnail PNG')
-    return {'url': save_png(png, payload), 'width': int.from_bytes(png[16:20], 'big'),
+    return {'url': measured('artifact_write', save_png, png, payload), 'width': int.from_bytes(png[16:20], 'big'),
             'height': int.from_bytes(png[20:24], 'big')}
 
 
 def main() -> None:
     for line in sys.stdin:
         request = None
+        timings = None
+        requests = None
         try:
             request = json.loads(line)
-            result = {"id": request["id"], "ok": True, "data": execute(request["payload"])}
+            timings = [] if request.get('timing') is True else None
+            operation = request['payload'].get('operation')
+            if timings is not None and operation not in {'catalog', 'catalog_read', 'catalog_refresh'}:
+                requests = [0]
+            token = _TIMINGS.set(timings)
+            http_token = _HTTP_REQUESTS.set(requests)
+            try:
+                result = {"id": request["id"], "ok": True, "data": execute(request["payload"])}
+            finally:
+                _HTTP_REQUESTS.reset(http_token)
+                _TIMINGS.reset(token)
         except Exception as exc:
             result = {"id": request.get("id") if isinstance(request, dict) else None,
                       "ok": False, "error": re.sub(r"https?://\S+", "[service URL]", f"{type(exc).__name__}: {exc}")[:1200]}
+        if timings is not None:
+            result['timings'] = timings
+        if requests is not None:
+            result['http_requests'] = requests[0]
         try:
             line = json.dumps(result, ensure_ascii=False, allow_nan=False)
         except (ValueError, TypeError):
-            line = json.dumps({'id': result['id'], 'ok': False, 'error': 'GEE result is not JSON serializable'})
+            fallback = {'id': result['id'], 'ok': False, 'error': 'GEE result is not JSON serializable'}
+            if timings is not None:
+                fallback['timings'] = timings
+            if requests is not None:
+                fallback['http_requests'] = requests[0]
+            line = json.dumps(fallback)
         sys.stdout.write(line + "\n")
         sys.stdout.flush()
 

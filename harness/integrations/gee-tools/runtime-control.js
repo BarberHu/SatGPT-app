@@ -35,7 +35,7 @@ export function mountControl(ctx, runWorker) {
       reply(200, { ready: true });
       return;
     }
-    if (req.method !== 'POST' || !['/cancel', '/reload', '/reasoning'].includes(req.url)) {
+    if (req.method !== 'POST' || !['/cancel', '/reload', '/reasoning', '/thumbnail'].includes(req.url)) {
       res.writeHead(404).end();
       return;
     }
@@ -70,10 +70,12 @@ export function mountControl(ctx, runWorker) {
         return;
       }
       if (typeof body.owner_id !== 'string' || !/^[a-f0-9]{32}$/.test(body.owner_id)) {
-        reply(400, { error: 'Invalid reload owner' });
+        reply(400, { error: 'Invalid tool owner' });
         return;
       }
-      const result = await runWorker(body.owner_id, body.payload, abort.signal);
+      const payload = req.url === '/thumbnail' ? { ...body.payload, operation: 'layer_thumbnail' } : body.payload;
+      const callId = req.url === '/thumbnail' && typeof body.tool_call_id === 'string' ? body.tool_call_id : undefined;
+      const result = await runWorker(body.owner_id, payload, abort.signal, callId);
       reply(200, result);
     } catch (error) {
       if (!abort.signal.aborted) reply(422, { error: String(error?.message || 'Runtime request failed').slice(0, 500) });

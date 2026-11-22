@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Annotated
@@ -116,6 +117,15 @@ def get_conversation(conversation_id: str, request: Request, owner: Owner):
 def reload_layer(conversation_id: str, layer_id: str, request: Request, owner: Owner):
     with api_errors():
         return request.app.state.controller.reload_layer(owner, conversation_id, layer_id)
+
+
+@router.get('/api/harness/conversations/{conversation_id}/layer-thumbnails')
+def layer_thumbnails(conversation_id: str, ids: str, request: Request, owner: Owner):
+    selected = list(dict.fromkeys(ids.split(',')))
+    if not 1 <= len(selected) <= 24 or any(not re.fullmatch(r'[a-f0-9]{32}-\d{1,4}', key) for key in selected):
+        raise HTTPException(422, 'Invalid layer identifiers')
+    with api_errors():
+        return {'layers': request.app.state.controller.thumbnails.states(owner, conversation_id, selected)}
 
 
 @router.post('/api/harness/tasks', status_code=202)

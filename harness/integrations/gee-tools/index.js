@@ -20,6 +20,7 @@ const workerOptions = {
 const pool = new WorkerPool(workerOptions, Number(process.env.SATGPT_GEE_WORKERS || 16), Number(process.env.SATGPT_GEE_QUEUE_LIMIT || 128));
 const catalogReaders = new WorkerPool(workerOptions, 1);
 const catalogRefreshers = new WorkerPool(workerOptions, 1);
+const thumbnailWorkers = new WorkerPool(workerOptions, 1, 16);
 const catalogDir = process.env.SATGPT_CATALOG_CACHE;
 const catalog = new CatalogCoordinator(
   (owner, payload, signal, observe) => catalogReaders.run(owner, { ...payload, operation: 'catalog_read', catalog_dir: catalogDir },
@@ -39,10 +40,10 @@ const CODE_PARAMETER = {
 };
 const PYTHON_RULES = 'ee and the exact task geometry analysis_region (ee.Geometry) / analysis_region_geojson are preloaded. Assign the output to result. No import, print, def, file access, or private attributes. For a simple .map() callback use an inline lambda. Run gee_check before executing complex code.';
 
-function execute(owner, payload, signal) {
+function execute(owner, payload, signal, toolCallId) {
   const operation = payload.operation || 'layer';
   const taskId = payload.analysis_context?.task_id;
-  const callId = timingLog ? randomUUID() : null;
+  const callId = timingLog ? toolCallId || randomUUID() : null;
   const observe = timingLog && (point => {
     if (timingWriteFailed) return;
     try {
@@ -54,6 +55,10 @@ function execute(owner, payload, signal) {
     }
   });
   if (operation === 'catalog') return catalog.search(owner, payload, { signal, observe });
+  if (operation === 'layer_thumbnail' || operation === 'layer_thumbnail_warmup') {
+    const timeout = operation === 'layer_thumbnail_warmup' ? 15_000 : 45_000;
+    return thumbnailWorkers.run(owner, { ...payload, project }, { signal, timeout, observe });
+  }
   return pool.run(owner, { ...payload, project }, { signal, timeout: 150000, observe });
 }
 
@@ -77,7 +82,8 @@ export async function runWithContext(payload, exec) {
   const result = await execute(owner_id, { ...payload, artifact_dir,
     artifact_url: '/api/previews/' + conversation_id + '/' + task_id,
     analysis_context: { task_id, conversation_id, bounds, analysis_region, ...(analysis_aoi && { analysis_aoi }) },
-  }, exec.signal);
+  }, exec.signal, exec.callId);
+  if (exec.signal?.aborted) throw new Error('Tool call cancelled');
   if (result.layer || result.preview) return { ...result, reference: { task_id, run_id } };
   return result;
 }
@@ -205,13 +211,14 @@ export function apply(ctx) {
     output: {
       schema: { type: 'object', properties: { layer: { type: 'object', additionalProperties: true } }, required: ['layer'], additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: `Map layer ${value.layer.name} created and sent to WebGIS.` }],
-      presentationMeta: (args, value) => ({ ...value.reference, layer: value.layer, code: args.code }),
+      presentationMeta: (args, value) => ({ ...value.reference, layer: value.layer,
+        ...(value.thumbnail_ref && { thumbnail_ref: value.thumbnail_ref }), code: args.code }),
     },
     async execute(args, exec) {
       const bounds = focusBounds(args.bounds);
       const visualization = { name: args.name };
       for (const key of ['bands', 'min', 'max', 'palette']) if (args[key] !== undefined) visualization[key] = args[key];
-      const value = await runWithContext({ layer_code: args.code, visualization, bounds,
+      const value = await runWithContext({ layer_code: args.code, visualization, bounds, defer_thumbnail: true,
         metadata: args.metadata, legend: args.legend }, exec);
       if (bounds) value.layer.bounds = bounds;
       return value;
@@ -226,7 +233,17 @@ export function apply(ctx) {
       return 'This tool is unavailable in this SatGPT session';
     }
   });
-  mountControl(ctx, execute);
+  let thumbnailRequested = false;
+  mountControl(ctx, (owner, payload, signal, callId) => {
+    if (payload.operation === 'layer_thumbnail') thumbnailRequested = true;
+    return execute(owner, payload, signal, callId);
+  });
   if (catalogDir) execute('catalog-startup', { operation: 'catalog', limit: 1 }).catch(() => {});
-  ctx.on('dispose', () => Promise.all([pool.close(), catalogReaders.close(), catalogRefreshers.close()]));
+  const thumbnailWarmup = project ? setImmediate(() => {
+    if (!thumbnailRequested) execute('thumbnail-startup', { operation: 'layer_thumbnail_warmup' }).catch(() => {});
+  }) : null;
+  ctx.on('dispose', () => {
+    if (thumbnailWarmup) clearImmediate(thumbnailWarmup);
+    return Promise.all([pool.close(), catalogReaders.close(), catalogRefreshers.close(), thumbnailWorkers.close()]);
+  });
 }

@@ -27,6 +27,7 @@ from .trace import add_harness_event, clean_text, remove_final_answer
 from .task_stream import TaskStream
 from .analysis_region import validate_analysis_region, region_bounds, validate_analysis_aoi
 from .layer_generation import generation_recipe, replay_payload
+from .layer_thumbnails import LayerThumbnails, valid_ref
 
 
 def validate_bounds(value) -> list[float]:
@@ -124,6 +125,7 @@ class TaskController:
         self.execution_slots = integer('SATGPT_AGENT_TASKS')
         self.timeout = integer('SATGPT_AGENT_DEADLINE_SECONDS')
         self.gee_workers = integer('SATGPT_GEE_WORKERS')
+        self.timing_log = os.getenv('SATGPT_HARNESS_TIMING_LOG')
         self.trace_secrets = tuple(key for name in ('AIHUBMIX_API_KEY', 'DEEPSEEK_API_KEY')
                                    if len(key := os.getenv(name, '')) >= 8)
         self.runtime = runtime_factory(self.root, self.state / 'dsh-home', self.gee_workers,
@@ -138,12 +140,25 @@ class TaskController:
         # Queued work lives in SQLite. Retain an event stream only while a client uses it.
         self.queued_streams = WeakValueDictionary()
         self.reloads = {}
+        self.thumbnails = LayerThumbnails(self)
         self.monitor = threading.Thread(target=self._monitor, name='satgpt-runtime-monitor', daemon=True)
         self.monitor.start()
 
     @property
     def healthy(self):
         return not self.closed.is_set() and self.runtime.available.is_set()
+
+    def _task_timing(self, event, task_id, **fields):
+        if not self.timing_log:
+            return
+        point = {'component': 'task', 'event': event, 'task_id': task_id,
+                 'at_ms': time.time_ns() // 1_000_000, **fields}
+        try:
+            with open(self.timing_log, 'ab', buffering=0,
+                      opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
+                stream.write((encode(point) + '\n').encode('utf-8'))
+        except OSError:
+            self.timing_log = None
 
     def _require_available(self, *, allow_rotation=False):
         if allow_rotation and self.rotating and not self.closed.is_set():
@@ -259,6 +274,12 @@ class TaskController:
                            'reloaded_at': timestamp()}
                 if not fresh.get('thumbnail'):
                     updated.pop('thumbnail', None)
+                if 'thumbnail_status' not in fresh:
+                    updated.pop('thumbnail_status', None)
+                ref = updated.pop('thumbnail_ref', None)
+                updated.pop('thumbnail_call_id', None)
+                if valid_ref(ref):
+                    self.thumbnails.update_receipt(db, owner, item['job_id'], index, previous.get('reload_version', 0), ref, None)
                 item['layers'][index] = updated
                 self.store.save_messages(db, cid, messages)
             return {'conversation_id': cid, 'layer_id': layer_id, 'layer': updated}
@@ -322,6 +343,7 @@ class TaskController:
                 db.execute('INSERT INTO tasks(id, conversation_id, owner, request_id, fingerprint, status, receipt) '
                            'VALUES(?,?,?,?,?,?,?)', (task_id, cid, owner, request_id, fingerprint, 'queued', encode(receipt)))
                 self.store.save_messages(db, cid, [*messages, message('user', prompt, task_id, **snapshot)])
+            self._task_timing('enqueued', task_id)
             self.wakeup.set()
             return receipt
 
@@ -398,8 +420,9 @@ class TaskController:
                 dispatched_at = timestamp()
                 wait_ms = (datetime.fromisoformat(dispatched_at) - datetime.fromisoformat(receipt['created_at']))
                 self.runtime.reserve(native_id)
-                self._update(task, status='starting', dispatched_at=dispatched_at,
-                             queue_wait_ms=max(0, round(wait_ms.total_seconds() * 1000)))
+                queue_wait_ms = max(0, round(wait_ms.total_seconds() * 1000))
+                self._update(task, status='starting', dispatched_at=dispatched_at, queue_wait_ms=queue_wait_ms)
+                self._task_timing('claimed', task_id, queue_wait_ms=queue_wait_ms)
                 self.queued_streams.pop(task_id, None)
                 self.active[task_id] = task
                 self.pool.submit(self._run, task)
@@ -479,7 +502,8 @@ class TaskController:
             value = data.get('meta')
             if not isinstance(value, dict) or value.get('task_id') != task.receipt['id'] or value.get('run_id') != task.run_id:
                 continue
-            call_id = data.get('message', {}).get('toolCallId') or event.get('seq')
+            native_call_id = data.get('message', {}).get('toolCallId')
+            call_id = native_call_id or event.get('seq')
             if call_id in seen:
                 continue
             seen.add(call_id)
@@ -499,6 +523,13 @@ class TaskController:
                         'data_url': f'/api/harness/conversations/{cid}/tasks/{job_id}/osm/{ref}.geojson',
                     })
                     continue
+                if layer.get('thumbnail_status') == 'pending':
+                    if valid_ref(value.get('thumbnail_ref')):
+                        layer['thumbnail_ref'] = value['thumbnail_ref']
+                        if isinstance(native_call_id, str):
+                            layer['thumbnail_call_id'] = native_call_id
+                    else:
+                        layer['thumbnail_status'] = 'unavailable'
                 layer['generation'] = generation_recipe(code, layer, snapshot)
                 layer.update(code=code, reloadable=layer['generation'] is not None)
                 layers.append(layer)
@@ -525,6 +556,7 @@ class TaskController:
                 status=status, trace=trace, timeline=timeline, started_at=job.get('started_at'),
                 finished_at=receipt['finished_at'], **output)])
             self.store.save_task(db, receipt)
+        self._task_timing('finished', job['id'], outcome=status)
         stream.update(**receipt)
         return receipt
 
@@ -533,6 +565,7 @@ class TaskController:
             task.receipt = self._settle(task.owner, task.receipt, task.stream, status, text, trace, output)
             del self.active[task.receipt['id']]
             self.wakeup.set()
+            self.thumbnails.schedule(task.owner, task.receipt)
 
     def _run(self, task):
         from deepseek_harness.errors import TransportClosedError
@@ -618,3 +651,4 @@ class TaskController:
         self.monitor.join(timeout=3)
         self.runtime.close()
         self.pool.shutdown(wait=True, cancel_futures=False)
+        self.thumbnails.close()

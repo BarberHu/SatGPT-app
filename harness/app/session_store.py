@@ -133,6 +133,9 @@ class SessionStore:
         db.execute('UPDATE tasks SET status=?, receipt=? WHERE id=?', (job['status'], encode(job), job['id']))
 
     @staticmethod
-    def save_messages(db, cid, messages):
-        db.execute('UPDATE conversations SET messages=?, updated=? WHERE id=?',
-                   (encode(messages[-100:]), timestamp(), cid))
+    def save_messages(db, cid, messages, *, touch=True):
+        value = encode(messages[-100:])
+        if touch:
+            db.execute('UPDATE conversations SET messages=?, updated=? WHERE id=?', (value, timestamp(), cid))
+        else:
+            db.execute('UPDATE conversations SET messages=? WHERE id=?', (value, cid))

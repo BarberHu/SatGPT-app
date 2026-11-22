@@ -76,7 +76,7 @@ GitHub 的 `pro2.0` 已拉取。本次使用 `14fd5d951d2c1f79f7cf5fe7bbe4d607b5
 | `SATGPT_AGENT_TASKS` | 128 个执行槽，可设为 1–128 |
 | `SATGPT_GEE_WORKERS` | 16，可设为 1–32 |
 | `SATGPT_GEE_QUEUE_LIMIT` | 全局等待 128，可设为 1–65535。单身份上限按全局等待位的一半向上取整 |
-| `SATGPT_HARNESS_TIMING_LOG` | 可选，填写 Harness 可写的绝对路径以追加诊断 JSONL。包含 GEE 入队、领取、返回及拒绝，还有模型重试和重试启动的时间。建议在诊断结束后关闭以控制文件大小 |
+| `SATGPT_HARNESS_TIMING_LOG` | 可选，填写 Harness 可写的绝对路径以追加诊断 JSONL。可按任务和工具调用关联入队、领取、Python 阶段和返回，也记录队列拒绝及模型重试。建议在诊断结束后关闭以控制文件大小 |
 | `SATGPT_AGENT_RESIDENT_SESSIONS` | 128，须至少等于执行槽数量 |
 | `SATGPT_AGENT_DEADLINE_SECONDS` | 7200 秒，可设为 1–7200，从执行器领取任务起计时 |
 
@@ -98,6 +98,12 @@ HTTPS 网关设置 `SATGPT_PUBLIC_ORIGIN` 为浏览器实际访问的 origin，�
 收到 runtime 不可用时查看 `/readyz`，再对整个后端做进程级恢复。该操作影响进程内全部活动任务。清理不能确认的任务持续占用自己的名额，进程重启后可查看其结果状态。
 
 Agent 的 OSM 查询、Overpass 客户端和快照读取位于 harness/app，由 DSH 工具调用。Basic 的道路和建筑预览使用 Mapbox Streets v8 矢量瓦片。
+
+用回执中的任务 ID 和 Harness 原生工具 `call_id` 对齐诊断日志。后台缩略图沿用所属图层的工具调用 ID，可按 `operation` 区分。`enqueued` 到 `claimed` 是 worker 等待，立即领取的调用没有入队事件。`worker_stage` 的 `duration_ms` 来自 Python 的单调时钟，涵盖校验、Earth Engine 初始化或复用、脚本、结果取回、地图 ID、缩略图生成、下载与产物写入。`returned.worker_stages_reported=false` 表示没有收到内部阶段，常见于取消、超时或进程退出。`http_requests` 独立记录 worker 观察到的 Requests 发送和 PNG 下载尝试，涵盖脚本内的 GEE 请求，范围限于 Python worker 的这两个入口。STAC、浏览器瓦片和传输层自动重试的次数不在此列。
+
+新建 Agent 图层随任务终态交付。交互图层可用后，缩略图可能仍在等待独立 worker，前端仅查询待生成卡片的状态。后台失败、过载或重启后，对应卡片会结束等待，交互瓦片保持可用。手动重载和 `gee_preview` 沿用同步行为。
+
+Harness 运行时启动时，插件在后台用同一个单槽缩略图池预热 Earth Engine。`layer_thumbnail_warmup` 只初始化会话，预算 15 秒，其结果不参与后端就绪判断。真实请求已先进入池时跳过预热。预热在途时，缩略图请求按原有 45 秒总预算等待可用槽位。启动预热失败后由真实请求按需初始化。诊断日志可以查看预热终态和首张缩略图的 `ee_reuse` 或 `ee_initialize`。
 
 公开 STAC 索引 7 天内为新鲜缓存。7 天至 30 天的可用索引会先返回并标记为过期，同时由独立 worker 后台刷新。冷查询和显式刷新共享同一次重建。普通请求在上游失败后等待 60 秒再触发下一次尝试，现有可用索引保留。启动预热时无需等待上游建立索引。
 

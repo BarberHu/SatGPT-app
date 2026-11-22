@@ -57,6 +57,7 @@ export class WorkerClient {
         const result = JSON.parse(this.buffer.slice(0, end));
         this.buffer = this.buffer.slice(end + 1);
         if (result.id !== this.pending?.id || this.buffer) throw new Error('Mismatched ' + this.service + ' worker response');
+        this.pending.onTiming(result.timings, result.http_requests);
         if (result.ok) this.pending.resolve(result.data);
         else this.pending.reject(new Error(result.error || this.service + ' worker failed'));
       } catch (error) {
@@ -78,12 +79,12 @@ export class WorkerClient {
     return this.terminate(this.child, new Error(this.service + ' worker is closing'));
   }
 
-  run(payload, { signal, timeout }) {
+  run(payload, { signal, timeout, onTiming }) {
     if (this.pending) return Promise.reject(new Error(this.service + ' worker slot is occupied'));
     if (signal?.aborted) return Promise.reject(new Error('Tool call cancelled'));
     const child = this.start();
     const id = randomUUID();
-    const line = JSON.stringify({ id, payload }) + '\n';
+    const line = JSON.stringify({ id, payload, ...(onTiming && { timing: true }) }) + '\n';
     return new Promise((resolve, reject) => {
       let stopping = false;
       const stop = message => {
@@ -102,6 +103,7 @@ export class WorkerClient {
       };
       this.pending = {
         id,
+        onTiming: (stages, requests) => { if (!stopping) onTiming?.(stages, requests); },
         resolve: value => { if (!stopping) finish(resolve)(value); },
         reject: error => { if (!stopping) finish(reject)(error); },
       };
