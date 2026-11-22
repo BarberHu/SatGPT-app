@@ -87,20 +87,23 @@ class UnifiedBackendTests(unittest.TestCase):
         with self.client as client:
             self.assertEqual(client.get('/api/harness/session').status_code, 200)
             self.assertEqual(client.get('/api/harness/conversation').json()['messages'], [])
-            for path, function in [('/api/maps/historical', 'get_historical_map_payload'),
-                                   ('/api/maps/flood-hotspot', 'get_flood_hotspot_map_payload')]:
-                payload = {'longitude': 100, 'latitude': 10, 'year': 2020, 'start_date': '2020-01-01'}
-                expected = {'success': True, 'data': {'layers': [{'url': 'offline-tile'}]}}
-                with patch.object(basic, function, return_value=expected) as operation:
-                    self.assertEqual(client.post(path, json=payload).json(), expected)
-                    operation.assert_called_once_with(payload)
-                with patch.object(basic, function, side_effect=ValueError('fixture error')):
-                    response = client.post(path, json=payload)
-                    self.assertEqual(response.status_code, 500)
-                    self.assertEqual(response.json(), {'detail': 'fixture error'})
-                basic.gee_service.initialized = False
-                self.assertEqual(client.post(path, json=payload).status_code, 503)
-                basic.gee_service.initialized = True
+
+    def test_preset_layer_contract_and_error_behavior(self):
+        path = '/api/preset-layers'
+        payload = {'preset_id': 'singleInundationEvent'}
+        expected = {'status': 'ready', 'layer': {'url': 'offline-tile'}}
+        with self.client as client:
+            with patch.object(basic, 'get_preset_layer_payload', return_value=expected) as operation:
+                self.assertEqual(client.post(path, json=payload).json(), expected)
+                operation.assert_called_once_with(payload)
+            with patch.object(basic, 'get_preset_layer_payload', side_effect=ValueError('fixture error')):
+                response = client.post(path, json=payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), {'detail': 'fixture error'})
+            with patch.object(basic, 'get_preset_layer_payload', side_effect=RuntimeError('fixture error')):
+                self.assertEqual(client.post(path, json=payload).status_code, 502)
+            basic.gee_service.initialized = False
+            self.assertEqual(client.post(path, json=payload).status_code, 503)
 
     def test_legacy_location_routes_are_removed(self):
         with self.client as client:
@@ -122,6 +125,11 @@ class UnifiedBackendTests(unittest.TestCase):
             ('POST', '/api/agent-raster-layers'),
             ('POST', '/api/agent-raster-download'),
             ('POST', '/api/road-network'),
+            ('GET', '/api/maps/default'),
+            ('POST', '/api/maps/unsupervised'),
+            ('POST', '/api/maps/historical'),
+            ('POST', '/api/maps/flood-hotspot'),
+            ('POST', '/api/maps/water-regime-change'),
         )
         with self.client as client:
             client.get('/api/harness/session').raise_for_status()
@@ -130,6 +138,8 @@ class UnifiedBackendTests(unittest.TestCase):
                 with self.subTest(method=method, path=path):
                     self.assertNotIn(path, schema['paths'])
                     self.assertEqual(client.request(method, path).status_code, 404)
+            self.assertNotIn('/api/ee-tiles/{layer_id}/{z}/{x}/{y}', schema['paths'])
+            self.assertEqual(client.get('/api/ee-tiles/offline/1/2/3').status_code, 404)
 
     def test_raster_file_download_remains_available(self):
         payload = {'layer_key': 'populationDensity'}
@@ -254,11 +264,11 @@ class UnifiedBackendTests(unittest.TestCase):
                         return {'success': True}
                     with patch.object(basic, '_HEAVY_OPERATION_SEMAPHORE', asyncio.Semaphore(1)), \
                             patch.object(basic, '_HEAVY_QUEUE_TIMEOUT_SECONDS', .05), \
-                            patch.object(basic, 'get_historical_map_payload', side_effect=hold):
-                        first = asyncio.create_task(client.post('/api/maps/historical', json={}))
+                            patch.object(basic, 'get_preset_layer_payload', side_effect=hold):
+                        first = asyncio.create_task(client.post('/api/preset-layers', json={}))
                         try:
                             self.assertTrue(await asyncio.to_thread(entered.wait, 2))
-                            response = await client.post('/api/maps/historical', json={})
+                            response = await client.post('/api/preset-layers', json={})
                             self.assertEqual(response.status_code, 503)
                             self.assertEqual(response.headers['retry-after'], '5')
                             self.assertEqual((await client.get('/readyz')).status_code, 200)
@@ -266,17 +276,6 @@ class UnifiedBackendTests(unittest.TestCase):
                             release.set()
                             self.assertEqual((await first).status_code, 200)
         asyncio.run(scenario())
-
-    def test_tile_proxy_uses_unified_http_service(self):
-        with self.client as client:
-            registry = basic.TileProxyServer.get_instance()
-            registry.register('offline', Mock(fetch_tile=Mock(return_value=b'png')))
-            response = client.get('/api/ee-tiles/offline/1/2/3')
-            self.assertEqual(response.content, b'png')
-            self.assertEqual(response.headers['content-type'], 'image/png')
-            self.assertEqual(client.get('/api/ee-tiles/missing/1/2/3').status_code, 404)
-        self.assertEqual(registry.tile_registry, {})
-
 
 class EnvironmentTests(unittest.TestCase):
     def test_only_unified_entry_point_owns_a_fastapi_application(self):

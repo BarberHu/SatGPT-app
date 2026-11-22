@@ -211,7 +211,7 @@ The canonical backend command is `harness\.venv\Scripts\python.exe satgpt_config
 
 Existing `.env`, credentials, `harness/state/`, browser layer records and `basic-venv/` are preserved. After stopping all old services and verifying the unified setup, you may remove only the obsolete `basic-venv/` directory yourself. Keep `harness/.venv/` and `harness/state/`. For Compose upgrades, stop the old stack first without `-v`, then use the same project name and `harness_state` volume; see [PRODUCTION.md](PRODUCTION.md).
 
-Harness keeps multi-turn local sessions, one background task executor and an independent Python tool process using the same interpreter. Basic's semaphore still limits synchronous GEE request construction/tile retrieval off the event loop; remote sensing calculations run in GEE. The former random-port tile proxy is now `/api/ee-tiles/...` in the same API. No additional HTTP listener is opened for it.
+Harness keeps multi-turn local sessions, one background task executor and an independent Python tool process using the same interpreter. Basic limits synchronous GEE requests and runs them off the HTTP event loop. The browser loads rendered preset tiles from Earth Engine and road and building tiles from Mapbox.
 
 The HTTP process, thread resources, memory and failure boundary are now shared. A backend restart interrupts both modes; local task state and business-layer caches remain in memory. One worker and one backend replica are required; local conversation files are not multi-process storage. This consolidation does not promise faster model/GEE responses or lower memory usage.
 

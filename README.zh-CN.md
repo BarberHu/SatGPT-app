@@ -211,7 +211,7 @@ Basic 包目录已改名为 `basic/`，Python 导入统一使用 `basic`。现�
 
 现有 `.env`、凭据、`harness/state/`、浏览器图层记录及 `basic-venv/` 均保留。停止旧服务并验证新启动流程后，可自行删除仅包含旧 Python 环境的 `basic-venv/`；保留 `harness/.venv/` 和 `harness/state/`。Compose 迁移先停止旧栈，不加 `-v`，继续使用原项目名及 `harness_state` 卷，详见 [PRODUCTION.md](PRODUCTION.md)。
 
-Harness 保留多轮本地会话、后台任务线程池和使用同一解释器的独立 Python 工具进程。Basic 并发信号量继续限制同步 GEE 请求构建、瓦片获取等操作，并在线程中执行；主要遥感计算仍在 GEE 云端。原来随机端口的瓦片代理并入 `/api/ee-tiles/...`，不再额外监听 HTTP 端口。
+Harness 保留多轮本地会话、后台任务线程池和使用同一解释器的独立 Python 工具进程。Basic 限制同步 GEE 请求的并发，并在线程中执行这些请求。浏览器从 Earth Engine 加载预设瓦片，从 Mapbox 加载道路和建筑瓦片。
 
 两个模式共享 HTTP 进程、线程资源、内存和故障范围，重启后端会同时中断两边。任务状态与业务图层缓存仍在内存；必须采用单 worker、单后端副本，本地会话文件不支持多进程一致性。本次合并不承诺模型/GEE 响应或内存占用一定改善。
 

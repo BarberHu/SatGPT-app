@@ -259,109 +259,6 @@ def attach_map_id(content: Dict[str, Any], key: str, map_id: Dict[str, Any]) -> 
     content[f"eeMapURL{key}"] = map_id["tile_fetcher"].url_format
 
 
-def surface_water_tool_style(image: ee.Image) -> ee.Image:
-    water_style = (
-        "<RasterSymbolizer>"
-        '<ColorMap extended="true">'
-        '<ColorMapEntry color="#FD0303" quantity="2.0" label="-1"/>'
-        '<ColorMapEntry color="#00008B" quantity="3.0" label="-1"/>'
-        "</ColorMap>"
-        "</RasterSymbolizer>"
-    )
-    return image.sldStyle(water_style)
-
-
-def get_default_map_payload() -> Dict[str, Any]:
-    default = surface_water_tool_style(
-        ee.Image("users/arjenhaag/SERVIR-Mekong/SWMT_default_2017_2")
-    ).getMapId()
-    return {
-        "eeMapId": default["mapid"],
-        "eeToken": default["token"],
-        "eeMapURL": default["tile_fetcher"].url_format,
-    }
-
-
-def get_unsupervised_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
-    unsupervised_catalog = get_basic_layer_catalog()["unsupervised"]
-    permanent_water_catalog = unsupervised_catalog["globalSurfaceWater"]
-
-    collection = (
-        ee.ImageCollection("LANDSAT/LE07/C01/T1_SR")
-        .filterBounds(region)
-        .filterDate(payload.get("time_start"), payload.get("time_end"))
-    )
-
-    def compute_ndwi(image: ee.Image) -> ee.Image:
-        ndwi = image.normalizedDifference(["B2", "B4"]).rename("NDWI")
-        return image.addBands(ndwi)
-
-    landsat_ndwi = collection.map(compute_ndwi)
-    median_ndwi = landsat_ndwi.median().clip(region)
-    gsw = ee.Image(permanent_water_catalog["dataset"])
-    occurrence = gsw.select(permanent_water_catalog["band"])
-    water_mask = occurrence.gte(permanent_water_catalog["threshold"])
-    masked_result = median_ndwi.updateMask(water_mask)
-    training = masked_result.select("NDWI").sample(
-        region=region,
-        scale=30,
-        numPixels=5000,
-    )
-
-    clusterer = ee.Clusterer.wekaKMeans(3).train(training)
-    result = masked_result.cluster(clusterer)
-    color_image = result.visualize(min=0, max=1, palette=["blue", "green", "red"])
-    mapid = color_image.getMapId()
-    return {
-        "eeMapId": mapid["mapid"],
-        "eeToken": mapid["token"],
-        "eeMapURL": mapid["tile_fetcher"].url_format,
-    }
-
-
-def _attach_supplementary_map_layers(content: Dict[str, Any], region: ee.Geometry) -> None:
-    supplementary_catalog = get_basic_layer_catalog()["supplementary"]
-    lclu = ee.ImageCollection(supplementary_catalog["landcover"]["dataset"]).first().clip(region)
-    population_density = ee.Image(
-        supplementary_catalog["populationDensity"]["dataset"]
-    ).clip(region)
-    population_density = visualize_image(
-        population_density, supplementary_catalog["populationDensity"]["visualization"]
-    )
-    soil_texture = ee.Image(supplementary_catalog["soilTexture"]["dataset"]).clip(region).select(
-        supplementary_catalog["soilTexture"]["band"]
-    )
-    soil_texture = visualize_image(
-        soil_texture, supplementary_catalog["soilTexture"]["visualization"]
-    )
-    healthcare_access = ee.Image(
-        supplementary_catalog["healthCareAccess"]["dataset"]
-    ).select(supplementary_catalog["healthCareAccess"]["band"]).clip(region)
-    healthcare_access = visualize_image(
-        healthcare_access, supplementary_catalog["healthCareAccess"]["visualization"]
-    )
-
-    attach_map_id(content, "LCLU", lclu.getMapId())
-    attach_map_id(content, "PopulationDensity", population_density.getMapId())
-    attach_map_id(content, "SoilTexture", soil_texture.getMapId())
-    attach_map_id(content, "HealthCareAccess", healthcare_access.getMapId())
-
-
-def get_historical_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
-    jrc_surface_water, jrc_surface_flood, jrc_surface_water_visual, jrc_surface_flood_visual = (
-        _build_single_inundation_images(payload, region)
-    )
-    content: Dict[str, Any] = {}
-    attach_map_id(content, "Flood", jrc_surface_flood_visual.getMapId())
-    attach_map_id(content, "Water", jrc_surface_water_visual.getMapId())
-    _attach_supplementary_map_layers(content, region)
-    return content
-
-
 def _build_single_inundation_images(payload: Dict[str, Any], region: ee.Geometry) -> tuple[ee.Image, ee.Image, ee.Image, ee.Image]:
     basic_layer_catalog = get_basic_layer_catalog()
     historical_catalog = basic_layer_catalog["historical"]
@@ -1183,19 +1080,6 @@ def get_agent_raster_download_file(payload: Dict[str, Any]):
     raise RuntimeError(last_error or "Raster download failed.")
 
 
-def get_flood_hotspot_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
-    permanent_water_layer, flood_frequency_map, permanent_water_visual, flood_visual = (
-        _build_flood_hotspot_images(payload, region)
-    )
-    content: Dict[str, Any] = {}
-    attach_map_id(content, "Flood", flood_visual.getMapId())
-    attach_map_id(content, "Water", permanent_water_visual.getMapId())
-    _attach_supplementary_map_layers(content, region)
-    return content
-
-
 def _build_flood_hotspot_images(payload: Dict[str, Any], region: ee.Geometry) -> tuple[ee.Image, ee.Image, ee.Image, ee.Image]:
     basic_layer_catalog = get_basic_layer_catalog()
     hotspot_catalog = basic_layer_catalog["hotspot"]
@@ -1237,36 +1121,3 @@ def _build_flood_hotspot_images(payload: Dict[str, Any], region: ee.Geometry) ->
     )
 
     return permanent_water_layer, flood_frequency_map, permanent_water_visual, flood_visual
-
-
-def get_water_regime_change_map_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    aoi = parse_aoi_from_payload(payload)
-    region = aoi_to_ee_geometry(aoi)
-    basic_layer_catalog = get_basic_layer_catalog()
-    regime_catalog = basic_layer_catalog["waterRegimeChange"]
-    supplementary_catalog = basic_layer_catalog["supplementary"]
-
-    transition = ee.Image(regime_catalog["jrcGlobalSurfaceWater"]["dataset"]).select(
-        regime_catalog["jrcGlobalSurfaceWater"]["band"]
-    ).clip(region)
-    transition_classes = regime_catalog["transitionClasses"]
-    regime_change = transition.remap(
-        transition_classes["sourceValues"],
-        transition_classes["displayValues"],
-    )
-    regime_change = regime_change.updateMask(regime_change.gt(0))
-    regime_change = visualize_image(regime_change, regime_catalog["visualization"])
-
-    seasonality = ee.Image(supplementary_catalog["seasonality"]["dataset"]).select(
-        supplementary_catalog["seasonality"]["band"]
-    ).clip(region)
-    seasonality = seasonality.updateMask(seasonality.gt(0))
-    seasonality = visualize_image(
-        seasonality, supplementary_catalog["seasonality"]["visualization"]
-    )
-
-    content: Dict[str, Any] = {}
-    attach_map_id(content, "RegimeChange", regime_change.getMapId())
-    attach_map_id(content, "Seasonality", seasonality.getMapId())
-    _attach_supplementary_map_layers(content, region)
-    return content

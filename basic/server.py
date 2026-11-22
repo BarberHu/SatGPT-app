@@ -8,7 +8,7 @@ from typing import Any, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.applications import Starlette
@@ -21,14 +21,8 @@ from .gee_service import gee_service, get_flood_images
 from .gee_code_generator import generate_flood_gee_code
 from harness.app.identity import owner_for
 from .business_layer_store import get_business_layer, resolve_business_layers, upsert_business_layers
-from .water_assets.tile_service import TileProxyServer
 from .flood_api_services import (
     get_agent_raster_download_file,
-    get_default_map_payload,
-    get_flood_hotspot_map_payload,
-    get_historical_map_payload,
-    get_unsupervised_map_payload,
-    get_water_regime_change_map_payload,
     thin_geojson_geometry,
 )
 logger = logging.getLogger(__name__)
@@ -130,7 +124,6 @@ async def lifespan(app: Starlette):
     finally:
         app.state.basic_initialized = False
         gee_service.initialized = False
-        TileProxyServer.get_instance().tile_registry.clear()
 
 
 router = APIRouter()
@@ -204,19 +197,6 @@ def _ensure_gee_ready() -> None:
 
 # ============== API 端点 ==============
 
-@router.get("/api/ee-tiles/{layer_id}/{z}/{x}/{y}")
-async def proxy_tile(layer_id: str, z: int, x: int, y: int):
-    fetcher = TileProxyServer.get_instance().tile_registry.get(layer_id)
-    if fetcher is None:
-        raise HTTPException(404, "Unknown layer id")
-    try:
-        content = await _run_heavy_operation(fetcher.fetch_tile, x, y, z)
-        return Response(content, media_type="image/png", headers={"Cache-Control": "no-store"})
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(500, f"Tile fetch failed: {exc}") from exc
-
 @router.get("/")
 async def root():
     """健康检查"""
@@ -237,65 +217,6 @@ async def health():
         "model_authentication": "not_checked",
         "gee_max_concurrency": _HEAVY_OPERATION_LIMIT,
     }
-
-
-@router.get("/api/maps/default")
-async def get_default_map():
-    _ensure_gee_ready()
-    try:
-        return await _run_heavy_operation(get_default_map_payload)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/maps/unsupervised")
-async def get_unsupervised_map(request: Request):
-    _ensure_gee_ready()
-    try:
-        payload = await _get_request_payload(request)
-        return await _run_heavy_operation(get_unsupervised_map_payload, payload)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/maps/historical")
-async def get_historical_map(request: Request):
-    _ensure_gee_ready()
-    try:
-        payload = await _get_request_payload(request)
-        return await _run_heavy_operation(get_historical_map_payload, payload)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/maps/flood-hotspot")
-async def get_flood_hotspot_map(request: Request):
-    _ensure_gee_ready()
-    try:
-        payload = await _get_request_payload(request)
-        return await _run_heavy_operation(get_flood_hotspot_map_payload, payload)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/maps/water-regime-change")
-async def get_water_regime_change_map(request: Request):
-    _ensure_gee_ready()
-    try:
-        payload = await _get_request_payload(request)
-        return await _run_heavy_operation(get_water_regime_change_map_payload, payload)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/api/preset-layers")

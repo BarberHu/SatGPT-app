@@ -105,7 +105,7 @@ docker compose --project-name satgpt --project-directory . --env-file .env -f sc
 
 Python 组件统一通过 `satgpt_config.py` 加载配置，按根目录解析相对路径。两份 `server.py` 只导出 `APIRouter`、处理函数及生命周期钩子；`satgpt_backend.py` 是唯一创建 FastAPI 应用的位置。统一后端通过两个模块的路由和显式组合生命周期集成，各模块初始化一次、按相反顺序关闭；初始化失败会反向清理已进入的生命周期，关闭时取消 Agent 任务、关闭 SDK/工具进程并等待线程池退出。SDK/工具 worker 在首次任务/工具调用时按需启动；就绪检查不能据此声称它们已通过外部认证。Basic 的 GEE 初始化在线程内进行，失败时健康状态为 degraded。
 
-Basic 的重任务信号量保留，主要限制同步 GEE 请求与瓦片获取的并发，遥感计算在 GEE 云端。兼容瓦片代理由统一后端的 `/api/ee-tiles/...` 提供。两个模式共享 HTTP 进程、资源和故障范围；Basic 的线程请求、Harness 的同步 HTTP 操作及 SSE 等待仍会竞争线程/连接资源。工具代码继续在独立进程执行，未引入数据库、消息队列或分布式任务框架。
+Basic 的重任务信号量限制同步 GEE 请求的并发，遥感计算在 GEE 云端。浏览器直接从 Earth Engine 或 Mapbox 加载各自的瓦片。两个模式共享 HTTP 进程、资源和故障范围；Basic 的线程请求、Harness 的同步 HTTP 操作及 SSE 等待仍会竞争线程/连接资源。工具代码继续在独立进程执行，未引入数据库、消息队列或分布式任务框架。
 
 仅支持单 worker、单后端副本。任务和业务图层缓存仍在内存，重启会丢失这些状态；已有会话文件继续保存在原位置。两边不再可以独立重启。本次合并不承诺模型速度、GEE 计算速度或内存占用改善。
 
