@@ -11,6 +11,8 @@ from pyproj import Transformer
 
 
 MAX_CELLS = 20_000_000
+# Earth Engine can account for wider intermediate pixels than the returned uint8 band.
+MAX_REQUEST_CELLS = 4_000_000
 RECIPE_LIMIT = 4_000_000
 UNKNOWN, OUTSIDE, INVALID = 255, 254, 253
 BAND = 'flood_class'
@@ -54,6 +56,23 @@ def summarize_pixels(pixels, scale, minimum_coverage):
             'observed_fraction': observed / total, 'classifiable_fraction': (dry + flood) / total}
 
 
+def read_grid_pixels(ee, image, grid):
+    width, height, scale = grid['width'], grid['height'], grid['scale']
+    rows_per_request = MAX_REQUEST_CELLS // width
+    pixels = np.empty((height, width), dtype=np.uint8)
+    for first_row in range(0, height, rows_per_request):
+        rows = min(rows_per_request, height - first_row)
+        packed = ee.data.computePixels({'expression': image, 'fileFormat': 'NUMPY_NDARRAY', 'bandIds': [BAND],
+            'grid': {'crsCode': grid['crs'], 'dimensions': {'width': width, 'height': rows},
+                     'affineTransform': {'scaleX': scale, 'scaleY': -scale, 'translateX': grid['x'],
+                                         'translateY': grid['y'] - first_row * scale}}})
+        block = packed[BAND]
+        if block.dtype != np.uint8 or block.shape != (rows, width):
+            raise ValueError('Earth Engine returned an unexpected flood grid')
+        pixels[first_row:first_row + rows] = block
+    return pixels
+
+
 def classify(ee, image, payload):
     context = payload['analysis_context']
     geometry = context.get('analysis_region')
@@ -70,12 +89,7 @@ def classify(ee, image, payload):
     canonical = image.select([0], [BAND]).reproject(crs=grid['crs'], crsTransform=transform).clip(aoi)
     classified = canonical.remap([0, 1, 2], [0, 1, 2], INVALID, BAND).rename(BAND)
     encoded = classified.unmask(UNKNOWN, False).clip(aoi).unmask(OUTSIDE, False).toUint8()
-    packed = ee.data.computePixels({'expression': encoded, 'fileFormat': 'NUMPY_NDARRAY', 'bandIds': [BAND],
-        'grid': {'crsCode': grid['crs'], 'dimensions': {'width': grid['width'], 'height': grid['height']},
-                 'affineTransform': {'scaleX': scale, 'scaleY': -scale, 'translateX': grid['x'], 'translateY': grid['y']}}})
-    pixels = np.ascontiguousarray(packed[BAND])
-    if pixels.dtype != np.uint8 or pixels.shape != (grid['height'], grid['width']):
-        raise ValueError('Earth Engine returned an unexpected flood grid')
+    pixels = read_grid_pixels(ee, encoded, grid)
     stats = summarize_pixels(pixels, scale, minimum)
     return canonical.eq(1).selfMask(), pixels, {
         'version': 1, 'geometry': geometry, 'bounds': context['bounds'], 'grid': grid, 'stats': stats,

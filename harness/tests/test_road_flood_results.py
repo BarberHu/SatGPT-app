@@ -1,19 +1,33 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, patch
 
 import numpy as np
 from shapely.geometry import box, mapping
 
 from harness.app.agent import conversation_prompt
 from harness.app.controller import TaskController
-from harness.app.flood_results import load, save, summarize_pixels
+from harness.app.flood_results import load, read_grid_pixels, save, summarize_pixels
 from harness.app.road_flood_analysis import road_source, split_line, totals
 from harness.app.road_snapshot import query_snapshot
 
 
 class FloodRoadTests(unittest.TestCase):
+    def test_large_flood_grid_reads_aligned_row_blocks(self):
+        grid = {'x': 100, 'y': 200, 'scale': 10, 'width': 2, 'height': 5, 'crs': 'EPSG:32642'}
+        expected = np.array([[0, 1], [2, 255], [254, 0], [1, 2], [0, 1]], dtype=np.uint8)
+        compute = Mock(side_effect=[{'flood_class': block} for block in (expected[:2], expected[2:4], expected[4:])])
+        ee = SimpleNamespace(data=SimpleNamespace(computePixels=compute))
+        with patch('harness.app.flood_results.MAX_REQUEST_CELLS', 4):
+            np.testing.assert_array_equal(read_grid_pixels(ee, 'image', grid), expected)
+        requests = [call.args[0]['grid'] for call in compute.call_args_list]
+        self.assertEqual([row['dimensions']['height'] for row in requests], [2, 2, 1])
+        self.assertEqual([row['affineTransform']['translateY'] for row in requests], [200, 180, 160])
+        self.assertEqual([row['affineTransform']['translateX'] for row in requests], [100, 100, 100])
+
     def test_centerline_uses_disjoint_cell_lengths(self):
         grid = {'x': 0, 'y': 10, 'scale': 10}
         pixels = np.array([[1, 1, 0, 255]], np.uint8)
