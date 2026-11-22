@@ -4,6 +4,7 @@ import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkerPool } from './worker-pool.js';
+import { CatalogCoordinator } from './catalog-coordinator.js';
 import { GEOCODE_TOOL_NAME, mountControl, OSM_TOOL_NAMES, readBinding } from './runtime-control.js';
 
 export const name = 'webgis-gee-tools';
@@ -11,11 +12,21 @@ export const inject = ['agents', 'llm', 'tools'];
 
 const root = process.env.WEBGIS_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const project = process.env.GEE_PROJECT_ID;
-const pool = new WorkerPool({
+const workerOptions = {
   python: process.env.SATGPT_HARNESS_PYTHON || 'python',
   worker: path.join(root, 'app', 'gee_worker.py'),
   cwd: root,
-}, Number(process.env.SATGPT_GEE_WORKERS || 16), Number(process.env.SATGPT_GEE_QUEUE_LIMIT || 128));
+};
+const pool = new WorkerPool(workerOptions, Number(process.env.SATGPT_GEE_WORKERS || 16), Number(process.env.SATGPT_GEE_QUEUE_LIMIT || 128));
+const catalogReaders = new WorkerPool(workerOptions, 1);
+const catalogRefreshers = new WorkerPool(workerOptions, 1);
+const catalogDir = process.env.SATGPT_CATALOG_CACHE;
+const catalog = new CatalogCoordinator(
+  (owner, payload, signal, observe) => catalogReaders.run(owner, { ...payload, operation: 'catalog_read', catalog_dir: catalogDir },
+    { signal, timeout: 10_000, observe }),
+  (owner, observe) => catalogRefreshers.run(owner, { operation: 'catalog_refresh', catalog_dir: catalogDir },
+    { timeout: 240_000, observe }),
+);
 const timingLog = process.env.SATGPT_HARNESS_TIMING_LOG;
 let timingWriteFailed = false;
 
@@ -42,8 +53,8 @@ function execute(owner, payload, signal) {
       process.stderr.write('SatGPT could not write GEE timing events.\n');
     }
   });
-  return pool.run(owner, { ...payload, project, catalog_dir: process.env.SATGPT_CATALOG_CACHE }, { signal,
-    timeout: operation === 'catalog' ? 240000 : 150000, observe });
+  if (operation === 'catalog') return catalog.search(owner, payload, { signal, observe });
+  return pool.run(owner, { ...payload, project }, { signal, timeout: 150000, observe });
 }
 
 function focusBounds(value) {
@@ -106,7 +117,7 @@ export function apply(ctx) {
 
   ctx.tools.register({
     name: 'gee_catalog',
-    description: 'Search the complete public Earth Engine STAC dataset catalog by id, title, keywords, and description. Use it to verify dataset IDs before analysis instead of guessing. First call builds a cache and may take 1-2 minutes.',
+    description: 'Search the public Earth Engine STAC dataset catalog by id, title, keywords, and description. A cached result can be marked stale while the catalog refreshes in the background. Only a cold cache or explicit refresh waits for a rebuild.',
     parameters: {
       type: 'object',
       properties: {
@@ -216,5 +227,6 @@ export function apply(ctx) {
     }
   });
   mountControl(ctx, execute);
-  ctx.on('dispose', () => pool.close());
+  if (catalogDir) execute('catalog-startup', { operation: 'catalog', limit: 1 }).catch(() => {});
+  ctx.on('dispose', () => Promise.all([pool.close(), catalogReaders.close(), catalogRefreshers.close()]));
 }

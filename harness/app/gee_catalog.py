@@ -12,6 +12,7 @@ from urllib.request import urlopen
 
 STAC_BASE = "https://earthengine-stac.storage.googleapis.com/catalog"
 STAC_TTL_SECONDS = 7 * 24 * 3600
+STAC_MAX_AGE_SECONDS = 30 * 24 * 3600
 
 
 def _get_json(url: str) -> dict | None:
@@ -22,6 +23,16 @@ def _get_json(url: str) -> dict | None:
         return None
 
 
+def _get_documents(pool, links, valid):
+    documents = list(pool.map(_get_json, links))
+    missing = [index for index, document in enumerate(documents) if not valid(document)]
+    for index, document in zip(missing, pool.map(_get_json, (links[index] for index in missing))):
+        documents[index] = document
+    if any(not valid(document) for document in documents):
+        raise RuntimeError('The public Earth Engine catalog returned an incomplete index')
+    return documents
+
+
 def _build_index() -> dict:
     root = _get_json(f"{STAC_BASE}/catalog.json")
     if not root:
@@ -29,16 +40,12 @@ def _build_index() -> dict:
     children = [link["href"] for link in root.get("links", [])
                 if link.get("rel") == "child" and link.get("href")]
     with ThreadPoolExecutor(max_workers=24) as pool:
-        catalogs = list(pool.map(_get_json, children))
-    dataset_links = [link["href"] for catalog in catalogs if catalog
-                     for link in catalog.get("links", [])
-                     if link.get("rel") == "child" and link.get("href")]
-    with ThreadPoolExecutor(max_workers=24) as pool:
-        documents = list(pool.map(_get_json, dataset_links))
+        catalogs = _get_documents(pool, children, lambda value: isinstance(value, dict) and isinstance(value.get('links'), list))
+        dataset_links = [link["href"] for catalog in catalogs for link in catalog["links"]
+                         if link.get("rel") == "child" and link.get("href")]
+        documents = _get_documents(pool, dataset_links, lambda value: isinstance(value, dict) and bool(value.get('id')))
     items = []
     for document in documents:
-        if not document or not document.get("id"):
-            continue
         items.append({
             "id": document["id"],
             "title": document.get("title") or document["id"],
@@ -53,29 +60,62 @@ def _build_index() -> dict:
     return {"fetched_at": int(time.time()), "count": len(items), "items": items}
 
 
+def index_path(cache_dir):
+    cache_dir = cache_dir or Path(__file__).resolve().parent.parent / "state" / "catalog"
+    return cache_dir / "stac-index.json"
+
+
+def valid_index(index):
+    if not isinstance(index, dict):
+        return False
+    rows = index.get('items')
+    return (type(index.get('fetched_at')) is int and isinstance(rows, list) and bool(rows)
+            and index.get('count') == len(rows) and all(
+                isinstance(item, dict) and all(isinstance(item.get(key), str) for key in ('id', 'title'))
+                and isinstance(item.get('text', ''), str)
+                and isinstance(item.get('keywords'), list) and all(isinstance(word, str) for word in item['keywords'])
+                for item in rows))
+
+
+def rebuild(cache_dir=None):
+    index = _build_index()
+    if not valid_index(index):
+        raise ValueError('The rebuilt Earth Engine catalog is invalid')
+    cache_file = index_path(cache_dir)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = cache_file.parent / f"stac-index-{uuid.uuid4().hex}.tmp"
+    try:
+        temporary.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(cache_file)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {'fetched_at': index['fetched_at'], 'catalog_size': index['count']}
+
+
+def read_cached(query='', limit=20, dataset_type=None, cache_dir=None):
+    try:
+        index = json.loads(index_path(cache_dir).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {'cache_state': 'missing'}
+    if not valid_index(index):
+        return {'cache_state': 'missing'}
+    age = max(0, int(time.time()) - index['fetched_at'])
+    if age >= STAC_MAX_AGE_SECONDS:
+        return {'cache_state': 'missing'}
+    return {**search_index(index, query, limit, dataset_type), 'rebuilt': False,
+            'cache_state': 'stale' if age >= STAC_TTL_SECONDS else 'fresh', 'cache_age_seconds': age}
+
+
 def search(query: str = "", limit: int = 20, dataset_type: str | None = None,
            refresh: bool = False, cache_dir: Path | None = None) -> dict:
-    cache_dir = cache_dir or Path(__file__).resolve().parent.parent / "state" / "catalog"
-    cache_file = cache_dir / "stac-index.json"
-    index = None
-    if not refresh and cache_file.is_file():
-        try:
-            candidate = json.loads(cache_file.read_text(encoding="utf-8"))
-            if (int(time.time()) - int(candidate.get("fetched_at", 0)) < STAC_TTL_SECONDS
-                    and candidate.get("items") and "text" in candidate["items"][0]):
-                index = candidate
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-    rebuilt = index is None
-    if rebuilt:
-        index = _build_index()
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        temporary = cache_dir / f"stac-index-{uuid.uuid4().hex}.tmp"
-        try:
-            temporary.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-            temporary.replace(cache_file)
-        finally:
-            temporary.unlink(missing_ok=True)
+    result = read_cached(query, limit, dataset_type, cache_dir)
+    if refresh or result['cache_state'] != 'fresh':
+        rebuild(cache_dir)
+        result = {**read_cached(query, limit, dataset_type, cache_dir), 'rebuilt': True}
+    return result
+
+
+def search_index(index, query, limit, dataset_type):
     terms = [term for term in str(query).lower().replace(",", " ").split() if term]
     scored = []
     for item in index["items"]:
@@ -99,4 +139,4 @@ def search(query: str = "", limit: int = 20, dataset_type: str | None = None,
     result = [{key: value for key, value in item.items() if key != "text"}
               for _, item in scored[:limit]]
     return {"total": len(scored), "returned": len(result), "catalog_size": index["count"],
-            "rebuilt": rebuilt, "matches": result}
+            "matches": result}

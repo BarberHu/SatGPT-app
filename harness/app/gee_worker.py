@@ -238,12 +238,15 @@ def jsonable(value):
 
 def execute(payload: dict) -> dict:
     operation = payload.get("operation")
-    if operation == "catalog":
-        from gee_catalog import search
-
+    if operation in {"catalog", "catalog_read", "catalog_refresh"}:
+        from gee_catalog import read_cached, rebuild, search
         cache_dir = Path(payload['catalog_dir']) if payload.get('catalog_dir') else None
-        return search(payload.get("query", ""), payload.get("limit", 20),
-                      payload.get("type"), bool(payload.get("refresh")), cache_dir=cache_dir)
+        if operation == "catalog_refresh":
+            return rebuild(cache_dir)
+        query = (payload.get("query", ""), payload.get("limit", 20), payload.get("type"))
+        if operation == "catalog_read":
+            return read_cached(*query, cache_dir=cache_dir)
+        return search(*query, bool(payload.get("refresh")), cache_dir=cache_dir)
     if operation == "check":
         code = payload.get("code")
         try:
