@@ -125,6 +125,31 @@ test('view model keeps committed reasoning separate from final answer', () => {
   expect(model.items[0].layers[0].id).toBe('job-0');
 });
 
+test('development usage and estimated cost render once below the answer and survive switching to history', async () => {
+  const usage = { status: 'complete', input_tokens: 9_825, output_tokens: 74, total_tokens: 9_899,
+    estimated_cost: { currency: 'USD', amount: '0.001568755', reference_route: 'DeepSeek' } };
+  const task = { id: 'job', status: 'completed', output: { message: 'Test answer' }, dev_turn_usage: usage };
+  const history = { id: 'reply', role: 'assistant', job_id: 'job', content: 'Test answer', dev_turn_usage: usage };
+  const render = messages => act(async () => root.render(<MessageList items={chatViewModel(messages, task, null).items} />));
+  for (const messages of [[], [history]]) {
+    await render(messages);
+    const rows = node.querySelectorAll('[aria-label="Turn usage"]');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('9,899 tokens (9,825 input, 74 output)');
+    expect(rows[0].textContent).toContain('Estimated cost $0.001569 (DeepSeek list rates)');
+    expect(node.querySelector('.agent-markdown').compareDocumentPosition(rows[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }
+  await render([{ ...history, dev_turn_usage: { ...usage, status: 'partial', estimated_cost: undefined } }]);
+  expect(node.querySelector('[aria-label="Turn usage"]').textContent).toContain('Partial usage');
+  expect(node.querySelector('[aria-label="Turn usage"]').textContent).toContain('Estimated cost unavailable');
+  await render([{ ...history, dev_turn_usage: { ...usage, estimated_cost: undefined } }]);
+  expect(node.querySelector('[aria-label="Turn usage"]').textContent).toContain('Estimated cost unavailable');
+  await render([{ ...history, dev_turn_usage: { status: 'unavailable' } }]);
+  expect(node.querySelector('[aria-label="Turn usage"]').textContent).toContain('Token usage unavailable');
+  await render([{ ...history, dev_turn_usage: undefined }]);
+  expect(node.querySelector('[aria-label="Turn usage"]')).toBeNull();
+});
+
 test('live reasoning is available on demand without covering the answer', async () => {
   const { default: ChatMessage } = await import('./ChatMessage');
   await act(async () => root.render(<ChatMessage message={{ id: 'task', role: 'assistant', text: 'answer',

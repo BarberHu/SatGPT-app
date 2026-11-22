@@ -14,6 +14,7 @@ set "SATGPT_SERVICE_HOST=%AGENT_HOST%"
 set "SATGPT_PUBLIC_ORIGIN=http://%FRONTEND_HOST%:%FRONTEND_PORT%"
 set "SATGPT_COOKIE_SECURE=false"
 set "SATGPT_HARNESS_STATE_DIR=%ROOT_DIR%\harness\state\dev-multiuser"
+set "SATGPT_DEV_TURN_USAGE=1"
 
 if not "%~1"=="" if /I not "%~1"=="--frontend-only" (
     echo Usage: start_windows.bat [--frontend-only]

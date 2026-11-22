@@ -1,7 +1,8 @@
-const defaultStyle = import.meta.env.REACT_APP_MAPBOX_STYLE_URL;
+const runtimeConfig = (typeof globalThis !== 'undefined' && globalThis.__SATGPT_RUNTIME_CONFIG__) || {};
+const defaultStyle = runtimeConfig.REACT_APP_MAPBOX_STYLE_URL || import.meta.env.REACT_APP_MAPBOX_STYLE_URL;
 
 export const mapOptions = {
-  token: import.meta.env.REACT_APP_MAPBOX_ACCESS_TOKEN,
+  token: runtimeConfig.REACT_APP_MAPBOX_ACCESS_TOKEN || import.meta.env.REACT_APP_MAPBOX_ACCESS_TOKEN,
   style: defaultStyle,
   basemaps: [
     { id: 'default', label: 'Default', style: defaultStyle },

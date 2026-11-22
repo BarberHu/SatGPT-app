@@ -38,7 +38,8 @@ class ConversationTests(unittest.TestCase):
         empty = {'conversation_id': None, 'messages': [], 'active_task': None}
         for _ in range(3):
             self.assertEqual(self.a.get(API+'/conversation').json(), empty)
-        for body in (task_body(None, '   '), task_body(None, bounds=[1, 0, 0, 1]),
+        for body in (task_body(None, ''), task_body(None, '   '), task_body(None, 'a' * 2001),
+                     task_body(None, bounds=[1, 0, 0, 1]),
                      task_body(None, analysis_region={'type': 'Point', 'coordinates': [1, 1]})):
             self.assertEqual(self.a.post(API+'/tasks', json=body).status_code, 422)
         with patch.object(self.controller, '_require_available', side_effect=AdmissionError('runtime_unavailable', 'Offline', 503)):
@@ -50,6 +51,19 @@ class ConversationTests(unittest.TestCase):
         with self.controller.store.connect() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM conversations').fetchone()[0], 0)
             self.assertEqual(db.execute('SELECT count(*) FROM tasks').fetchone()[0], 0)
+
+    def test_short_messages_are_accepted_and_saved(self):
+        cid = None
+        for prompt in ('好', '继续', ' 继续 '):
+            with self.subTest(prompt=prompt):
+                response = self.a.post(API+'/tasks', json=task_body(cid, prompt))
+                self.assertEqual(response.status_code, 202, response.text)
+                job = response.json()
+                cid = job['conversation_id']
+                self.assertEqual(wait_for_task(self.a, job['id'])['status'], 'completed')
+                history = self.a.get(f'{API}/conversations/{cid}').json()['messages']
+                self.assertEqual((history[-2]['role'], history[-2]['content']), ('user', prompt.strip()))
+                self.assertEqual((history[-1]['role'], history[-1]['content']), ('assistant', 'Offline answer'))
 
     def test_first_message_retry_reuses_conversation_and_deleting_it_leaves_no_draft_record(self):
         self.controller.execution_slots = 0

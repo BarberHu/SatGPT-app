@@ -56,13 +56,35 @@ test('per-layer visibility, opacity, ordering, focus and removal use the shared 
  await click('Landslide');await click('Slope Steepness');await click('Load layer');await flush();
  await act(async()=>node.querySelector('[aria-label="Hide Slope Steepness"]').click());
  expect(state.scope.setVisibility).toHaveBeenCalledWith(expect.any(String),false);
+ const card = node.querySelector('[aria-label="Layer Slope Steepness"]');
+ const locate = card.querySelector('[aria-label="Locate layer"]');
+ expect(locate.nextElementSibling.getAttribute('aria-label')).toBe('Show Slope Steepness');
+ expect(card.querySelector('.preset-layer-details').hidden).toBe(true);
+ await act(async () => locate.click());
+ expect(state.scope.setView).toHaveBeenCalledWith({ bounds: [100, 10, 101, 11] });
+ expect(card.querySelector('.preset-layer-details').hidden).toBe(true);
  await click('Details for Slope Steepness');
+ expect(card.querySelectorAll('[aria-label="Locate layer"]')).toHaveLength(1);
  const slider=node.querySelector('[aria-label="Opacity for Slope Steepness"]');
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(slider,'0.35');slider.dispatchEvent(new Event('input',{bubbles:true}));});
  expect(state.scope.setOpacity).toHaveBeenCalledWith(expect.any(String),.35);
- await click('Locate layer');expect(state.scope.setView).toHaveBeenCalled();
  await click('Move down');expect(state.scope.setOrder.mock.lastCall[0]).toHaveLength(2);
  await click('Remove layer');expect(node.querySelectorAll('.preset-layer-card')).toHaveLength(1);expect(state.scope.removeLayer).toHaveBeenCalled();
+});
+
+test('a failed preset stays locatable at its original grid with details closed', async () => {
+  state.request.mockRejectedValueOnce(new Error('Generation failed'));
+  await act(async () => root.render(<AppProvider><Probe /></AppProvider>));
+  await selectGrid(100);
+  await click('Load layer');
+  await flush();
+  await selectGrid(101);
+
+  const card = node.querySelector('[aria-label="Layer JRC annual water classification"]');
+  expect(card.querySelector('.preset-layer-warning').textContent).toContain('Generation failed');
+  expect(card.querySelector('.preset-layer-details').hidden).toBe(true);
+  await act(async () => card.querySelector('[aria-label="Locate layer"]').click());
+  expect(state.scope.setView).toHaveBeenCalledWith({ bounds: [100, 10, 101, 11] });
 });
 
 test('the layer library has no study area tools and enables loading after grid selection', async () => {

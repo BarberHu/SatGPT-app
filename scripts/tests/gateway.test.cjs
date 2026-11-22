@@ -304,4 +304,14 @@ test('production gateway preserves Basic and Harness contracts', { timeout: 2000
     assert.equal(legacy.headers.etag, undefined);
     assert.deepEqual(legacy.body, updated);
   });
+
+  await t.test('serves public runtime Mapbox config without exposing backend secrets', async t => {
+    const response = await getRawResponse(`${base}/runtime-config.js`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers['content-type'], /javascript/);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    const text = response.body.toString('utf8');
+    assert.match(text, /window\.__SATGPT_RUNTIME_CONFIG__\s*=/);
+    assert.doesNotMatch(text, /DEEPSEEK_API_KEY|AIHUBMIX_API_KEY|OPENAI_API_KEY|PRIVATE KEY/i);
+  });
 });

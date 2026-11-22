@@ -45,7 +45,7 @@ Owner = Annotated[str, Depends(owner_for)]
 
 class TaskRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    prompt: str = Field(min_length=3, max_length=2000)
+    prompt: str = Field(min_length=1, max_length=2000)
     bounds: list[float] = Field(min_length=4, max_length=4)
     conversation_id: str | None = Field(default=None, max_length=100)
     request_id: str = Field(pattern=r'^[A-Za-z0-9_-]{16,80}$')

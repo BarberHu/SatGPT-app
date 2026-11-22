@@ -190,7 +190,7 @@
 .harness-app .agent-map-context { position: absolute; display: flex; gap: 7px; align-items: center; top: auto; bottom: 76px; left: 16px; max-width: calc(100% - 88px); box-sizing: border-box; background: #fffffff0; padding: 7px 10px; border: 1px solid var(--satgpt-ui-border); border-radius: 7px; color: var(--satgpt-ui-muted); font-size: 12px; pointer-events: none; box-shadow: var(--satgpt-ui-shadow); overflow-wrap: anywhere; }
 .harness-app .agent-map-layer { border: 1px solid #e7ebf1; border-radius: 9px; padding: 8px; background: var(--satgpt-ui-canvas); }
 .harness-app .agent-map-layer + .agent-map-layer { margin-top: 8px; }
-.harness-app .agent-layer-heading { display: grid; grid-template-columns: 40px minmax(0, 1fr) 30px 28px; align-items: start; gap: 7px 8px; min-width: 0; }
+.harness-app .agent-layer-heading { display: grid; grid-template-columns: 40px minmax(0, 1fr) max-content; align-items: start; gap: 7px 8px; min-width: 0; }
 .harness-app .agent-layer-thumbnail { display: block; width: 40px; height: 40px; grid-row: 1 / 3; flex: none; border: 1px solid #e4e8ee; border-radius: 6px; background: #f4f6f8; overflow: hidden; padding: 0; }
 .harness-app .agent-layer-thumbnail img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .harness-app .agent-layer-thumbnail:focus-visible, .harness-app .agent-layer-eye:focus-within { outline: 2px solid #5574b5; outline-offset: 3px; }
@@ -201,11 +201,12 @@
 .harness-app .agent-layer-meta > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .harness-app .agent-layer-meta > span:first-child { max-width: 100%; }
 .harness-app .agent-layer-meta > span[aria-hidden] { display: none; }
-.harness-app .agent-layer-eye { grid-column: 3; grid-row: 1; display: flex; align-items: center; justify-content: center; position: relative; color: #5576bc; width: 30px; height: 32px; border-radius: 6px; flex: none; cursor: pointer; }
+.harness-app .agent-layer-controls { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 8px; }
+.harness-app .agent-layer-eye { display: flex; align-items: center; justify-content: center; position: relative; color: #5576bc; width: 30px; height: 32px; border-radius: 6px; flex: none; cursor: pointer; }
 .harness-app .agent-layer-eye:hover { background: #f0f4fb; }
 .harness-app .agent-layer-eye input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .harness-app .agent-map-layer.is-hidden .agent-layer-eye { color: #a1a8b5; }
-.harness-app .agent-layer-more { grid-column: 4; grid-row: 1; flex: none; width: 28px; height: 32px; padding: 0; color: #7b869a; }
+.harness-app :is(.agent-layer-locate, .agent-layer-more) { flex: none; width: 28px; height: 32px; padding: 0; color: #7b869a; }
 .harness-app .agent-layer-legend { grid-column: 2 / -1; grid-row: 2; min-width: 0; margin: 0; color: var(--satgpt-ui-muted); font-size: 11px; }
 .harness-app .agent-layer-legend-title { display: block; margin-bottom: 3px; }
 .harness-app .agent-layer-scale { width: 100%; }
@@ -284,3 +285,5 @@
 .harness-app .agent-region-tools p { margin: 0 0 8px; font-size: 12px; line-height: 1.5; }
 .harness-app .agent-region-tools > div { display: flex; gap: 8px; }
 .harness-app .agent-message-scope { display: block; margin-top: 6px; font-size: 10px; opacity: .7; }
+
+.harness-app .agent-turn-usage { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: 12px; opacity: .74; font-variant-numeric: tabular-nums; }

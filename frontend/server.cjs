@@ -211,6 +211,25 @@ function serveStatic(req, res) {
   }
 }
 
+function serveRuntimeConfig(req, res) {
+  const payload = {};
+  const mapboxToken = String(env.REACT_APP_MAPBOX_ACCESS_TOKEN || '').trim();
+  if (mapboxToken && !mapboxToken.startsWith('sk.')) {
+    payload.REACT_APP_MAPBOX_ACCESS_TOKEN = mapboxToken;
+  }
+  const mapboxStyle = String(env.REACT_APP_MAPBOX_STYLE_URL || '').trim();
+  if (mapboxStyle) {
+    payload.REACT_APP_MAPBOX_STYLE_URL = mapboxStyle;
+  }
+  const body = `window.__SATGPT_RUNTIME_CONFIG__ = ${JSON.stringify(payload)};\n`;
+  setSecurityHeaders(res);
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', mimeTypes['.js']);
+  res.setHeader('Content-Length', Buffer.byteLength(body));
+  res.writeHead(200);
+  res.end(req.method === 'HEAD' ? undefined : body);
+}
+
 const server = http.createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
 
@@ -224,6 +243,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (!['GET', 'HEAD'].includes(req.method)) {
     res.writeHead(405, { Allow: 'GET, HEAD' }).end();
+    return;
+  }
+  if (pathname === '/runtime-config.js') {
+    serveRuntimeConfig(req, res);
     return;
   }
   serveStatic(req, res);
