@@ -124,6 +124,14 @@ test('shows annotated raster metrics and distinguishes a valid zero from missing
   ]);
 });
 
+test('draws Agent OSM roads red and highlights inundated segments with a wider yellow stroke', () => {
+  const road = physical('roads');
+  expect(map.getPaintProperty(road, 'line-color')).toEqual([
+    'match', ['get', 'analysis_status'], 'hit', '#FFEA00', 'no_data', '#757575', '#EF3338',
+  ]);
+  expect(map.getPaintProperty(road, 'line-width')).toEqual(['match', ['get', 'analysis_status'], 'hit', 4, 3]);
+});
+
 test('moves labels with geometry, restores them after a style change and cleans up on removal and teardown', () => {
   const move = vi.spyOn(map, 'moveLayer');
   scope.setOrder(['roads', 'pois', 'buildings']);

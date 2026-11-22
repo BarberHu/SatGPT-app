@@ -154,13 +154,18 @@ export class MapboxAdapter {
       this.map.addSource(sourceId, { type: 'geojson', data: layer.dataUrl ? new URL(publicPath(layer.dataUrl), window.location.origin).href : layer.data,
         ...(layer.dataUrl && { attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>' }) });
       if (layer.dataUrl) {
+        const analysisStatus = ['get', 'analysis_status'];
+        const agentRoad = layer.osmInteractive && layer.renderAs === 'line';
         const style = {
-          line: { color: '#1685a9', 'line-width': 2.5 },
+          line: agentRoad
+            ? { color: '#EF3338', 'line-width': ['match', analysisStatus, 'hit', 4, 3] }
+            : { color: '#1685a9', 'line-width': 2.5 },
           circle: { color: '#a9387e', 'circle-radius': 5, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1 },
           fill: { color: '#d58620', 'fill-outline-color': '#9c5d12' },
         }[layer.renderAs];
         const { color, ...paint } = style;
-        const featureColor = ['match', ['get', 'analysis_status'], 'hit', '#c53d24', 'no_data', '#757575', color];
+        const hitColor = agentRoad ? '#FFEA00' : '#c53d24';
+        const featureColor = ['match', analysisStatus, 'hit', hitColor, 'no_data', '#757575', color];
         const geometry = { line: 'LineString', circle: 'Point', fill: 'Polygon' }[layer.renderAs];
         this.map.addLayer({ id: layerId, source: sourceId, type: layer.renderAs,
           filter: ['==', ['geometry-type'], geometry],
