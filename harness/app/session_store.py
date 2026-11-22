@@ -9,6 +9,8 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .geo_index import SCHEMA as GEO_INDEX_SCHEMA, backfill as backfill_geo_index
+
 ACTIVE = frozenset({'queued', 'starting', 'running', 'cancelling', 'cleaning'})
 _ACTIVE_SQL = ', '.join(f"'{status}'" for status in sorted(ACTIVE))
 TERMINAL = frozenset({'completed', 'failed', 'cancelled', 'interrupted'})
@@ -56,6 +58,9 @@ class SessionStore:
                 CREATE INDEX IF NOT EXISTS tasks_conversation ON tasks(conversation_id);
                 CREATE INDEX IF NOT EXISTS tasks_waiting ON tasks(status) WHERE status='queued';
             """)
+            db.executescript(GEO_INDEX_SCHEMA)
+            if not any(row['name'] == 'recover_context' for row in db.execute('PRAGMA table_info(conversations)')):
+                db.execute('ALTER TABLE conversations ADD COLUMN recover_context INTEGER NOT NULL DEFAULT 0')
         with self.connect(write=True) as db:
             unfinished = f'SELECT id, owner, conversation_id, receipt FROM tasks WHERE status IN ({_ACTIVE_SQL}) LIMIT 100'
             while rows := db.execute(unfinished).fetchall():
@@ -74,6 +79,7 @@ class SessionStore:
 
             db.execute(f'CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_active_per_conversation '
                        f'ON tasks(conversation_id) WHERE status IN ({_ACTIVE_SQL})')
+            backfill_geo_index(db, self.path)
 
     @contextmanager
     def connect(self, *, write=False):

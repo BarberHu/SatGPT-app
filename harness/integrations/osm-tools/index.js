@@ -8,8 +8,11 @@ const root = process.env.WEBGIS_ROOT || fileURLToPath(new URL('../../', import.m
 const sharedDir = new URL('.', import.meta.url).pathname.endsWith('/satgpt-osm-tools/')
   ? '../webgis-gee-tools/' : '../gee-tools/';
 const shared = file => new URL(sharedDir + file, import.meta.url).href;
-const { OSM_TOOL_NAMES, readBinding } = await import(shared('runtime-control.js'));
+const { OSM_TOOL_NAMES, readBinding, floodResultFor } = await import(shared('runtime-control.js'));
 const { WorkerPool } = await import(shared('worker-pool.js'));
+
+const summaryFields = ['status', 'count', 'by_category', 'source', 'source_mode', 'fallback_reason', 'source_version',
+  'osm_data_time', 'attribution', 'license_url', 'skipped_geometry', 'snapshot_skipped_geometry', 'data_ref'];
 
 const definitions = [
   { name: OSM_TOOL_NAMES[0], kind: 'roads', renderAs: 'line', title: 'OSM roads',
@@ -25,11 +28,14 @@ export function registerTools(ctx, pool, bindingFor = readBinding) {
   for (const { name, kind, renderAs, title, description, categories } of definitions) {
     ctx.tools.register({
       name,
-      description: description + ' within the current task map area. Set show_on_map when the user asks for a map. Results describe the current OSM dataset.',
+      description: description + ' within the current task map area. Set show_on_map when the user asks for a map.'
+        + (kind === 'roads' ? ' Pass flood_data_ref from geo_data_search to query the original flood area and return indexed roads. flood_ref is a legacy option.' : ''),
       parameters: {
         type: 'object',
         properties: {
           ...(categories && { category: { type: 'string', enum: categories } }),
+          ...(kind === 'roads' && { flood_ref: { type: 'string', pattern: '^[a-f0-9]{32}$' },
+            flood_data_ref: { type: 'string', pattern: '^g_[a-f0-9]{32}$' } }),
           show_on_map: { type: 'boolean', description: 'Show the resulting layer when the task completes.' },
         },
         ...(kind === 'pois' && { required: ['category'] }),
@@ -49,17 +55,28 @@ export function registerTools(ctx, pool, bindingFor = readBinding) {
         const binding = id && bindingFor(String(id));
         if (!binding) throw new Error('OSM tools require an active SatGPT task.');
         const { owner_id, task_id, run_id, analysis_region, bounds, artifact_dir } = binding;
+        const floodRef = kind === 'roads' ? args.flood_ref : undefined;
+        const indexedFlood = kind === 'roads' ? args.flood_data_ref : undefined;
+        if (indexedFlood && floodRef) throw new Error('Provide one flood reference');
+        const flood = floodRef === undefined ? null : floodResultFor(binding, floodRef);
         const category = args.category ?? (kind === 'roads' ? 'major' : null);
-        const value = await pool.run(owner_id, { kind, category, analysis_region, bounds, artifact_dir },
+        const value = await pool.run(owner_id, { kind, category, artifact_dir,
+          analysis_region: flood?.analysis_region ?? analysis_region, bounds: flood?.bounds ?? bounds,
+          ...(binding.geo_context && { geo_context: binding.geo_context, analysis_aoi: binding.analysis_aoi }),
+          ...(indexedFlood && { flood_data_ref: indexedFlood }),
+          ...(flood && { flood_ref: floodRef, selected_region: analysis_region }) },
           { signal: exec.signal, timeout: 22_000 });
         if (exec.signal?.aborted) throw new Error('Tool call cancelled');
         if (value.error) return { summary: { status: value.error.code, message: value.error.message } };
-        if (!value.artifact_ref) return { summary: value.summary };
+        const summary = Object.fromEntries(summaryFields.filter(key => Object.hasOwn(value.summary, key))
+          .map(key => [key, value.summary[key]]));
+        if (!value.artifact_ref) return { summary };
         const visible = args.show_on_map === true;
         return {
-          summary: { ...value.summary, map_layer: visible ? 'show_on_completion' : 'available' },
+          summary: { ...summary, artifact_ref: value.artifact_ref,
+            map_layer: visible ? 'show_on_completion' : 'available' },
           layer: { kind: 'geojson', renderAs, name: category ? title + ' · ' + category.replaceAll('_', ' ') : title,
-            artifact_ref: value.artifact_ref, bounds: value.bounds ?? bounds, visible,
+            artifact_ref: value.artifact_ref, bounds: value.bounds ?? flood?.bounds ?? bounds, visible,
             metadata: { source: [value.summary.source, value.summary.attribution].filter(Boolean).join(' · '), observed_at: value.summary.osm_data_time,
               description: `${value.summary.count} OSM objects in the task area.` } },
           reference: { task_id, run_id },

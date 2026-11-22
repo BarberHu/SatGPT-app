@@ -18,21 +18,55 @@ test('GEE plugin requires a native bound session and delegates checks to the Pyt
   }));
   const { apply } = await import('../integrations/gee-tools/index.js');
   const registered = [];
+  const sections = [];
   const disposers = [];
+  let onAgentCreated;
   let guard;
   apply({ tools: { register: tool => registered.push(tool), guard: callback => { guard = callback; } },
-    on: (event, callback) => { if (event === 'dispose') disposers.push(callback); },
+    systemPrompt: { section: section => sections.push(section) },
+    on: (event, callback) => {
+      if (event === 'dispose') disposers.push(callback);
+      if (event === 'agent/created') onAgentCreated = callback;
+    },
     agents: { get: () => undefined } });
   try {
+    assert.equal(sections.length, 1);
+    assert.equal(sections[0].name, 'satgpt:analysis');
+    assert.match(sections[0].text, /Wait for explicit approval of that plan/);
     const check = registered.find(tool => tool.name === 'gee_check');
+    const evaluate = registered.find(tool => tool.name === 'gee_eval');
     const layer = registered.find(tool => tool.name === 'gee_layer');
     const exec = { agent: { session: { id } } };
     assert.ok(layer.parameters.properties.bounds);
     await assert.rejects(check.execute({ code: 'result=1' }, {}), /No active SatGPT run/);
+    let visible;
+    onAgentCreated({ agent: { ctx: { tools: { restrict: rule => { visible = rule.allow; } } } } });
+    assert.deepEqual(visible, [...registered.map(tool => tool.name), 'skill']);
+    const loadSkill = name => ({ ...exec, name: 'skill', arguments: { name } });
+    assert.equal(guard(loadSkill('flood-extent')), undefined);
+    assert.equal(guard(loadSkill('flood-exposure')), undefined);
+    assert.equal(guard(loadSkill('sentinel2-latest')), undefined);
+    assert.equal(guard(loadSkill('rainfall-analysis')), undefined);
+    assert.match(guard(loadSkill('unrelated-skill')), /unavailable/);
+    assert.match(guard({ ...exec, name: 'skill' }), /unavailable/);
+    assert.match(guard({ ...loadSkill('flood-extent'), agent: { session: { id: 'unbound' } } }), /unavailable/);
     assert.match(guard({ ...exec, name: 'terminal' }), /unavailable/);
     assert.equal(guard({ ...exec, name: 'gee_check' }), undefined);
     assert.equal((await check.execute({ code: 'result = ee.Image(1)' }, exec)).valid, true);
     assert.equal((await check.execute({ code: 'import os\nresult = 1' }, exec)).valid, false);
+    const code = 'result = image.reduceRegion(reducer, analysis_region, 30, None, 1e9)';
+    const invalid = await check.execute({ code }, exec);
+    assert.equal(invalid.valid, false);
+    assert.match(invalid.errors[0], /crsTransform.*line 1.*maxPixels/);
+    await assert.rejects(evaluate.execute({ code }, exec), error =>
+      error.message === `ValueError: ${invalid.errors[0]}`);
+    const dates = 'scenes = ee.ImageCollection("CHIRPS").filterBounds(analysis_region)\n'
+      + 'result = scenes.map(lambda image: ee.Date(image.get("system:time_start")).format("YYYY-MM-dd"))';
+    const invalidMap = await check.execute({ code: dates }, exec);
+    assert.equal(invalidMap.valid, false);
+    assert.match(invalidMap.errors[0], /ImageCollection\.map.*line 2.*ee\.List\.map/);
+    await assert.rejects(evaluate.execute({ code: dates }, exec), error =>
+      error.message === `ValueError: ${invalidMap.errors[0]}`);
     await assert.rejects(layer.execute({ name: 'Wrong location', code: 'result = ee.Image(1)',
       bounds: [119, 31, 114, 35] }, exec), /bounds/);
   } finally {

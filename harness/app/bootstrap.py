@@ -1,4 +1,4 @@
-"""Install the local GEE tool bundle into the private Harness SDK profile."""
+"""Install SatGPT tools and skills into the private Harness SDK home."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ BUNDLES = {"@local/webgis-gee-tools": "gee-tools",
            "@local/satgpt-assistant-stream": "assistant-stream",
            "@local/satgpt-osm-tools": "osm-tools",
            "@local/satgpt-geocoding-tools": "geocoding-tools"}
+SKILLS = ("flood-extent", "flood-exposure", "sentinel2-latest", "rainfall-analysis")
 
 
 def ensure_plugin(home: Path) -> None:
@@ -33,3 +34,12 @@ def ensure_plugin(home: Path) -> None:
         if bundle not in bundles:
             bundles.append(bundle)
     profile.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    for name in SKILLS:
+        source = project / "skills" / name / "SKILL.md"
+        content = source.read_bytes()
+        destination = home / "skills" / name / "SKILL.md"
+        if destination.is_file() and destination.read_bytes() == content:
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)

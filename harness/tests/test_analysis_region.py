@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from harness.app.agent import conversation_prompt
 from harness.app.analysis_region import validate_analysis_region
 from harness.app.controller import TaskController
 from harness.app.gee_worker import run_code, execute
@@ -72,7 +71,8 @@ class AnalysisRegionTests(unittest.TestCase):
                 prompt, context = captured[0]
                 self.assertNotEqual(context['session_id'], cid)
                 self.assertEqual(context['analysis_region'], TRIANGLE)
-                self.assertIn(json.dumps(TRIANGLE), prompt)
+                self.assertNotIn(json.dumps(TRIANGLE), prompt)
+                self.assertIn('the explicitly confirmed analysis polygon', prompt)
                 other = new_chat(client)
                 sent = client.post('/api/harness/tasks', json=task_body(other, 'Knowledge question')).json()
                 self.assertIsNone(wait_for_task(client, sent['id'])['analysis_region'])
@@ -105,14 +105,17 @@ class AnalysisRegionTests(unittest.TestCase):
     def test_eval_worker_uses_exact_geometry(self):
         with patch('harness.app.gee_worker.earth_engine', return_value=GeometryEE):
             result = execute({'operation':'eval', 'project':'offline',
-                              'analysis_context':{'analysis_region':TRIANGLE}, 'code':'result = analysis_region'})
-        self.assertEqual(result, {'result':{'exact':TRIANGLE}})
+                              'analysis_context':{'analysis_region':TRIANGLE},
+                              'code':'result = analysis_region["exact"] == analysis_region_geojson'})
+            with self.assertRaisesRegex(ValueError, 'Spatial payloads'):
+                execute({'operation': 'eval', 'project': 'offline', 'analysis_context': {'analysis_region': TRIANGLE},
+                         'code': 'result = analysis_region'})
+        self.assertEqual(result, {'result': True})
 
     def test_prompt_rules_are_present_without_changing_normal_knowledge_behavior(self):
-        prompt = conversation_prompt('compare here and Zhengzhou', [0,0,1,1], [], TRIANGLE)
-        for rule in ['ordinary knowledge', 'BEFORE executing', 'Do not repeatedly ask', 'multi-region',
-                     'model-guessed coordinates', 'never invent', 'actual scope used', 'filterBounds',
-                     'not a guaranteed geographic conflict detector']:
+        prompt = (Path(__file__).resolve().parents[1] / 'integrations/gee-tools/system-prompt.md').read_text(encoding='utf-8')
+        for rule in ['ordinary knowledge', 'before spatial analysis', 'Preserve resolved choices',
+                     'separate regions in comparisons', 'verified boundary', 'actual scope used', 'filterBounds']:
             self.assertIn(rule, prompt)
 
 

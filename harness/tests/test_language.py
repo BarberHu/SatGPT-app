@@ -1,34 +1,104 @@
+import ast
+import re
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from harness.app.agent import conversation_prompt, describe_run_failure
+from harness.app.bootstrap import ensure_plugin
 from harness.app.controller import validate_bounds
 from harness.app.gee_worker import checked_code, execute as gee_execute
 from harness.app.trace import clean_text
+
+
+HARNESS = Path(__file__).resolve().parents[1]
+SYSTEM_PROMPT = (HARNESS / 'integrations' / 'gee-tools' / 'system-prompt.md').read_text(encoding='utf-8')
+SKILLS = HARNESS / 'skills'
+
+
+def python_examples(skill):
+    text = (SKILLS / skill / 'SKILL.md').read_text(encoding='utf-8')
+    return re.findall(r'```python\n(.*?)\n```', text, re.DOTALL)
+
+
+class SkillBootstrapTests(unittest.TestCase):
+    def test_sdk_bootstrap_installs_and_updates_only_the_managed_skills(self):
+        names = ('flood-extent', 'flood-exposure', 'sentinel2-latest', 'rainfall-analysis')
+        with TemporaryDirectory() as temp:
+            home = Path(temp)
+            unrelated = home / 'skills' / 'other-skill' / 'SKILL.md'
+            unrelated.parent.mkdir(parents=True)
+            unrelated.write_text('keep this', encoding='utf-8')
+            ensure_plugin(home)
+            installed = home / 'profiles/sdk/node_modules/@local/webgis-gee-tools/system-prompt.md'
+            self.assertEqual(installed.read_text(encoding='utf-8'), SYSTEM_PROMPT)
+            for name in names:
+                with self.subTest(name=name):
+                    actual = home / 'skills' / name / 'SKILL.md'
+                    self.assertEqual(actual.read_bytes(), (SKILLS / name / 'SKILL.md').read_bytes())
+                    actual.write_text('previous version', encoding='utf-8')
+
+            ensure_plugin(home)
+            for name in names:
+                with self.subTest(updated=name):
+                    actual = home / 'skills' / name / 'SKILL.md'
+                    self.assertEqual(actual.read_bytes(), (SKILLS / name / 'SKILL.md').read_bytes())
+            self.assertEqual(unrelated.read_text(encoding='utf-8'), 'keep this')
 
 
 class EnglishInterfaceTests(unittest.TestCase):
     def test_prompt_defaults_to_english_without_rewriting_user_content(self):
         user = '显示郑州的洪水范围'
         prompt = conversation_prompt(user, [100, 10, 101, 11], [])
-        self.assertIn('Use English by default', prompt)
-        self.assertIn('legend labels', prompt)
-        self.assertIn('Follow an explicit user request for another language', prompt)
+        self.assertIn('Use English by default', SYSTEM_PROMPT)
+        self.assertIn('legend labels', SYSTEM_PROMPT)
+        self.assertIn('Follow an explicit user request for another language', SYSTEM_PROMPT)
         self.assertTrue(prompt.endswith(user))
+        self.assertNotIn('Use English by default', prompt)
 
-    def test_prompt_provides_request_time_and_valid_gee_example(self):
+    def test_turn_keeps_request_time_and_gives_examples_only_to_skills(self):
         submitted = '2026-11-19T03:40:59.863108+00:00'
         prompt = conversation_prompt('Find recent imagery', [100, 10, 101, 11], [], created_at=submitted)
         self.assertIn(f'Request submitted at {submitted} (UTC).', prompt)
-        self.assertIn('system:time_start', prompt)
-        self.assertIn('gee_check', prompt)
-        examples = [block.split('\n```', 1)[0] for block in prompt.split('```python\n')[1:]]
-        self.assertEqual(len(examples), 3)
+        self.assertNotIn('```python', prompt)
+        self.assertIn('system:time_start', SYSTEM_PROMPT)
+        self.assertIn('Normal tools validate scripts locally', SYSTEM_PROMPT)
+        self.assertIn('Use `gee_check` for debugging', SYSTEM_PROMPT)
+        examples = python_examples('sentinel2-latest') + python_examples('rainfall-analysis')
+        self.assertEqual(len(examples), 4)
         for example in examples:
             with self.subTest(example=example):
                 self.assertEqual(gee_execute({'operation': 'check', 'code': example}),
                                  {'valid': True, 'errors': [], 'warnings': []})
+
+    def test_rainfall_examples_bind_each_period_and_use_original_masks(self):
+        skill = (SKILLS / 'rainfall-analysis' / 'SKILL.md').read_text(encoding='utf-8')
+        self.assertIn('Empty, null, or failed queries require permission before widening scope', SYSTEM_PROMPT)
+        self.assertIn('Skip collection-wide totals and date ranges.', skill)
+        self.assertIn('A valid zero stays zero; report a null mean as missing.', skill)
+        self.assertIn('Follow an explicit user request for another language or output format', SYSTEM_PROMPT)
+        examples = python_examples('rainfall-analysis')
+        for example in examples:
+            tree = ast.parse(example)
+            methods = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)]
+            dates = [tuple(arg.value for arg in node.args) for node in methods if node.func.attr == 'filterDate']
+            self.assertCountEqual(dates, [('FIRST_START_UTC', 'FIRST_END_UTC'), ('SECOND_START_UTC', 'SECOND_END_UTC')])
+            names = {node.func.attr for node in methods}
+            self.assertIn('filterBounds', names)
+            self.assertFalse(names & {'Rectangle', 'Point', 'bounds', 'buffer', 'unmask', 'selfMask', 'updateMask', 'map'})
+        self.assertIn('geometry=analysis_region', examples[1])
+        self.assertIn('first.sum().reduceRegion', examples[1])
+        self.assertIn('second.sum().reduceRegion', examples[1])
+
+    def test_flood_approval_lives_in_system_prompt_and_skill_respects_approved_fallback(self):
+        for rule in ('Wait for explicit approval of that plan', 'Map-area confirmation alone leaves the plan pending',
+                     'Verify observations and coverage first', 'only after the primary query establishes its trigger',
+                     'before widening the area or dates, relaxing sensor filters'):
+            self.assertIn(rule, SYSTEM_PROMPT)
+        skill = (SKILLS / 'flood-extent' / 'SKILL.md').read_text(encoding='utf-8')
+        self.assertIn('only when the approved plan includes that fallback', skill)
 
     def test_gee_preflight_rejects_unsupported_python_with_repairs(self):
         cases = [

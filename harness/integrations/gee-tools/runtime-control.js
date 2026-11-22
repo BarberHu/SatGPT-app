@@ -17,6 +17,13 @@ export function readBinding(sessionId) {
   }
 }
 
+export function floodResultFor(binding, ref) {
+  if (typeof ref !== 'string' || !/^[a-f0-9]{32}$/.test(ref) || !Object.hasOwn(binding.flood_results || {}, ref)) {
+    throw new Error('The flood result is unavailable in this conversation. Select a published flood result.');
+  }
+  return binding.flood_results[ref];
+}
+
 export function mountControl(ctx, runWorker) {
   const token = process.env.SATGPT_CONTROL_TOKEN;
   const portFile = process.env.SATGPT_CONTROL_PORT_FILE;

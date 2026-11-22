@@ -15,10 +15,11 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness.app.osm_queries import OverpassQueries, query_scope, validate_category
 from harness.app.osm_transport import RoadNetworkError
-
 from harness.app.road_snapshot import query_snapshot
 from harness.app.regional_osm import query_regional_snapshot
+from harness.app.geo_index import get as indexed_data, publish as index_publication
 from shapely import GEOSException
+from shapely.geometry import mapping, shape
 
 
 ONLINE_FAILURES = {'osm_timeout', 'osm_rate_limited', 'osm_unavailable'}
@@ -81,9 +82,28 @@ async def query_sources(service, kind, category, region, bounds):
 async def execute(service, payload):
     kind, category = payload['kind'], payload.get('category')
     region, bounds = payload.get('analysis_region'), payload.get('bounds')
+    flood_ref = payload.get('flood_ref')
+    selected = payload.get('selected_region')
+    context = payload.get('geo_context')
+    label = (payload.get('analysis_aoi') or {}).get('label')
+    if payload.get('flood_data_ref'):
+        try:
+            flood = indexed_data(context, payload['flood_data_ref'], ('flood',))
+        except ValueError as exc:
+            raise RoadNetworkError(422, 'invalid_data_reference', str(exc)) from exc
+        selected, region, bounds = region, flood['geometry'], flood['bounds']
+        flood_ref = flood['legacy_ref']
+        label = flood['name']
+    if flood_ref and selected and not shape(selected).equals(shape(region)):
+        raise RoadNetworkError(422, 'scope_conflict', 'The confirmed area differs from the saved flood area. Select the original flood area or clear the current selection.')
     summary, content = await query_sources(service, kind, category, region, bounds)
+    if flood_ref and summary['count']:
+        collection = json.loads(content)
+        collection['flood_result_ref'] = flood_ref
+        content = json.dumps(collection, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
     result = {"summary": summary}
     if summary["count"]:
+        area = query_scope(region, bounds, kind)
         folder = Path(payload["artifact_dir"])
         folder.mkdir(parents=True, exist_ok=True)
         reference = uuid4().hex
@@ -95,7 +115,17 @@ async def execute(service, payload):
         finally:
             temporary.unlink(missing_ok=True)
         result["artifact_ref"] = reference
-        result["bounds"] = list(query_scope(region, bounds, kind).bounds)
+        if context:
+            try:
+                data_ref = index_publication(context, kind, reference, {**summary, 'category': category},
+                    {'analysis_region': mapping(area), 'bounds': list(area.bounds), 'label': label})
+                if data_ref is None:
+                    raise ValueError('OSM artifact could not be indexed')
+            except (ValueError, OSError, sqlite3.Error):
+                path.unlink(missing_ok=True)
+                raise RoadNetworkError(502, 'osm_index_unavailable', 'The OSM result could not be registered.') from None
+            summary['data_ref'] = data_ref
+        result['bounds'] = list(area.bounds)
     return result
 
 

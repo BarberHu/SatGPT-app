@@ -104,6 +104,32 @@ def geocoding_sdk_fixture(*, enabled=True, wait_for_upstream=None, public=False)
 
 
 class GeocodingSdkTests(unittest.TestCase):
+    def test_sdk_sends_system_rules_separately_from_turn_context_on_followup(self):
+        with geocoding_sdk_fixture(enabled=False) as (controller, seen), client_for(controller) as owner:
+            cid = None
+            for question in ('Review the selected study area.', 'Review the same study area again.'):
+                submitted = owner.post('/api/harness/tasks', json=task_body(cid, question, analysis_region=POLYGON))
+                submitted.raise_for_status()
+                job = submitted.json()
+                cid = job['conversation_id']
+                record = wait_for_task(owner, job['id'], timeout=20)
+                self.assertEqual(record['status'], 'completed', record.get('error'))
+            self.assertEqual(len(seen['requests']), 2)
+            for request in seen['requests']:
+                messages = request['messages']
+                system = json.dumps(request.get('system', ''), ensure_ascii=False)
+                system += json.dumps([row for row in messages if row.get('role') == 'system'], ensure_ascii=False)
+                self.assertIn("You are SatGPT's geospatial analysis assistant", system)
+                self.assertNotIn('You are a coding agent', system)
+                self.assertEqual(system.count('Wait for explicit approval of that plan'), 1)
+                visible = json.dumps(messages, ensure_ascii=False)
+                for name in ('flood-extent', 'flood-exposure', 'sentinel2-latest', 'rainfall-analysis'):
+                    self.assertIn(name, visible)
+                self.assertNotIn('Use preloaded ee and analysis_region', json.dumps(request.get('tools', [])))
+                self.assertNotIn('coordinates', visible)
+                self.assertIn('Bounds [west,south,east,north]', visible)
+                self.assertNotIn('FIRST_START_UTC', visible)
+
     def test_dsh_geocodes_with_osm_disabled_and_preserves_task_scope(self):
         with geocoding_sdk_fixture() as (controller, seen), client_for(controller) as owner:
             for prompt, region, expected in [(LOOKUP, None, '113.66'), (ANALYZE, POLYGON, '请确认')]:

@@ -8,7 +8,7 @@ import json
 from .gee_worker import checked_code
 
 
-def generation_recipe(code, layer, context=None):
+def generation_recipe(code, layer, context=None, inputs=None):
     if not isinstance(code, str) or not code.strip():
         return None
     return {'version': 1, 'code': code,
@@ -16,7 +16,7 @@ def generation_recipe(code, layer, context=None):
             'bounds': copy.deepcopy(layer.get('bounds')),
             'metadata': copy.deepcopy(layer.get('metadata') or {}),
             'legend': copy.deepcopy(layer.get('legend')),
-            'analysis_context': copy.deepcopy(context)}
+            'analysis_context': copy.deepcopy(context), **({'inputs': copy.deepcopy(inputs)} if inputs else {})}
 
 
 def replay_payload(recipe):
@@ -32,7 +32,8 @@ def replay_payload(recipe):
             raise ValueError('The original analysis region is unavailable. Run the original analysis again.')
     return copy.deepcopy({'layer_code': code, 'visualization': recipe.get('visualization') or {},
                           'bounds': recipe.get('bounds'), 'metadata': recipe.get('metadata') or {},
-                          'legend': recipe.get('legend'), 'analysis_context': recipe.get('analysis_context')})
+                          'legend': recipe.get('legend'), 'analysis_context': recipe.get('analysis_context'),
+                          **({'inputs': recipe['inputs']} if recipe.get('inputs') else {})})
 
 
 def restore_generation_recipes(messages, conversation_id):

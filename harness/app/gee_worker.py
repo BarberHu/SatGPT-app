@@ -243,7 +243,7 @@ def code_warnings(code: str) -> list[str]:
     return list(dict.fromkeys(warnings))
 
 
-def run_code(ee, code: str, analysis_context=None):
+def run_code(ee, code: str, analysis_context=None, indexed_inputs=None):
     available = {name: getattr(ee, name) for name in EE_TYPES if hasattr(ee, name)}
     scope = {"ee": SimpleNamespace(**available), "__builtins__": SAFE_BUILTINS.copy()}
     if analysis_context is not None:
@@ -261,6 +261,7 @@ def run_code(ee, code: str, analysis_context=None):
             geometry = {'type': 'Polygon', 'coordinates': [[[w,s], [e,s], [e,n], [w,n], [w,s]]]}
         scope['analysis_region_geojson'] = geometry
         scope['analysis_region'] = ee.Geometry(geometry)
+    scope.update(indexed_inputs or {})
     compiled = measured('validate', checked_code, code)
     measured('script', exec, compiled, scope)
     if "result" not in scope:
@@ -281,8 +282,59 @@ def jsonable(value):
     raise TypeError(f"Cannot serialize result type: {type(value).__name__}")
 
 
+def resolve_inputs(ee, payload):
+    refs = payload.get('inputs') or {}
+    if not refs:
+        return None
+    from geo_index import artifact_directory, get
+    from flood_results import paths, RECIPE_LIMIT
+    if not isinstance(refs, dict) or len(refs) > 6:
+        raise ValueError('Use up to six named spatial inputs')
+    result = {}
+    for name, ref in refs.items():
+        if not isinstance(name, str) or not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_]{0,39}', name) or name in {
+                'ee', 'result', 'analysis_region', 'analysis_region_geojson', *SAFE_BUILTINS}:
+            raise ValueError('Use an ordinary Python variable name for each spatial reference')
+        context = payload['geo_context']
+        record = get(context, ref, ('area', 'flood'))
+        if record['kind'] == 'area':
+            result[name] = ee.Geometry(record['geometry'])
+        else:
+            path, _ = paths(artifact_directory(context, record['task_id']), record['legacy_ref'])
+            with path.open('rb') as file:
+                raw = file.read(RECIPE_LIMIT + 1)
+            if len(raw) > RECIPE_LIMIT:
+                raise ValueError('Flood recipe is unavailable')
+            result[name] = ee.Image(ee.deserializer.fromCloudApiJSON(json.loads(raw)['image']))
+    return result
+
+
 def execute(payload: dict) -> dict:
     operation = payload.get("operation")
+    if operation in ('geo_search', 'geo_info'):
+        from geo_index import get, metadata, search
+        if operation == 'geo_search':
+            return search(payload['geo_context'], payload['filters'])
+        return {**metadata(get(payload['geo_context'], payload['data_ref'])), 'status': 'ready'}
+    if operation == 'road_flood':
+        from flood_results import load
+        from osm_raster_analysis import write_layer
+        from road_flood_analysis import analyze
+        if payload.get('flood_data_ref'):
+            from geo_index import artifact_directory, get
+            from shapely.geometry import shape
+            context = payload['geo_context']
+            flood = get(context, payload['flood_data_ref'], ('flood',))
+            roads = get(context, payload['road_data_ref'], ('roads',))
+            selected = payload['analysis_context'].get('analysis_region')
+            if (not roads.get('geometry') or not shape(roads['geometry']).equals(shape(flood['geometry']))
+                    or selected and not shape(selected).equals(shape(flood['geometry']))):
+                raise ValueError('The selected roads and study area must match the saved flood area')
+            payload = {**payload, 'flood_directory': str(artifact_directory(context, flood['task_id'])),
+                       'road_directory': str(artifact_directory(context, roads['task_id'])),
+                       'flood_ref': flood['legacy_ref'], 'osm_ref': roads['legacy_ref']}
+        recipe, pixels = measured('flood_read', load, payload['flood_directory'], payload['flood_ref'])
+        return measured('road_flood', analyze, payload, recipe, pixels, write_layer)
     if operation in {"catalog", "catalog_read", "catalog_refresh"}:
         from gee_catalog import read_cached, rebuild, search
         cache_dir = Path(payload['catalog_dir']) if payload.get('catalog_dir') else None
@@ -300,13 +352,17 @@ def execute(payload: dict) -> dict:
             return {"valid": False, "errors": [str(exc)], "warnings": []}
         return {"valid": True, "errors": [], "warnings": code_warnings(code)}
     # Reject local Python errors before credentials, ee.Initialize, or a GEE request.
-    if operation in {"eval", "preview"}:
+    if operation in {"eval", "preview", "osm_analysis"}:
         measured('validate', checked_code, payload.get("code"), check_eval_arguments=operation == "eval")
     elif operation not in {"status", "layer_thumbnail", "layer_thumbnail_warmup"}:
         measured('validate', checked_code, payload.get("layer_code"))
         analysis_code = payload.get("analysis_code")
         if isinstance(analysis_code, str) and analysis_code.strip():
             measured('validate', checked_code, analysis_code)
+    if operation == 'osm_analysis':
+        from osm_raster_analysis import format_result, prepare, reduce_features, resolve_input
+        payload = resolve_input(payload)
+        settings, source, features = measured('osm_input', prepare, payload)
     project = payload.get("project")
     if not project:
         raise ValueError("Missing GEE_PROJECT_ID. Set it in the project root .env.")
@@ -327,7 +383,19 @@ def execute(payload: dict) -> dict:
         image = measured('thumbnail_restore', restore_thumbnail_image, ee, recipe['image'])
         return {'thumbnail': save_thumbnail(image, recipe['visualization'], recipe['bounds'], ee, payload)}
     if operation == "eval":
-        return {"result": jsonable(run_code(ee, payload["code"], payload.get('analysis_context')))}
+        from context_guard import summary
+        value = run_code(ee, payload['code'], payload.get('analysis_context'), resolve_inputs(ee, payload))
+        spatial_types = tuple(item for name in ('Geometry', 'Feature', 'FeatureCollection', 'Image', 'ImageCollection')
+                              if isinstance((item := getattr(ee, name, None)), type))
+        if isinstance(value, spatial_types):
+            raise ValueError('Return scalar statistics or publish an indexed spatial artifact')
+        return {"result": summary(jsonable(value))}
+    if operation == 'osm_analysis':
+        image = run_code(ee, payload['code'], payload['analysis_context'])
+        if not isinstance(image, ee.Image):
+            raise TypeError('OSM analysis code must assign an ee.Image to result')
+        reduced = reduce_features(ee, image, settings, features)
+        return format_result(payload, settings, source, features, jsonable(reduced))
     if operation == "preview":
         image = run_code(ee, payload["code"], payload.get('analysis_context'))
         if not callable(getattr(image, "getThumbURL", None)):
@@ -353,9 +421,12 @@ def execute(payload: dict) -> dict:
                             "url": preview_url, "bytes": len(png),
                             "width": int.from_bytes(png[16:20], "big"),
                             "height": int.from_bytes(png[20:24], "big")}}
-    image = run_code(ee, payload["layer_code"], payload.get('analysis_context'))
+    image = run_code(ee, payload["layer_code"], payload.get('analysis_context'), resolve_inputs(ee, payload))
     if not callable(getattr(image, "getMapId", None)):
         raise TypeError("layer_code must assign an ee.Image to result")
+    if operation == 'flood_publish':
+        from flood_results import classify, save
+        image, pixels, recipe = measured('flood_pixels', classify, ee, image, payload)
     vis = payload.get("visualization") or {}
     options = {key: vis[key] for key in ("bands", "min", "max", "palette") if key in vis}
     map_name = measured('map_id', image.getMapId, options)["mapid"]
@@ -371,6 +442,19 @@ def execute(payload: dict) -> dict:
     # -I workers resolve local helpers explicitly, independent of startup cwd.
     from layer_details import layer_metadata, legend_labels
     output['layer']['metadata'] = layer_metadata(payload.get('metadata'))
+    if operation == 'flood_publish':
+        ref = measured('flood_save', save, payload['artifact_dir'], recipe, pixels)
+        grid, scale = recipe['grid'], recipe['grid']['scale']
+        output['flood_result'] = {'ref': ref, **recipe['stats'], 'crs': grid['crs'], 'scale': scale,
+                                  'event': recipe['provenance']['event'], 'observed_at': recipe['provenance']['observed_at'],
+                                  'source': recipe['provenance']['source']}
+        if payload.get('geo_context'):
+            from geo_index import publish
+            output['flood_result']['data_ref'] = publish(payload['geo_context'], 'flood', ref,
+                output['flood_result'], {**payload['analysis_context'], 'area_ref': payload.get('area_ref')})
+        output['display_code'] = (payload['layer_code'] + '\nresult = result.select([0]).reproject('
+                                  f"crs={grid['crs']!r}, crsTransform={[scale, 0, 0, 0, -scale, 0]}"
+                                  ').clip(analysis_region).eq(1).selfMask()')
     labels = legend_labels(payload.get('legend'), options)
     if labels:
         output['layer']['legend'] = labels
@@ -481,8 +565,9 @@ def main() -> None:
                 _HTTP_REQUESTS.reset(http_token)
                 _TIMINGS.reset(token)
         except Exception as exc:
+            from context_guard import safe_text
             result = {"id": request.get("id") if isinstance(request, dict) else None,
-                      "ok": False, "error": re.sub(r"https?://\S+", "[service URL]", f"{type(exc).__name__}: {exc}")[:1200]}
+                      "ok": False, "error": safe_text(re.sub(r"https?://\S+", "[service URL]", f"{type(exc).__name__}: {exc}"))[:1200]}
         if timings is not None:
             result['timings'] = timings
         if requests is not None:

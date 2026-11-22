@@ -11,6 +11,7 @@ COPY --chown=satgpt:satgpt basic /app/basic
 COPY --chown=satgpt:satgpt harness/__init__.py /app/harness/__init__.py
 COPY --chown=satgpt:satgpt harness/app /app/harness/app
 COPY --chown=satgpt:satgpt harness/integrations /app/harness/integrations
+COPY --chown=satgpt:satgpt harness/skills /app/harness/skills
 COPY --chown=satgpt:satgpt satgpt_config.py satgpt_backend.py /app/
 COPY --chown=satgpt:satgpt frontend/src/config/layerCatalog.json /app/frontend/src/config/layerCatalog.json
 RUN mkdir -p /app/harness/state && chown -R satgpt:satgpt /app/harness

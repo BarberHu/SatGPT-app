@@ -28,6 +28,8 @@ from .task_stream import TaskStream
 from .analysis_region import validate_analysis_region, region_bounds, validate_analysis_aoi
 from .layer_generation import generation_recipe, replay_payload
 from .layer_thumbnails import LayerThumbnails, valid_ref
+from .geo_index import index_area
+from .context_guard import recovery_summary, safe_text
 
 
 def validate_bounds(value) -> list[float]:
@@ -217,6 +219,29 @@ class TaskController:
         return {'artifact_dir': str(self.state / 'artifacts' / owner / cid / task_id),
                 'artifact_url': f'/api/previews/{cid}/{task_id}'}
 
+    def _published_floods(self, owner, cid, messages):
+        areas = {item.get('job_id'): item for item in messages if item['role'] == 'user'}
+        results = {}
+        for item in reversed(messages):
+            original = areas.get(item.get('job_id'), {})
+            if item['role'] != 'assistant' or item.get('status') != 'completed' or not original.get('analysis_region'):
+                continue
+            job_id = item['job_id']
+            if not valid_ref(job_id):
+                continue
+            directory = Path(self._artifact_fields(owner, cid, job_id)['artifact_dir'])
+            for layer in item.get('layers') or []:
+                publication = layer.get('flood_result') or {}
+                ref = publication.get('ref')
+                if not valid_ref(ref) or not all((directory / f'flood-{ref}.{suffix}').is_file() for suffix in ('json', 'npy')):
+                    continue
+                results[ref] = {'analysis_region': original['analysis_region'], 'bounds': original['bounds'],
+                                'artifact_dir': str(directory), 'event': publication['event'],
+                                'observed_at': publication['observed_at']}
+                if len(results) == 8:
+                    return results
+        return results
+
     def artifact(self, owner, cid, task_id, filename, *, osm=False):
         if not re.fullmatch(r'[0-9a-f]{32}\.' + ('geojson' if osm else 'png'), filename):
             raise FileNotFoundError('Preview not found')
@@ -257,6 +282,9 @@ class TaskController:
             if len(self.reloads) >= self.gee_workers * 2 or sum(value == owner for value in self.reloads.values()) >= 2:
                 raise AdmissionError('reload_capacity', 'Layer reload capacity reached. Try again shortly.')
             payload.update(self._artifact_fields(owner, cid, item['job_id']))
+            if payload.get('inputs'):
+                payload['geo_context'] = {'db': str(self.store.path), 'owner': owner, 'conversation_id': cid,
+                                          'task_id': item['job_id'], 'replay': True}
             self.reloads[key] = owner
         settled = False
         try:
@@ -342,6 +370,10 @@ class TaskController:
                            'created_at': timestamp()}
                 db.execute('INSERT INTO tasks(id, conversation_id, owner, request_id, fingerprint, status, receipt) '
                            'VALUES(?,?,?,?,?,?,?)', (task_id, cid, owner, request_id, fingerprint, 'queued', encode(receipt)))
+                area_ref = index_area(db, owner, receipt)
+                if area_ref:
+                    receipt['area_ref'] = area_ref
+                    self.store.save_task(db, receipt)
                 self.store.save_messages(db, cid, [*messages, message('user', prompt, task_id, **snapshot)])
             self._task_timing('enqueued', task_id)
             self.wakeup.set()
@@ -530,7 +562,11 @@ class TaskController:
                             layer['thumbnail_call_id'] = native_call_id
                     else:
                         layer['thumbnail_status'] = 'unavailable'
-                layer['generation'] = generation_recipe(code, layer, snapshot)
+                publication = value.get('flood_result')
+                if isinstance(publication, dict) and valid_ref(publication.get('ref')):
+                    layer['bounds'] = snapshot['bounds']
+                    layer['flood_result'] = publication
+                layer['generation'] = generation_recipe(code, layer, snapshot, value.get('indexed_inputs'))
                 layer.update(code=code, reloadable=layer['generation'] is not None)
                 layers.append(layer)
             if 'preview' in value:
@@ -583,6 +619,7 @@ class TaskController:
                 raise InterruptedError()
             with self.store.connect(write=True) as db:
                 row = self.store.owned(db, task.owner, cid)
+                messages = json.loads(row['messages'])
                 resume = row['native_state'] != 'new'
                 if not resume:
                     db.execute("UPDATE conversations SET native_state='opening' WHERE id=?", (cid,))
@@ -593,15 +630,22 @@ class TaskController:
                 if task.stop_requested is not None:
                     raise InterruptedError()
                 self._update(task, status='running', started_at=timestamp())
-            binding = bridge.bind({**snapshot, 'owner_id': task.owner, 'session_id': session_id,
+            floods = self._published_floods(task.owner, cid, messages)
+            geo_context = {'db': str(self.store.path), 'owner': task.owner, 'conversation_id': cid, 'task_id': job_id}
+            binding = bridge.bind({**snapshot, 'owner_id': task.owner, 'session_id': session_id, 'flood_results': floods,
+                                   'geo_context': geo_context, 'area_ref': job.get('area_ref'),
                                    'reasoning_effort': job.get('reasoning_effort', self.runtime.default_reasoning_effort),
                                    'run_id': task.run_id, **self._artifact_fields(task.owner, cid, job_id)}, task.stream.frame)
             bound = True
             with self.lock:
                 if task.stop_requested is not None:
                     raise InterruptedError()
-            prompt = conversation_prompt(job['prompt'], job['bounds'], CATALOG, job.get('analysis_region'),
-                                         created_at=job['created_at'])
+            prompt = conversation_prompt(safe_text(job['prompt']), job['bounds'], CATALOG, job.get('analysis_region'),
+                                         created_at=job['created_at'],
+                                         area_ref=job.get('area_ref'),
+                                         recovered_context=recovery_summary(messages, job_id) if row['recover_context'] and not resume else None,
+                                         published_floods=[{'ref': ref, **{key: flood[key] for key in ('bounds', 'event', 'observed_at')}}
+                                                           for ref, flood in floods.items()])
             entered_run = True
             result = native.run(prompt, on_notification=lambda notice: self._notify(task, notice, trace))
             quiescent = True

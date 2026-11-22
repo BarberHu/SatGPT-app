@@ -1,3 +1,7 @@
+- id: system-prompt
+  config:
+    personaPrefix: You are SatGPT's geospatial analysis assistant.
+
 - insert:
     - id: webgis-gee-tools
       name: '@local/webgis-gee-tools'

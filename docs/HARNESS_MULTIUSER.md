@@ -79,8 +79,6 @@ GitHub 的 `pro2.0` 已拉取。本次使用 `14fd5d951d2c1f79f7cf5fe7bbe4d607b5
 | `SATGPT_HARNESS_TIMING_LOG` | 可选，填写 Harness 可写的绝对路径以追加诊断 JSONL。可按任务和工具调用关联入队、领取、Python 阶段和返回，也记录队列拒绝及模型重试。建议在诊断结束后关闭以控制文件大小 |
 | `SATGPT_AGENT_RESIDENT_SESSIONS` | 128，须至少等于执行槽数量 |
 | `SATGPT_AGENT_DEADLINE_SECONDS` | 7200 秒，可设为 1–7200，从执行器领取任务起计时 |
-
-128 个执行槽表示调度配置。已验证默认 128 通过启动校验，129 被拒绝。模拟 runtime 中 128 个任务重叠执行，第 129 个任务排队后完成，同一聊天重复提交返回 409。真实模型与 GEE 的实测并发见下方验证记录。显式设置 `.env` 或进程环境变量会覆盖默认值。
 | `SATGPT_GEOCODING_URL` | 默认留空。填写自托管或经授权的 Nominatim 兼容搜索端点后，DSH 可调用 `geocode_place`，独立于 OSM Overpass 开关 |
 
 `geocode_place` 将用户明确提到的地名和可选国家、语言过滤条件发送给配置的服务。候选包含地名、行政区、WGS84 位置、可用的包围盒及 OSM 归属。单个 worker 处理请求并缓存成功和无匹配结果，工具结果可随会话保存。配置的服务需允许这些用途。
@@ -99,7 +97,7 @@ HTTPS 网关设置 `SATGPT_PUBLIC_ORIGIN` 为浏览器实际访问的 origin，�
 
 Agent 的道路、建筑和 POI 优先通过 `SATGPT_OVERPASS_URL` 查询。超时、限流或上游响应异常时，道路和建筑可回退到覆盖整个选区的本地快照。在线查询成功返回空结果时保留该结果。建筑在线超限时也可回退，但须得到满足本地限制的非空结果。POI 只使用在线数据源。Basic 的道路和建筑预览使用 Mapbox Streets v8 矢量瓦片。
 
-可通过 `SATGPT_ROAD_SNAPSHOT` 配置单文件道路快照，作为区域快照不可用时的道路回退。文件须包含 `coverage` 多边形、`category`、`source`、`source_sha256`、`osm_data_time`、`skipped_geometry`、以及带 `osm_type`、`osm_id` 和 `category` 的道路线要素。单文件须覆盖完整选区且类别匹配。
+可通过 `SATGPT_ROAD_SNAPSHOT` 配置单文件道路快照，作为区域快照不可用时的道路回退。文件须包含 `coverage` 多边形、`category`、`source`、`source_sha256`、`osm_data_time`、`skipped_geometry`、以及带 `osm_type`、`osm_id` 和 `category` 的道路线要素。单文件须覆盖完整选区且类别匹配。`gee_publish_flood` 保存会话内可复用分类，后续道路查询可通过洪水引用使用原研究区。
 
 ### 斐济和汤加道路、建筑快照
 
@@ -120,13 +118,7 @@ Agent 的道路、建筑和 POI 优先通过 `SATGPT_OVERPASS_URL` 查询。超�
 
 Compose 部署在原配置后追加 `-f scripts/docker/compose.osm-snapshots.yml`，用 `SATGPT_OSM_SNAPSHOT_HOST_DIR` 指定已生成的快照目录，容器以只读方式挂载。
 
-用回执中的任务 ID 和 Harness 原生工具 `call_id` 对齐诊断日志。后台缩略图沿用所属图层的工具调用 ID，可按 `operation` 区分。`enqueued` 到 `claimed` 是 worker 等待，立即领取的调用没有入队事件。`worker_stage` 的 `duration_ms` 来自 Python 的单调时钟，涵盖校验、Earth Engine 初始化或复用、脚本、结果取回、地图 ID、缩略图生成、下载与产物写入。`returned.worker_stages_reported=false` 表示没有收到内部阶段，常见于取消、超时或进程退出。`http_requests` 独立记录 worker 观察到的 Requests 发送和 PNG 下载尝试，涵盖脚本内的 GEE 请求，范围限于 Python worker 的这两个入口。STAC、浏览器瓦片和传输层自动重试的次数不在此列。
-
-新建 Agent 图层随任务终态交付。交互图层可用后，缩略图可能仍在等待独立 worker，前端仅查询待生成卡片的状态。后台失败、过载或重启后，对应卡片会结束等待，交互瓦片保持可用。手动重载和 `gee_preview` 沿用同步行为。
-
-Harness 运行时启动时，插件在后台用同一个单槽缩略图池预热 Earth Engine。`layer_thumbnail_warmup` 只初始化会话，预算 15 秒，其结果不参与后端就绪判断。真实请求已先进入池时跳过预热。预热在途时，缩略图请求按原有 45 秒总预算等待可用槽位。启动预热失败后由真实请求按需初始化。诊断日志可以查看预热终态和首张缩略图的 `ee_reuse` 或 `ee_initialize`。
-
-公开 STAC 索引 7 天内为新鲜缓存。7 天至 30 天的可用索引会先返回并标记为过期，同时由独立 worker 后台刷新。冷查询和显式刷新共享同一次重建。普通请求在上游失败后等待 60 秒再触发下一次尝试，现有可用索引保留。启动预热时无需等待上游建立索引。
+会话地理数据索引保存已提交的研究区、洪水分类和新查询到的道路、建筑及 POI。每份 OSM GeoJSON 通过 `artifact_ref` 支持地图和下载，通过 `data_ref` 支持同一会话的检索和分析。`geo_data_search` 可按类型、关键词、日期和研究区引用检索，`geo_data_info` 返回字段和可用工具。`gee_eval`、`gee_layer` 和 `gee_publish_flood` 支持通过 `inputs` 绑定研究区或掩膜引用。道路叠加接收 `flood_data_ref` 和 `road_data_ref`，建筑和 POI 分析可向 `gee_osm_analyze` 传入 `osm_data_ref`，同一任务也可使用 `osm_ref`。模型只接收引用、范围摘要和统计，完整几何由后端读取。历史任务沿用现有索引和访问方式。
 
 ## SQLite 排队
 
@@ -135,6 +127,14 @@ Harness 运行时启动时，插件在后台用同一个单槽缩略图池预热
 同一聊天的排队任务也占用该聊天的唯一名额。重复提交返回 `409`，原请求的幂等重试返回原回执。取消排队任务直接进入 `cancelled`，无需打开原生会话。原有的 `SATGPT_AGENT_TASKS_PER_OWNER` 配置已取消，旧环境中的同名变量不再参与校验或调度。
 
 每个被领取的任务回执记录 `created_at`、`dispatched_at` 和 `queue_wait_ms`。`started_at` 仍表示任务进入运行阶段。SQLite 新增队列索引和同聊天未完成任务的唯一索引，已有任务表和终态记录可以继续使用。
+
+用回执中的任务 ID 和 Harness 原生工具 `call_id` 对齐诊断日志。后台缩略图沿用所属图层的工具调用 ID，可按 `operation` 区分。`enqueued` 到 `claimed` 是 worker 等待，立即领取的调用没有入队事件。`worker_stage` 的 `duration_ms` 来自 Python 的单调时钟，涵盖校验、Earth Engine 初始化或复用、脚本、结果取回、地图 ID、缩略图生成、下载与产物写入。`returned.worker_stages_reported=false` 表示没有收到内部阶段，常见于取消、超时或进程退出。`http_requests` 独立记录 worker 观察到的 Requests 发送和 PNG 下载尝试，涵盖脚本内的 GEE 请求，范围限于 Python worker 的这两个入口。STAC、浏览器瓦片和传输层自动重试的次数不在此列。
+
+新建 Agent 图层随任务终态交付。交互图层可用后，缩略图可能仍在等待独立 worker，前端仅查询待生成卡片的状态。后台失败、过载或重启后，对应卡片会结束等待，交互瓦片保持可用。手动重载和 `gee_preview` 沿用同步行为。
+
+Harness 运行时启动时，插件在后台用同一个单槽缩略图池预热 Earth Engine。`layer_thumbnail_warmup` 只初始化会话，预算 15 秒，其结果不参与后端就绪判断。真实请求已先进入池时跳过预热。预热在途时，缩略图请求按原有 45 秒总预算等待可用槽位。启动预热失败后由真实请求按需初始化。诊断日志可以查看预热终态和首张缩略图的 `ee_reuse` 或 `ee_initialize`。
+
+公开 STAC 索引 7 天内为新鲜缓存。7 天至 30 天的可用索引会先返回并标记为过期，同时由独立 worker 后台刷新。冷查询和显式刷新共享同一次重建。普通请求在上游失败后等待 60 秒再触发下一次尝试，现有可用索引保留。启动预热时无需等待上游建立索引。
 
 排队改造前后对应关系如下。
 

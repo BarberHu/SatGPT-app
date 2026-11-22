@@ -160,8 +160,7 @@ export class MapboxAdapter {
           fill: { color: '#d58620', 'fill-outline-color': '#9c5d12' },
         }[layer.renderAs];
         const { color, ...paint } = style;
-        const featureColor = layer.renderAs === 'line' ? color
-          : ['match', ['get', 'analysis_status'], 'hit', '#c53d24', 'no_data', '#757575', color];
+        const featureColor = ['match', ['get', 'analysis_status'], 'hit', '#c53d24', 'no_data', '#757575', color];
         const geometry = { line: 'LineString', circle: 'Point', fill: 'Polygon' }[layer.renderAs];
         this.map.addLayer({ id: layerId, source: sourceId, type: layer.renderAs,
           filter: ['==', ['geometry-type'], geometry],
