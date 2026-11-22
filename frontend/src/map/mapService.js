@@ -97,15 +97,15 @@ export class MapService {
   scope(group) {
     if (this.scopes.has(group)) return this.scopes.get(group);
     const scoped = {
-      listLayers: () => this.listLayers(group), addLayer: input => this.addLayer(input, group),
+      listLayers: () => this.listLayers(group), getLayer: id => this.layers.get(this.physical(group, id))?.layer,
+      addLayer: input => this.addLayer(input, group),
       removeLayer: id => this.removeLayer(id, group), setVisibility: (id, visible) => this.setVisibility(id, visible, group),
       replaceLayer: (id, input) => this.replaceLayer(id, input, group),
       setOpacity: (id, opacity) => this.setOpacity(id, opacity, group), setOrder: ids => this.setOrder(ids, group),
       setRoadLevels: (id, levels) => this.setRoadLevels(id, levels, group),
       subscribeTileStatus: listener => this.subscribeTileStatus(listener, group),
       subscribe: listener => this.subscribe(() => listener(this.listLayers(group))),
-      getCurrentView: () => this.getCurrentView(), setView: view => { if (this.enabled(group)) this.setView(view); },
-      captureSnapshot: () => this.captureSnapshot(), measureGroundDistance: (...args) => this.measureGroundDistance(...args),
+      setView: view => { if (this.enabled(group)) this.setView(view); },
     };
     this.scopes.set(group, scoped); return scoped;
   }

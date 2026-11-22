@@ -87,6 +87,20 @@ describe('map service boundary', () => {
     service.dispose();
   });
 
+  test('scoped lookup distinguishes the same logical layer ID across conversations', () => {
+    const service = new MapService(engine());
+    const first = service.scope('agent:a');
+    const second = service.scope('agent:b');
+    const older = first.addLayer(reloadableLayer('same'));
+    const newer = second.addLayer(reloadableLayer('same', 1));
+    expect(first.getLayer('same')).toBe(older);
+    expect(second.getLayer('same')).toBe(newer);
+    first.removeLayer('same');
+    expect(first.getLayer('same')).toBeUndefined();
+    expect(second.getLayer('same')).toBe(newer);
+    service.dispose();
+  });
+
   test('late replacements stay in their original scope and cannot restore removed layers', () => {
     const driver = engine();
     const service = new MapService(driver);

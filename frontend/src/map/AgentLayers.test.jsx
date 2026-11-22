@@ -68,3 +68,53 @@ test('OSM result references restore alongside GEE layers and stay in their own c
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
   }
 });
+
+test('history projection looks up existing layers by ID and replaces only changed layers', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const engine = { onStyleReady: () => () => {}, addLayer: vi.fn(), removeLayer: vi.fn(), setVisibility: vi.fn(),
+    setBasicActive: vi.fn(), setView: vi.fn(), dispose: vi.fn() };
+  const service = new MapService(engine);
+  service.setMode('agent');
+  holder.shared = { service, ready: true, configured: true, captureViewIntent: () => ({ setView: engine.setView }) };
+  const id = 'projection';
+  const scope = service.scope(`agent:${id}`);
+  const root = createRoot(document.createElement('div'));
+  const tile = version => `https://earthengine.googleapis.com/v1/projects/test/maps/${version}/tiles/{z}/{x}/{y}`;
+  const layers = Array.from({ length: 12 }, (_, index) => ({ name: `Layer ${index}`, url: tile(0) }));
+  const render = rows => act(async () => root.render(<Probe id={id} messages={[{
+    job_id: 'history', layers: rows, previews: [{ name: 'Layer 0', url: '/api/previews/legacy.png' }],
+  }]} />));
+  try {
+    await render(layers);
+    const lookup = vi.spyOn(scope, 'getLayer');
+    const list = vi.spyOn(service, 'listLayers');
+    engine.addLayer.mockClear();
+    await render(layers.map(layer => ({ ...layer })));
+    expect(lookup.mock.calls.map(([layerId]) => layerId)).toEqual(layers.map((_, index) => `history-${index}`));
+    expect(list).toHaveBeenCalledExactlyOnceWith(`agent:${id}`);
+    expect(engine.addLayer).not.toHaveBeenCalled();
+
+    await act(async () => {
+      holder.view.toggleLayer('history-0', false);
+      scope.setOpacity('history-0', 0.35);
+      holder.view.removeLayer('history-2');
+    });
+    const changed = layers.map(layer => ({ ...layer }));
+    changed[0].code = 'result = ee.Image(1)';
+    Object.assign(changed[1], { reload_version: 1, url: tile(1) });
+    Object.assign(changed[2], { reload_version: 1, url: tile(1) });
+    await render(changed);
+    expect(engine.addLayer.mock.calls.map(([layer]) => layer.id)).toEqual([
+      service.physical(`agent:${id}`, 'history-0'), service.physical(`agent:${id}`, 'history-1'),
+    ]);
+    expect(scope.getLayer('history-0')).toMatchObject({ code: changed[0].code, visible: false, opacity: 0.35,
+      thumbnail: { url: '/api/previews/legacy.png' } });
+    expect(scope.getLayer('history-1')).toMatchObject({ reloadVersion: 1, url: tile(1) });
+    expect(scope.getLayer('history-2')).toBeUndefined();
+  } finally {
+    await act(async () => root.unmount());
+    service.dispose();
+    localStorage.removeItem(`satgpt:harness:layers:${id}`);
+    delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  }
+});
