@@ -17,6 +17,7 @@ from geo_index import artifact_directory, get
 
 MAX_INPUT_BYTES = 1_000_000
 MAX_FEATURES = 1_000
+MAX_BUILDING_FEATURES = 4_000
 MAX_PIXELS_PER_BUILDING = 1_000_000
 DETAIL_LIMIT = 20
 AREA_BANDS = ['grid_area_m2', 'observed_area_m2', 'flood_area_m2']
@@ -69,8 +70,9 @@ def read_source(payload):
     if (not isinstance(source, dict) or source.get('type') != 'FeatureCollection'
             or 'analysis' in source or not isinstance(source.get('features'), list) or not source['features']):
         raise ValueError('Use a nonempty GeoJSON artifact from an OSM query in this task')
-    if len(source['features']) > MAX_FEATURES:
-        raise ValueError(f'OSM analysis supports up to {MAX_FEATURES:,} features. Select a smaller area.')
+    limit = MAX_BUILDING_FEATURES if payload.get('mode') == 'building_flood' else MAX_FEATURES
+    if len(source['features']) > limit:
+        raise ValueError(f'OSM analysis supports up to {limit:,} features. Select a smaller area.')
     return source
 
 
@@ -160,6 +162,15 @@ def reduce_features(ee, image, settings, source_features):
     return reduced.map(lambda feature: feature.setGeometry(None))
 
 
+def evaluate_features(ee, image, settings, source_features):
+    items = list(source_features.items())
+    rows = []
+    for start in range(0, len(items), MAX_FEATURES):
+        batch = dict(items[start:start + MAX_FEATURES])
+        rows.extend(reduce_features(ee, image, settings, batch).getInfo()['features'])
+    return {'features': rows}
+
+
 def join_results(rows, features):
     values = {}
     for row in rows['features']:
@@ -219,6 +230,10 @@ def format_result(payload, settings, source, features, rows):
         summary['osm_data_ref'] = payload['osm_data_ref']
     if not point or 'hit_value' in settings:
         summary['hit_count'] = hit_count
+    if not point:
+        summary['observed_area_m2'] = sum(row['observed_area_m2'] for row in details)
+        flood_areas = [row['flood_area_m2'] for row in details if row['flood_area_m2'] is not None]
+        summary['flood_area_m2'] = sum(flood_areas) if flood_areas else None
 
     result = {'summary': summary}
     show = payload.get('show_on_map') is True

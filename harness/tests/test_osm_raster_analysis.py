@@ -118,6 +118,22 @@ class OSMRasterAnalysisTests(apitestcase.ApiTestCase):
                     gee_worker.execute({**self.payload, **changes})
             initialize.assert_not_called()
 
+    def test_buildings_aggregate_totals_across_bounded_batches(self):
+        polygon = [[[10.005, 20.005], [10.01, 20.005], [10.01, 20.01], [10.005, 20.005]]]
+        self.source([feature('Polygon', 'way', n, polygon) for n in range(1, 4)])
+        first = rows({'way/1': {'grid_area_m2': 100, 'observed_area_m2': 100, 'flood_area_m2': 25},
+                      'way/2': {'grid_area_m2': 100}})
+        last = rows({'way/3': {'grid_area_m2': 100, 'observed_area_m2': 50, 'flood_area_m2': 5}})
+        with (patch.object(joint, 'MAX_FEATURES', 2), patch.object(gee_worker, 'earth_engine', return_value=ee),
+              patch.object(ee.data, 'computeValue', side_effect=[first, last]) as request):
+            result = gee_worker.execute({**self.payload, 'mode': 'building_flood'})
+        self.assertEqual(request.call_count, 2)
+        summary = result['summary']
+        self.assertEqual(summary['hit_count'], 2)
+        self.assertEqual(summary['coverage_counts'], {'complete': 1, 'partial': 1, 'none': 1})
+        self.assertEqual(summary['observed_area_m2'], 150)
+        self.assertEqual(summary['flood_area_m2'], 30)
+
     def test_geometry_and_artifact_limits_fail_before_earth_engine(self):
         point = feature('Point', 'node', 1, [10.005, 20.005])
         with patch.object(gee_worker, 'earth_engine') as initialize:

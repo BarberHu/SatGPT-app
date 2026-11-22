@@ -360,7 +360,7 @@ def execute(payload: dict) -> dict:
         if isinstance(analysis_code, str) and analysis_code.strip():
             measured('validate', checked_code, analysis_code)
     if operation == 'osm_analysis':
-        from osm_raster_analysis import format_result, prepare, reduce_features, resolve_input
+        from osm_raster_analysis import evaluate_features, format_result, prepare, resolve_input
         payload = resolve_input(payload)
         settings, source, features = measured('osm_input', prepare, payload)
     project = payload.get("project")
@@ -394,8 +394,8 @@ def execute(payload: dict) -> dict:
         image = run_code(ee, payload['code'], payload['analysis_context'])
         if not isinstance(image, ee.Image):
             raise TypeError('OSM analysis code must assign an ee.Image to result')
-        reduced = reduce_features(ee, image, settings, features)
-        return format_result(payload, settings, source, features, jsonable(reduced))
+        rows = measured('osm_reduce_features', evaluate_features, ee, image, settings, features)
+        return format_result(payload, settings, source, features, rows)
     if operation == "preview":
         image = run_code(ee, payload["code"], payload.get('analysis_context'))
         if not callable(getattr(image, "getThumbURL", None)):
