@@ -109,7 +109,8 @@ class NativeCancellationTests(unittest.TestCase):
                 self.assertEqual(wire_effort, {'NATIVE_HOLD_A': ('disabled', None), 'NATIVE_HOLD_B': ('enabled', 'max')})
                 self.assertEqual(len(offered_tools), 2)
                 expected_tools = {'gee_check', 'gee_eval', 'gee_layer', 'gee_preview',
-                                  'gee_status', 'gee_catalog', 'skill'}
+                                  'gee_status', 'gee_catalog', 'skill',
+                                  'gee_publish_flood', 'geo_data_search', 'geo_data_info'}
                 self.assertEqual(offered_tools, [expected_tools, expected_tools])
                 self.assertEqual(b.post(f'/api/harness/tasks/{ta}/cancel').status_code, 404)
                 a.post(f'/api/harness/tasks/{ta}/cancel').raise_for_status()
