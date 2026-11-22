@@ -81,7 +81,7 @@ export function apply(ctx) {
   });
   ctx.tools.register({
     name: 'gee_check',
-    description: 'Fast local preflight for restricted GEE Python. Run before executing complex code in gee_eval, gee_preview, or gee_layer. If valid is false, fix the reported error and check again before execution. Checks syntax, allowed statements and builtins, and result assignment without an Earth Engine request.',
+    description: 'Optional local debugging for restricted GEE Python. Checks syntax, allowed statements and builtins, result assignment, and selected Earth Engine argument mistakes without a remote request. If valid is false, fix the reported error. gee_eval, gee_preview, and gee_layer already validate Python before executing routine code.',
     parameters: { type: 'object', properties: { code: CODE_PARAMETER }, required: ['code'], additionalProperties: false },
     output: {
       schema: { type: 'object', properties: {

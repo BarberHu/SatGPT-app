@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+from collections import Counter
 import json
 import math
 import re
@@ -33,9 +34,11 @@ EE_TYPES = ("Algorithms", "Array", "Classifier", "Clusterer", "Date", "DateRange
 STATEMENT_HINTS = {
     ast.Import: "Remove the import. ee is already available.",
     ast.ImportFrom: "Remove the import. ee is already available.",
-    ast.FunctionDef: "Use an inline lambda for a simple Earth Engine .map() callback.",
-    ast.AsyncFunctionDef: "Use an inline lambda for a simple Earth Engine .map() callback.",
+    ast.FunctionDef: "Write multi-step calculations as top-level assignments. Use an inline lambda only for a simple Earth Engine .map() callback; use aggregate_array() to read properties.",
+    ast.AsyncFunctionDef: "Write multi-step calculations as top-level assignments. Use an inline lambda only for a simple Earth Engine .map() callback; use aggregate_array() to read properties.",
 }
+COLLECTION_TYPES = {"ImageCollection": "ee.Image", "FeatureCollection": "ee.Feature"}
+COLLECTION_CHAIN_METHODS = {"filter", "filterBounds", "filterDate", "limit", "select", "sort"}
 _SESSION = None
 _PROJECT = None
 # Isolated Python startup does not add the worker directory to the import path.
@@ -60,7 +63,87 @@ def earth_engine(project: str):
     return ee
 
 
-def checked_code(code: str) -> object:
+def check_reduce_region_arguments(call: ast.Call) -> None:
+    if not isinstance(call.func, ast.Attribute) or call.func.attr != "reduceRegion":
+        return
+    transform = next((keyword.value for keyword in call.keywords if keyword.arg == "crsTransform"), None)
+    if transform is None and len(call.args) >= 5 and not any(isinstance(arg, ast.Starred) for arg in call.args[:5]):
+        transform = call.args[4]
+    if isinstance(transform, ast.UnaryOp) and isinstance(transform.op, (ast.UAdd, ast.USub)):
+        transform = transform.operand
+    if isinstance(transform, ast.Constant) and type(transform.value) in (int, float):
+        raise ValueError(
+            f"reduceRegion crsTransform must be a transform list (line {call.lineno}). "
+            "The fifth positional argument is crsTransform. Use maxPixels=<integer> to set the pixel limit."
+        )
+
+
+def ee_constructor(expression):
+    if (isinstance(expression, ast.Call) and isinstance(expression.func, ast.Attribute)
+            and isinstance(expression.func.value, ast.Name) and expression.func.value.id == "ee"):
+        return expression.func.attr
+    return None
+
+
+def collection_kind(expression, bindings):
+    while (isinstance(expression, ast.Call) and isinstance(expression.func, ast.Attribute)
+           and expression.func.attr in COLLECTION_CHAIN_METHODS):
+        expression = expression.func.value
+    if isinstance(expression, ast.Name):
+        return bindings.get(expression.id)
+    kind = ee_constructor(expression)
+    return kind if kind in COLLECTION_TYPES else None
+
+
+def collection_map_return_error(callback: ast.Lambda, kind: str) -> str | None:
+    body = callback.body
+    if not isinstance(body, ast.Call) or not isinstance(body.func, ast.Attribute):
+        return None
+    receiver = body.func.value
+    if body.func.attr == "format" and ee_constructor(receiver) == "Date":
+        return "Use aggregate_array('system:time_start'), then ee.List.map() to format dates."
+    reduction = receiver if body.func.attr == "set" else body
+    if not (isinstance(reduction, ast.Call) and isinstance(reduction.func, ast.Attribute)
+            and reduction.func.attr == "reduceRegion"):
+        return None
+    image = reduction.func.value
+    parameters = callback.args.posonlyargs + callback.args.args
+    is_image_parameter = (kind == "ImageCollection" and bool(parameters) and isinstance(image, ast.Name)
+                          and image.id == parameters[0].arg)
+    if ee_constructor(image) == "Image" or is_image_parameter:
+        return "reduceRegion() returns a dictionary. Reduce outside the collection callback, or set metadata on the image and return the image."
+    return None
+
+
+def check_collection_map_returns(tree: ast.Module) -> None:
+    writes = Counter(node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store))
+    shadowed = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    if writes["ee"] or "ee" in shadowed:
+        return
+    bindings = {}
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Assign, ast.Expr)):
+            bindings.clear()
+            continue
+        for call in ast.walk(statement.value):
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "map"):
+                continue
+            kind = collection_kind(call.func.value, bindings)
+            callback = call.args[0] if call.args else next(
+                (argument.value for argument in call.keywords if argument.arg == "algorithm"), None)
+            if kind and isinstance(callback, ast.Lambda):
+                hint = collection_map_return_error(callback, kind)
+                if hint:
+                    raise ValueError(f"ee.{kind}.map() must return an {COLLECTION_TYPES[kind]} (line {call.lineno}). {hint}")
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if isinstance(target, ast.Name) and writes[target.id] == 1 and target.id not in shadowed:
+                kind = collection_kind(statement.value, bindings)
+                if kind:
+                    bindings[target.id] = kind
+
+
+def checked_code(code: str, *, check_eval_arguments: bool = False) -> object:
     if not isinstance(code, str):
         raise ValueError("code must be a Python string")
     if len(code) > 16_000:
@@ -87,6 +170,10 @@ def checked_code(code: str) -> object:
                 and hasattr(builtins, node.func.id) and node.func.id not in SAFE_BUILTINS):
             hint = ". Assign the output to result." if node.func.id == "print" else ""
             raise ValueError(f"Python builtin {node.func.id} is unavailable in this executor (line {node.lineno}){hint}")
+        if check_eval_arguments and isinstance(node, ast.Call):
+            check_reduce_region_arguments(node)
+    if check_eval_arguments:
+        check_collection_map_returns(tree)
     if not any(isinstance(node, ast.Name) and node.id == "result" and isinstance(node.ctx, ast.Store)
                for node in ast.walk(tree)):
         raise ValueError("Code must assign a value to result. Write result = stats or result = {...}. "
@@ -160,13 +247,13 @@ def execute(payload: dict) -> dict:
     if operation == "check":
         code = payload.get("code")
         try:
-            checked_code(code)
+            checked_code(code, check_eval_arguments=True)
         except ValueError as exc:
             return {"valid": False, "errors": [str(exc)], "warnings": []}
         return {"valid": True, "errors": [], "warnings": code_warnings(code)}
     # Reject local Python errors before credentials, ee.Initialize, or a GEE request.
     if operation in {"eval", "preview"}:
-        checked_code(payload.get("code"))
+        checked_code(payload.get("code"), check_eval_arguments=operation == "eval")
     elif operation != "status":
         checked_code(payload.get("layer_code"))
         analysis_code = payload.get("analysis_code")
