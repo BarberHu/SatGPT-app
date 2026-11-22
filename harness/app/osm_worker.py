@@ -12,8 +12,8 @@ import httpx
 
 # The worker is launched with Python's isolated mode.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from basic.osm_queries import OverpassQueries
-from basic.road_network import RoadNetworkError
+from harness.app.osm_queries import OverpassQueries
+from harness.app.osm_transport import RoadNetworkError
 
 
 async def execute(service, payload):

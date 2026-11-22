@@ -7,7 +7,6 @@ from io import BytesIO
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -34,7 +33,6 @@ from .flood_api_services import (
 )
 logger = logging.getLogger(__name__)
 from .preset_layers import get_preset_layer_payload
-from .road_network import OverpassRoads, RoadNetworkError, network_bounds
 
 _HEAVY_OPERATION_LIMIT = max(1, int(required_env("SATGPT_HEAVY_CONCURRENCY")))
 _HEAVY_QUEUE_TIMEOUT_SECONDS = max(
@@ -126,18 +124,13 @@ async def lifespan(app: Starlette):
     global _HEAVY_OPERATION_SEMAPHORE
     _HEAVY_OPERATION_SEMAPHORE = asyncio.Semaphore(_HEAVY_OPERATION_LIMIT)
     await asyncio.to_thread(gee_service._initialize_ee)
-    async with httpx.AsyncClient(headers={"User-Agent": "SatGPT/2.0"}, timeout=httpx.Timeout(10, connect=5)) as client:
-        roads = OverpassRoads(client, required_env("SATGPT_OVERPASS_URL"))
-        app.state.road_network = roads
-        app.state.basic_initialized = True
-        try:
-            yield
-        finally:
-            app.state.road_network = None
-            app.state.basic_initialized = False
-            gee_service.initialized = False
-            TileProxyServer.get_instance().tile_registry.clear()
-            await roads.close()
+    app.state.basic_initialized = True
+    try:
+        yield
+    finally:
+        app.state.basic_initialized = False
+        gee_service.initialized = False
+        TileProxyServer.get_instance().tile_registry.clear()
 
 
 router = APIRouter()
@@ -150,10 +143,6 @@ class GeoBounds(BaseModel):
     south: float
     east: float
     north: float
-
-
-class RoadNetworkRequest(BaseModel):
-    geojson: dict
 
 
 class FloodImageRequest(BaseModel):
@@ -322,19 +311,6 @@ async def get_preset_layer(request: Request):
     except Exception:
         logger.warning('Preset layer generation failed', exc_info=False)
         raise HTTPException(status_code=502, detail='Unable to generate this layer. Check the study area and dates, then retry.')
-
-
-@router.post("/api/road-network")
-async def get_road_network(payload: RoadNetworkRequest, request: Request):
-    roads = getattr(request.app.state, "road_network", None)
-    if roads is None:
-        raise HTTPException(503, detail={"code": "roads_unavailable", "message": "The road service is unavailable."})
-    try:
-        bounds = network_bounds(payload.geojson)
-        result = await roads.get(bounds)
-    except RoadNetworkError as error:
-        raise HTTPException(error.status_code, detail={"code": error.code, "message": str(error)}) from error
-    return Response(content=result, media_type="application/geo+json")
 
 
 @router.post("/api/agent-raster-download-file")

@@ -121,6 +121,7 @@ class UnifiedBackendTests(unittest.TestCase):
             ('POST', '/api/recommended-layer-render'),
             ('POST', '/api/agent-raster-layers'),
             ('POST', '/api/agent-raster-download'),
+            ('POST', '/api/road-network'),
         )
         with self.client as client:
             client.get('/api/harness/session').raise_for_status()

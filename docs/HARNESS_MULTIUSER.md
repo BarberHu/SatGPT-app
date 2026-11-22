@@ -88,6 +88,8 @@ HTTPS 网关设置 `SATGPT_PUBLIC_ORIGIN` 为浏览器实际访问的 origin，�
 
 收到 runtime 不可用时查看 `/readyz`，再对整个后端做进程级恢复。该操作影响进程内全部活动任务。清理不能确认的任务持续占用自己的名额，进程重启后可查看其结果状态。
 
+Agent 的 OSM 查询、Overpass 客户端和快照读取位于 harness/app，由 DSH 工具调用。Basic 的道路和建筑预览使用 Mapbox Streets v8 矢量瓦片。
+
 ## SQLite 排队
 
 提交成功返回 `202` 和 `queued`。任务记录与用户消息在同一事务写入，调度器按提交顺序领取。启动、运行、停止和清理占用执行槽。排队任务可以用原任务 ID 查询和接收 SSE，关闭页面后刷新仍可恢复进度。

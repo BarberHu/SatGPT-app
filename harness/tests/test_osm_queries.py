@@ -10,8 +10,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import httpx
 
-from basic.osm_queries import ATTRIBUTION, OverpassQueries
-from basic.road_network import RoadNetworkError
+from harness.app.osm_queries import ATTRIBUTION, OverpassQueries
+from harness.app.osm_transport import RoadNetworkError
 from harness.app.controller import TaskController
 from harness.app.identity import owner_for
 from harness.app.osm_worker import execute

@@ -11,7 +11,7 @@ from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, P
 from shapely.ops import linemerge
 
 from harness.app.analysis_region import validate_analysis_region
-from .road_network import MAX_RESULT_BYTES, MAX_WAYS, ROAD_CLASSES, OverpassClient, RoadNetworkError, checked_elements, geometry_positions
+from .osm_transport import MAX_RESULT_BYTES, MAX_WAYS, ROAD_CLASSES, OverpassClient, RoadNetworkError, checked_elements, geometry_positions
 
 
 ATTRIBUTION = "© OpenStreetMap contributors"
