@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Map as MapIcon, MessageSquare, PanelLeft, X } from 'lucide-react';
 import { useAgentChat } from './hooks/useAgentChat';
 import { useAgentMap } from './hooks/useAgentMap';
@@ -6,6 +6,8 @@ import { useAgentRegion } from './hooks/useAgentRegion';
 import AreaControls from '../aoi/AreaControls';
 import { getBoundsFromGeometry } from '../utils/aoi';
 import { regionKey, selectionKey } from './map/regionSelection';
+import { usePersonal } from '../personal/PersonalContext';
+import { visibleMapMessages } from '../personal/mapInputs';
 import ConversationSidebar from './components/ConversationSidebar';
 import MessageList from './components/MessageList';
 import Composer from './components/Composer';
@@ -29,12 +31,17 @@ function useNarrowLayout() {
 }
 
 export default function HarnessApp({ active = true, onHistoryToolsChange }) {
+  const personal = usePersonal();
   const narrow = useNarrowLayout();
   const [historyOpen, setHistoryOpen] = useState(() => !window.matchMedia?.('(max-width: 960px)').matches);
   const [mobileView, setMobileView] = useState('chat');
   const [prompt, setPrompt] = useState('');
   const chat = useAgentChat({ visible: active && (!narrow || (mobileView === 'chat' && !historyOpen)) });
-  const map = useAgentMap(chat.conversationId, chat.messages);
+  useEffect(() => { personal.setConversation(chat.conversationId); }, [chat.conversationId, personal.setConversation]);
+  useEffect(() => { if (personal.displayVersion) chat.refreshConversation?.(); }, [personal.displayVersion]);
+  const mapMessages = useMemo(() => visibleMapMessages(chat.messages, personal.connection, personal.user?.owner),
+    [chat.messages, personal.connection, personal.user?.owner]);
+  const map = useAgentMap(chat.conversationId, mapMessages);
   const region = useAgentRegion(chat.conversationId, chat.messages, active);
   const toggleHistory = useCallback(() => setHistoryOpen(open => !open), []);
   useEffect(() => {
@@ -70,7 +77,7 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
     const geometry = region.snapshot();
     const area = geometry ? getBoundsFromGeometry(geometry) : null;
     const bounds = area ? [area.west, area.south, area.east, area.north] : map.bounds();
-    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata())) setPrompt('');
+    if (text && bounds && await chat.send(text, bounds, geometry, region.metadata(), personal.selected.map(row => row.id))) setPrompt('');
   };
   const editRegion = () => {
     if (region.begin() && narrow) setMobileView('map');
@@ -103,6 +110,8 @@ export default function HarnessApp({ active = true, onHistoryToolsChange }) {
               reconnecting={chat.reconnecting} onSuggest={setPrompt} onFocusLayer={focusLayer} />
             {chat.error ? <div className="agent-chat-error" role="alert"><span>{chat.error}</span><Button type="button" variant="ghost" size="icon" aria-label="Dismiss error" onClick={chat.clearError}><X /></Button></div> : null}
             <Composer value={prompt} onChange={setPrompt} onSend={send} onStop={chat.stop}
+              dataActions={<div className="personal-data-chips"><button type="button" onClick={personal.open}>My data / upload</button>
+                {personal.selected.map(row => <button key={row.id} type="button" aria-label={`Remove data input ${row.name}`} onClick={() => personal.remove(row.id)}>{row.name} ×</button>)}</div>}
               region={region} onEditRegion={editRegion}
               areaControls={<AreaControls hideEditAction current={region.aoi} scopeKey={`${active ? 'agent' : 'inactive'}:${chat.conversationId}`} disabled={!active || !region.ready || region.editing || chat.loading || chat.pending}
                 onUse={region.use} onEdit={aoi => { if (region.begin(aoi) && narrow) setMobileView('map'); }}

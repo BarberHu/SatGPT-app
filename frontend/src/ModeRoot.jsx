@@ -1,4 +1,5 @@
-import React, { lazy, Suspense, useState } from 'react';
+import React, { lazy, Suspense, useLayoutEffect, useRef, useState } from 'react';
+import { PersonalProvider, usePersonal } from './personal/PersonalContext';
 import App from './App';
 import { AoiLibraryProvider } from './aoi/AoiLibraryContext';
 import { AppProvider } from './context/AppContext';
@@ -10,11 +11,20 @@ import './styles/workspace.css';
 const HarnessApp = lazy(() => import('./harness/App'));
 const MODE_STORAGE_KEY = 'satgpt:mode';
 function initialMode() {
+  if (new URLSearchParams(window.location.search).get('mode') === 'agent') return 'agent';
   try { return window.sessionStorage.getItem(MODE_STORAGE_KEY) === 'agent' ? 'agent' : 'basic'; }
   catch { return 'basic'; }
 }
 function Workspace({ mode, changeMode, agentVisited }) {
   const map = useSharedMap();
+  const personal = usePersonal();
+  const priorIdentity = useRef(personal.workspaceKey);
+  useLayoutEffect(() => {
+    if (priorIdentity.current !== personal.workspaceKey) {
+      map.service?.clearAgentWorkspaces();
+      priorIdentity.current = personal.workspaceKey;
+    }
+  }, [personal.workspaceKey, map.service]);
   const [historyTools, setHistoryTools] = useState(null);
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState('');
@@ -33,11 +43,11 @@ function Workspace({ mode, changeMode, agentVisited }) {
     <main className="satgpt-mode-content">
       <SharedMapSurface />
       <div className="satgpt-business-panel satgpt-basic-panel" hidden={mode !== 'basic'} role="tabpanel" id="satgpt-panel-basic" aria-labelledby="satgpt-tab-basic">
-        <App active={mode === 'basic'} />
+        {personal.local && !personal.local.basic_available ? <div className="satgpt-mode-loading" role="status">Basic cloud services are unavailable in local Agent mode. Switch to intelligent analysis and connect your Google account.</div> : <App active={mode === 'basic'} />}
       </div>
       {agentVisited ? <div className="satgpt-business-panel satgpt-agent-panel" hidden={mode !== 'agent'} role="tabpanel" id="satgpt-panel-agent" aria-labelledby="satgpt-tab-agent">
         <Suspense fallback={<div className="satgpt-mode-loading" role="status">Loading intelligent analysis…</div>}>
-          <HarnessApp active={mode === 'agent'} onHistoryToolsChange={setHistoryTools} />
+          {personal.ready ? <HarnessApp key={personal.workspaceKey} active={mode === 'agent'} onHistoryToolsChange={setHistoryTools} /> : <p role="status">Checking account workspace…</p>}
         </Suspense>
       </div> : null}
     </main>
@@ -52,7 +62,7 @@ export default function ModeRoot() {
     setMode(next);
     try { sessionStorage.setItem(MODE_STORAGE_KEY, next); } catch { /* Optional storage. */ }
   };
-  return <AoiLibraryProvider><AppProvider><SharedMapProvider mode={mode}>
+  return <AoiLibraryProvider><AppProvider><SharedMapProvider mode={mode}><PersonalProvider>
     <Workspace mode={mode} changeMode={changeMode} agentVisited={agentVisited} />
-  </SharedMapProvider></AppProvider></AoiLibraryProvider>;
+  </PersonalProvider></SharedMapProvider></AppProvider></AoiLibraryProvider>;
 }

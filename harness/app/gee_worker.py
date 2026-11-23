@@ -14,7 +14,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import urlopen, Request, build_opener, ProxyHandler
 
 
 SAFE_BUILTINS = {"int": int, "float": float, "str": str, "bool": bool,
@@ -24,26 +24,51 @@ SAFE_BUILTINS = {"int": int, "float": float, "str": str, "bool": bool,
                  "enumerate": enumerate, "zip": zip, "any": any, "all": all}
 DENIED_NAMES = {"open", "exec", "eval", "compile", "globals", "locals", "vars",
                 "getattr", "setattr", "delattr", "__import__", "breakpoint"}
-DENIED_EE_ATTRIBUTES = {"data", "batch", "Export", "ServiceAccountCredentials"}
+DENIED_EE_ATTRIBUTES = {"data", "batch", "Export", "ServiceAccountCredentials", "Initialize", "Authenticate", "Reset"}
 _SESSION = None
 _PROJECT = None
+_CREDENTIAL_KIND = 'unavailable'
+
+
+def personal_credentials():
+    endpoint, lease = os.getenv('SATGPT_GEE_BROKER'), os.getenv('SATGPT_GEE_LEASE')
+    if not endpoint or not lease:
+        return None
+    from urllib.parse import urlsplit
+    parsed = urlsplit(endpoint)
+    if parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.path != '/credentials':
+        raise ValueError('Invalid internal credential broker')
+    try:
+        opener = build_opener(ProxyHandler({}))
+        with opener.open(Request(endpoint, headers={'Authorization': 'Bearer ' + lease}), timeout=35) as response:
+            value = json.loads(response.read(16000))
+        return value
+    except Exception as exc:
+        raise ValueError('Reconnect the original personal Earth Engine account.') from exc
+
+
+def preview_directory():
+    return Path(os.getenv('SATGPT_PREVIEW_DIR') or Path(__file__).resolve().parent.parent / 'state' / 'previews')
 
 
 def earth_engine(project: str):
     """Keep one authenticated Earth Engine client for the worker lifetime."""
-    global _SESSION, _PROJECT
-    if _SESSION is not None and _PROJECT == project:
+    global _SESSION, _PROJECT, _CREDENTIAL_KIND
+    personal = personal_credentials()
+    if not personal:
+        raise ValueError('Sign in with Google. Agent GEE execution requires a user OAuth credential lease.')
+    key = (personal['project'], personal['connection'], personal['revision'], personal['access_token']) if personal else project
+    if _SESSION is not None and _PROJECT == key:
         return _SESSION
     import ee
-    import google.auth
     from google.oauth2.credentials import Credentials as UserCredentials
-    from google.oauth2.service_account import Credentials as ServiceCredentials
 
-    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/earthengine"])
-    if isinstance(credentials, UserCredentials) or not isinstance(credentials, ServiceCredentials):
-        raise ValueError("GEE worker requires a service account credential")
+    if personal:
+        credentials = UserCredentials(token=personal['access_token'])
+        project = personal['project']
+        _CREDENTIAL_KIND = 'personal'
     ee.Initialize(credentials=credentials, project=project)
-    _SESSION, _PROJECT = ee, project
+    _SESSION, _PROJECT = ee, key
     return ee
 
 
@@ -97,6 +122,9 @@ def code_warnings(code: str) -> list[str]:
 
 def run_code(ee, code: str, analysis_context=None):
     scope = {"ee": ee, "__builtins__": SAFE_BUILTINS}
+    constructors = {'IMAGE': 'Image', 'IMAGE_COLLECTION': 'ImageCollection', 'TABLE': 'FeatureCollection'}
+    scope['analysis_inputs'] = {row['id']: getattr(ee, constructors[row['type']])(row['asset_id'])
+                                for row in ((analysis_context or {}).get('execution') or {}).get('data_refs', [])}
     if analysis_context is not None:
         # A fresh scope on every execution, including analysis_code. Never cache
         # mutable task geometry in this persistent worker's module globals.
@@ -155,13 +183,16 @@ def execute(payload: dict) -> dict:
         analysis_code = payload.get("analysis_code")
         if isinstance(analysis_code, str) and analysis_code.strip():
             checked_code(analysis_code)
-    project = payload.get("project")
+    execution = (payload.get('analysis_context') or {}).get('execution') or {}
+    if execution.get('mode') == 'personal' and not os.getenv('SATGPT_GEE_BROKER'):
+        raise ValueError('Personal analysis requires its original authenticated execution context.')
+    project = execution.get('project') or payload.get("project")
     if not project:
-        raise ValueError("Missing GEE_PROJECT_ID. Set it in the project root .env.")
+        raise ValueError('Verify your Earth Engine project before starting analysis.')
     ee = earth_engine(project)
     if operation == "status":
         return {"python": sys.version.split()[0], "ee_version": getattr(ee, "__version__", "unknown"),
-                "project": project, "credential_type": "service_account",
+                "project": project, "credential_type": _CREDENTIAL_KIND,
                 "initialized": True, "server_round_trip": ee.Number(1).add(1).getInfo() == 2}
     if operation == "eval":
         return {"result": jsonable(run_code(ee, payload["code"], payload.get('analysis_context')))}
@@ -186,7 +217,7 @@ def execute(payload: dict) -> dict:
             png = response.read(12_000_001)
         if len(png) > 12_000_000 or not png.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("The GEE preview is not a valid PNG or exceeds 12 MB")
-        preview_dir = Path(__file__).resolve().parent.parent / "state" / "previews"
+        preview_dir = preview_directory()
         preview_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{uuid.uuid4().hex}.png"
         (preview_dir / filename).write_bytes(png)
@@ -243,7 +274,7 @@ def save_thumbnail(image, visualization, bounds, ee):
         png = response.read(4_000_001)
     if len(png) > 4_000_000 or len(png) < 24 or not png.startswith(b'\x89PNG\r\n\x1a\n'):
         raise ValueError('Invalid layer thumbnail PNG')
-    directory = Path(__file__).resolve().parent.parent / 'state' / 'previews'
+    directory = preview_directory()
     directory.mkdir(parents=True, exist_ok=True)
     filename = f'{uuid.uuid4().hex}.png'
     (directory / filename).write_bytes(png)

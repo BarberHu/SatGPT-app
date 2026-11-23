@@ -8,8 +8,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-def selected_provider() -> str:
-    provider = os.getenv("DSH_PROVIDER", "deepseek-official").strip().lower()
+def selected_provider(environment=None) -> str:
+    environment = os.environ if environment is None else environment
+    provider = environment.get("DSH_PROVIDER", "deepseek-official").strip().lower()
     if provider not in {"aihubmix", "deepseek-official"}:
         raise ValueError("DSH_PROVIDER must be aihubmix or deepseek-official")
     return provider
@@ -20,9 +21,10 @@ def model_key_configured() -> bool:
     return bool(os.getenv(key_name, "").strip())
 
 
-def selected_reasoning_effort(model: str | None = None) -> str | None:
-    model = model or os.getenv("DSH_MODEL", "deepseek-v4-flash")
-    value = os.getenv("DSH_REASONING_EFFORT", "").strip().lower()
+def selected_reasoning_effort(model: str | None = None, environment=None) -> str | None:
+    environment = os.environ if environment is None else environment
+    model = model or environment.get("DSH_MODEL", "deepseek-v4-flash")
+    value = environment.get("DSH_REASONING_EFFORT", "").strip().lower()
     if not value:
         value = "high" if "deepseek" in model.lower() else "default"
     if value not in {"default", "off", "low", "high", "max"}:
@@ -30,8 +32,9 @@ def selected_reasoning_effort(model: str | None = None) -> str | None:
     return None if value == "default" else value
 
 
-def selected_max_tokens() -> int:
-    raw = os.getenv("DSH_MAX_TOKENS", "32768").strip()
+def selected_max_tokens(environment=None) -> int:
+    environment = os.environ if environment is None else environment
+    raw = environment.get("DSH_MAX_TOKENS", "32768").strip()
     try:
         value = int(raw)
     except ValueError as exc:
@@ -41,17 +44,18 @@ def selected_max_tokens() -> int:
     return value
 
 
-def harness_model_options(home: Path) -> dict:
-    provider = selected_provider()
-    model = os.getenv("DSH_MODEL", "deepseek-v4-flash").strip()
+def harness_model_options(home: Path, environment=None) -> dict:
+    environment = os.environ if environment is None else environment
+    provider = selected_provider(environment)
+    model = environment.get("DSH_MODEL", "deepseek-v4-flash").strip()
     if not model:
         raise ValueError("DSH_MODEL must not be empty")
-    effort = selected_reasoning_effort(model)
+    effort = selected_reasoning_effort(model, environment)
     effort_option = {"reasoning_effort": effort} if effort else {}
     if provider == "deepseek-official":
         return {"provider": provider, "model": model, **effort_option}
 
-    base_url = os.getenv("AIHUBMIX_BASE_URL", "https://aihubmix.com/v1").strip().rstrip("/")
+    base_url = environment.get("AIHUBMIX_BASE_URL", "https://aihubmix.com/v1").strip().rstrip("/")
     parsed = urlparse(base_url)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         raise ValueError("AIHUBMIX_BASE_URL must be an HTTPS URL without credentials or API keys")

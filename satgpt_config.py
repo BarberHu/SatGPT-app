@@ -26,7 +26,9 @@ DEFAULTS = {
 
 def load_project_env(root: Path = PROJECT_ROOT) -> Path:
     env_file = root / '.env'
-    load_dotenv(env_file, override=False, interpolate=False)
+    # The local application never inherits repository model/admin credentials.
+    if os.getenv('SATGPT_RUN_MODE') != 'local':
+        load_dotenv(env_file, override=False, interpolate=False)
     for name, value in DEFAULTS.items():
         os.environ.setdefault(name, value)
     raw = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', '').strip()
@@ -71,6 +73,9 @@ def validate_url(name: str, https_only=False):
 
 
 def validate_config(component='all'):
+    if os.getenv('SATGPT_RUN_MODE') == 'local':
+        # Account, project and model setup are interactive and checked at task creation.
+        return
     ports = [integer(name) for name in ('AGENT_PORT', 'FRONTEND_PORT')]
     if len(set(ports)) != 2:
         invalid('AGENT_PORT/FRONTEND_PORT', 'must use distinct ports')
@@ -84,7 +89,7 @@ def validate_config(component='all'):
             invalid(name, 'must be true or false')
     integer('PROXY_TIMEOUT_MS', 1, 86400000)
     integer('PROXY_MAX_SOCKETS', 1, 65535)
-    if component in {'all', 'backend', 'basic', 'harness'}:
+    if component in {'all', 'backend', 'basic'}:
         required_env('GEE_PROJECT_ID')
         credential = Path(required_env('GOOGLE_APPLICATION_CREDENTIALS'))
         if not credential.is_file():

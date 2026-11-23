@@ -174,7 +174,7 @@ export function useAgentChat({ visible = true } = {}) {
     }
   }, [loading, pending, stopping]);
 
-  const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null) => {
+  const send = useCallback(async (prompt, bounds, analysis_region = null, analysis_aoi = null, data_refs = []) => {
     if (deleteRequest.current || action.current || pending || loading || ['queued', 'running'].includes(task?.status)) return false;
     action.current = true;
     setPending(true);
@@ -183,7 +183,7 @@ export function useAgentChat({ visible = true } = {}) {
     const signal = request.current?.signal;
     const id = conversationId.current;
     try {
-      const next = await chatApi.send({ prompt, bounds, analysis_region, ...(analysis_aoi ? { analysis_aoi } : {}), conversation_id: id }, signal);
+      const next = await chatApi.send({ prompt, bounds, analysis_region, ...(analysis_aoi ? { analysis_aoi } : {}), ...(data_refs.length ? { data_refs } : {}), conversation_id: id }, signal);
       if (!alive.current || epoch !== generation.current) return false;
       setTask(next);
       await load(epoch, signal, id);
@@ -256,5 +256,6 @@ export function useAgentChat({ visible = true } = {}) {
   const conversationsWithActivity = useConversationActivity(sidebarConversations, conversation, visible && !loading, deletedId);
   return { ...view, conversationId: conversation.conversation_id, messages: conversation.messages,
     conversations: conversationsWithActivity, loading, pending, stopping, deleting, reconnecting, error, clearError: () => setError(''),
-    changeConversation, deleteConversation, send, stop };
+    changeConversation, deleteConversation, send, stop,
+    refreshConversation: () => load(generation.current, request.current?.signal, conversationId.current) };
 }

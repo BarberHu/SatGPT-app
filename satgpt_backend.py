@@ -20,6 +20,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="SatGPT API", version="1.0.0", lifespan=lifespan)
 app.include_router(basic.router)
 app.include_router(harness.router)
+from harness.app.personal.routes import install as install_personal
+install_personal(app)
 
 
 def component_status(request: Request) -> dict:

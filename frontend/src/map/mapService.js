@@ -79,6 +79,11 @@ export class MapService {
     this.mode = mode; this.engine.setBasicActive?.(mode === 'basic'); this.syncGroups();
   }
   selectConversation(id) { if (this.conversation !== id) { this.conversation = id; this.syncGroups(); } }
+  clearAgentWorkspaces() {
+    for (const row of [...this.layers.values()]) if (row.group.startsWith('agent:')) this.removeLayer(row.layer.id, row.group);
+    for (const group of this.scopes.keys()) if (group.startsWith('agent:')) this.scopes.delete(group);
+    this.selectConversation(null);
+  }
   syncGroups() { for (const row of this.layers.values()) this.engine.setVisibility(this.physical(row.group, row.layer.id), row.layer.visible && this.enabled(row.group)); }
   scope(group) {
     if (this.scopes.has(group)) return this.scopes.get(group);

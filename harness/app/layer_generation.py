@@ -17,7 +17,7 @@ from .gee_worker import checked_code
 def generation_recipe(code, layer, context=None):
     if not isinstance(code, str) or not code.strip():
         return None
-    return {'version': 1, 'code': code,
+    return {'version': 2 if (context or {}).get('execution') else 1, 'code': code,
             'visualization': {'name': layer.get('name', 'GEE result layer'), **(layer.get('visualization') or {})},
             'bounds': copy.deepcopy(layer.get('bounds')),
             'metadata': copy.deepcopy(layer.get('metadata') or {}),
@@ -26,7 +26,7 @@ def generation_recipe(code, layer, context=None):
 
 
 def replay_payload(recipe):
-    if not isinstance(recipe, dict) or recipe.get('version') != 1:
+    if not isinstance(recipe, dict) or recipe.get('version') not in {1, 2}:
         raise ValueError('Original generation parameters are unavailable for this layer.')
     code = recipe.get('code')
     checked_code(code)
@@ -64,7 +64,8 @@ def restore_generation_recipes(messages, conversation_id):
                 continue
         user = users.get(message.get('job_id'), {})
         context = ({'task_id': message.get('job_id'), 'conversation_id': conversation_id,
-                    'bounds': user.get('bounds'), 'analysis_region': user.get('analysis_region')}
+                    'bounds': user.get('bounds'), 'analysis_region': user.get('analysis_region'),
+                    **({'execution': user['execution']} if user.get('execution') else {})}
                    if user.get('bounds') is not None else None)
         for layer in layers:
             if not layer.get('generation'):
@@ -101,8 +102,25 @@ class LayerWorkerRunner:
         self.lock = threading.Lock()
         self.processes = set()
         self.closed = False
+        self.concurrency_gate = None
 
     def run(self, payload):
+        gate = self.concurrency_gate
+        if gate and not gate.acquire(blocking=False):
+            raise RuntimeError('Two layers are already reloading. Please wait and try again.')
+        try:
+            return self._run(payload)
+        finally:
+            if gate:
+                gate.release()
+
+    def _run(self, payload):
+        payload = copy.deepcopy(payload)
+        runtime = payload.pop('_worker_env', {})
+        environment = {**os.environ, 'SATGPT_GEE_BROKER': '', 'SATGPT_GEE_LEASE': '', **runtime}
+        for name in ('OPENAI_API_KEY', 'DEEPSEEK_API_KEY', 'AIHUBMIX_API_KEY', 'GOOGLE_OAUTH_CLIENT_SECRET', 'SATGPT_TOKEN_ENCRYPTION_KEY'):
+            environment.pop(name, None)
+        environment.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
         worker = self.root / 'app' / 'gee_worker.py'
         if not worker.is_file():
             worker = Path(__file__).with_name('gee_worker.py')
@@ -114,6 +132,7 @@ class LayerWorkerRunner:
             process = subprocess.Popen([sys.executable, '-X', 'utf8', '-I', str(worker)],
                                        cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                        stderr=subprocess.DEVNULL, text=True, encoding='utf-8',
+                                       env=environment,
                                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             self.processes.add(process)
         request_id = uuid.uuid4().hex

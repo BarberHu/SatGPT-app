@@ -1,5 +1,8 @@
+import { sessionHeaders, currentWorkspace, validateWorkspace } from '../personal/api';
 async function request(path, { signal, ...options } = {}) {
-  const response = await fetch(`/api/harness${path}`, { signal, ...options });
+  const expected = currentWorkspace();
+  const response = await fetch(`/api/harness${path}`, { signal, ...options, headers: { ...sessionHeaders(), ...options.headers } });
+  validateWorkspace(response, expected);
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || data.error || `HTTP ${response.status}`);
   return data;

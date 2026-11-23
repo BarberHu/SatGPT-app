@@ -1,5 +1,7 @@
 # Shared map workspace
 
+Experimental personal GEE uses this same map and layer protocol. See [setup and verification boundaries](../../../PERSONAL_GEE.md). Identity changes clear Agent groups and remount its conversation without recreating the map; AOI and Basic storage formats are preserved.
+
 `ModeRoot` keeps `AppProvider` and `SharedMapProvider` mounted for the workspace lifetime. The Basic panel stays mounted; the Agent panel mounts on its first visit and then retains its chat, input, history and SSE state. Only the business panels and layer groups are switched.
 
 `SharedMapSurface` owns the stable canvas container. `SharedMapViewport` describes its visible rectangle without moving or remounting the canvas. A single layout observer follows sidebars, resizable panels and narrow-screen tabs. `MapScale`, navigation, snapshots, English basemap labels, load/error state and persisted camera belong to the shared workspace.

@@ -89,6 +89,9 @@ coverage/
 # Keep backend consolidation regression tests reviewable.
 !/harness/tests/
 !/harness/tests/*.test.mjs
+!/harness/tests/test_personal.py
+!/harness/tests/test_personal_uploads.py
+!/harness/tests/test_local_app.py
 !/scripts/tests/
 !/scripts/tests/*.test.cjs
 !/frontend/src/config/viteProxyConfig.test.js

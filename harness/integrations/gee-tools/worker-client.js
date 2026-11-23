@@ -13,9 +13,12 @@ export class WorkerClient {
 
   start() {
     if (this.child) return;
+    const environment = { ...process.env };
+    for (const name of ['OPENAI_API_KEY', 'DEEPSEEK_API_KEY', 'AIHUBMIX_API_KEY', 'GOOGLE_OAUTH_CLIENT_SECRET', 'SATGPT_TOKEN_ENCRYPTION_KEY']) delete environment[name];
+    delete environment.GOOGLE_APPLICATION_CREDENTIALS;
     const child = spawn(this.python, ['-X', 'utf8', '-I', this.worker], {
       cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
-      env: process.env,
+      env: environment,
     });
     this.child = child;
     child.stdout.setEncoding('utf8');

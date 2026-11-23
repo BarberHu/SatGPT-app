@@ -29,6 +29,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: frontendRoot,
+    cacheDir: path.join(frontendRoot, '.cache', 'vite'),
     plugins: [react()],
     envDir: false,
     envPrefix: [],

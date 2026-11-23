@@ -6,6 +6,8 @@ SatGPT 是基于 Google Earth Engine（GEE）的遥感分析应用，将交互�
 
 应用提供 **Static layers（Basic，静态图层）** 和 **Intelligent analysis（Agent，智能分析）** 两种模式。两者共用持续挂载的一个 Mapbox 地图和当前视野，同时分别保留各自的分析状态。
 
+实验分支新增 Google/GEE 个人账户连接、个人资产分析与 GeoTIFF/GeoJSON 上传，默认关闭。启用步骤、格式限制及真实服务待验证事项见 [PERSONAL_GEE.md](PERSONAL_GEE.md)。
+
 ## 功能
 
 | 领域 | 能力 |
@@ -222,3 +224,6 @@ Basic 保持单轮语义及独立模型配置；Harness 保留多轮本地会话
 - [图表集成与第三方归属说明](frontend/src/harness/echarts/README.md)（英文）。
 
 图表集成包含第三方校验器代码，其[许可证](frontend/src/harness/echarts/vendor/LICENSE)与[归属声明](frontend/src/harness/echarts/vendor/NOTICE)随代码保留。重新分发这部分代码时，请保留这些归属文件。
+# 本地个人账号实验
+
+在 `codex/gee-personal-upload` 实验工作树中，可参照 [本地 Agent 使用说明](LOCAL_AGENT.md) 运行本机 Agent，并通过 Google Desktop OAuth 连接个人 GEE。该入口与下方原有统一后端启动方式分开，业务数据保存在本机；GEE 和云端模型请求仍会发送给相应服务。

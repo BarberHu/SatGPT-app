@@ -4,7 +4,7 @@ import { Button } from '../ui/button';
 import AttachmentList from './AttachmentList';
 import { regionPresentation } from '../map/regionPresentation';
 
-export default function Composer({ value, onChange, onSend, onStop, busy, pending, stopping, stopDisabled, disabled, mapReady, region, onEditRegion, areaControls }) {
+export default function Composer({ value, onChange, onSend, onStop, busy, pending, stopping, stopDisabled, disabled, mapReady, region, onEditRegion, areaControls, dataActions }) {
   const input = useRef(null);
   const area = regionPresentation(region, mapReady);
   const sendingDisabled = disabled || region?.editing;
@@ -16,6 +16,7 @@ export default function Composer({ value, onChange, onSend, onStop, busy, pendin
   return <div className="agent-composer-wrap">
     <form className="agent-composer harness-compose" onSubmit={event => { event.preventDefault(); if (value.trim() && !sendingDisabled) onSend(); }}>
       <AttachmentList items={[]} />
+      {dataActions}
       <textarea ref={input} aria-label="Message" value={value} rows={1}
         onChange={event => onChange(event.target.value)}
         placeholder="Ask about the map, explore data, or start an analysis…"

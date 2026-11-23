@@ -94,13 +94,20 @@ class LayerReloadTests(unittest.TestCase):
             try:
                 with self.assertRaisesRegex(RuntimeError,'already reloading'):
                     self.controller.reload_layer(self.cid,self.layer_id)
+                with self.assertRaisesRegex(RuntimeError, 'busy'):
+                    self.controller.delete_conversation(self.cid)
                 new = self.controller.new_conversation()
+                # Switching does not make a background reload safe to delete.
+                with self.assertRaisesRegex(RuntimeError, 'busy'):
+                    self.controller.delete_conversation(self.cid)
             finally: released.set()
             result = future.result(3)
         self.assertEqual(result['conversation_id'],self.cid)
         self.assertEqual(self.controller.conversation()['conversation_id'],new['conversation_id'])
         self.assertEqual(self.controller.conversation()['messages'],[])
         self.assertEqual(self.controller.conversation(self.cid)['messages'][-1]['layers'][0]['reload_version'],1)
+        self.controller.delete_conversation(self.cid)
+        with self.assertRaises(FileNotFoundError): self.controller.conversation(self.cid)
 
     def test_http_uses_saved_code_ignores_client_code_and_masks_service_urls(self):
         app = FastAPI(); app.include_router(server.router); app.state.controller = self.controller

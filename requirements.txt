@@ -18,6 +18,15 @@ httpx==0.28.1
 pydantic==2.14.2
 requests==2.34.2
 reportlab==4.5.1
+# Experimental personal GEE: OAuth protocol client and GeoTIFF metadata reader.
+requests-oauthlib==2.0.0
+oauthlib==4.0.1
+rasterio==1.4.3
+affine==3.0.1
+attrs==26.1.0
+click-plugins==1.1.1.2
+cligj==0.7.2
+numpy==2.5.4
 
 # Transitive dependencies (pinned for repeatable installation)
 annotated-doc==0.0.5

@@ -1,9 +1,11 @@
 import React from 'react';
 import { Camera, PanelLeft, PanelLeftClose, Settings2, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { usePersonal } from '../personal/PersonalContext';
 
 const modes = [{ id: 'basic', label: 'Static layers' }, { id: 'agent', label: 'Intelligent analysis' }];
 export default function WorkspaceHeader({ mode, onModeChange, canCapture, capturing, onCapture, captureHint, historyTools }) {
+  const personal = usePersonal();
   const navigate = event => {
     const index = modes.findIndex(item => item.id === mode);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? modes.length - 1
@@ -28,6 +30,7 @@ export default function WorkspaceHeader({ mode, onModeChange, canCapture, captur
         tabIndex={mode === item.id ? 0 : -1} onClick={() => onModeChange(item.id)}>{item.label}</button>)}
     </div>
     <div className="satgpt-topbar-actions">
+      <button type="button" className="satgpt-toolbar-button personal-account-button" onClick={personal.open} title="Google Earth Engine and my data" aria-label="Google Earth Engine and my data">{personal.user ? 'My data' : 'Google / GEE'}</button>
       <button type="button" className="satgpt-toolbar-button" aria-label="Save map image" title={canCapture ? 'Save current map image' : captureHint || 'Map capture will be available when the map is ready'}
         disabled={!canCapture || capturing} onClick={onCapture}><Camera size={20} strokeWidth={1.7} /></button>
       <Dialog.Root><Dialog.Trigger asChild>

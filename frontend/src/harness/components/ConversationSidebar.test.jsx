@@ -43,6 +43,51 @@ test('history is text-only; work uses spinners and only unread non-current chats
   expect(onSelect).toHaveBeenCalledWith('live');
 });
 
+test('delete is a separate accessible button, asks for confirmation and Cancel preserves the chat', async () => {
+  const onDelete = vi.fn(), onSelect = vi.fn();
+  await act(async () => root.render(<ConversationSidebar conversations={[{ id: 'old', title: 'History' }]}
+    onSelect={onSelect} onDelete={onDelete} />));
+  const remove = node.querySelector('[aria-label="Delete conversation: History"]');
+  expect(remove.closest('.agent-conversation')).toBeNull();
+  await act(async () => remove.click());
+  const dialog = document.querySelector('.agent-delete-dialog');
+  expect(dialog.textContent).toContain('History');
+  expect(document.activeElement.textContent).toBe('Cancel');
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(onDelete).not.toHaveBeenCalled();
+  await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === 'Cancel').click());
+  expect(document.querySelector('.agent-delete-dialog')).toBeNull();
+  expect(onDelete).not.toHaveBeenCalled();
+});
+
+test('confirmation blocks repeated clicks, shows failures and closes after a successful retry', async () => {
+  const onDelete = vi.fn(); let finish;
+  onDelete.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(true);
+  await act(async () => root.render(<ConversationSidebar conversations={[{ id: 'old', title: 'History' }]}
+    onDelete={onDelete} deleteError="This conversation is busy." />));
+  await act(async () => node.querySelector('[aria-label="Delete conversation: History"]').click());
+  const confirm = [...document.querySelectorAll('.agent-delete-dialog button')].find(button => button.textContent === 'Delete');
+  await act(async () => { confirm.click(); confirm.click(); });
+  expect(onDelete).toHaveBeenCalledTimes(1);
+  expect(confirm.disabled).toBe(true);
+  await act(async () => finish(false));
+  expect(document.querySelector('.agent-delete-dialog [role="alert"]').textContent).toBe('This conversation is busy.');
+  expect(row('History')).not.toBeNull();
+  await act(async () => confirm.click());
+  expect(onDelete).toHaveBeenLastCalledWith('old');
+  expect(document.querySelector('.agent-delete-dialog')).toBeNull();
+});
+
+test.each(['running', 'queued'])('delete is disabled for a %s conversation', async status => {
+  const onDelete = vi.fn();
+  await act(async () => root.render(<ConversationSidebar onDelete={onDelete}
+    conversations={[{ id: 'work', title: 'Busy', task_status: status }]} />));
+  const remove = node.querySelector('[aria-label="Delete conversation: Busy"]');
+  expect(remove.disabled).toBe(true);
+  await act(async () => remove.click());
+  expect(document.querySelector('.agent-delete-dialog')).toBeNull();
+});
+
 test('background completion refreshes the badge without switching chats and stops polling when idle', async () => {
   let status = 'running';
   chatApi.current.mockResolvedValue({ conversation_id: 'webgis-two', messages: [], active_task: null });

@@ -9,6 +9,8 @@ export default function ConversationSidebar({ conversations, currentId, disabled
   const [failed, setFailed] = useState(false);
   const submitting = useRef(false);
   const cancelButton = useRef(null);
+  const deleteButton = useRef(null);
+  const newChatButton = useRef(null);
   const confirmDelete = async () => {
     if (submitting.current) return;
     submitting.current = true;
@@ -26,7 +28,7 @@ export default function ConversationSidebar({ conversations, currentId, disabled
   };
   return <aside className={`agent-history${onCollapse ? ' has-close' : ''}`} aria-label="Conversation history">
     {onCollapse ? <Button type="button" variant="ghost" size="icon" className="agent-history-close" aria-label="Collapse conversation history" onClick={onCollapse}><X /></Button> : null}
-    <Button type="button" variant="outline" className="agent-new" onClick={onNew} disabled={disabled}><Plus />New chat</Button>
+    <Button ref={newChatButton} type="button" variant="outline" className="agent-new" onClick={onNew} disabled={disabled}><Plus />New chat</Button>
     <p className="agent-history-label">Your conversations</p>
     <nav className="agent-conversations" aria-label="Conversations">
       {conversations.length === 0 ? <p className="agent-history-empty">Your conversations will appear here</p> : null}
@@ -44,7 +46,7 @@ export default function ConversationSidebar({ conversations, currentId, disabled
         </button>
         {onDelete ? <Button type="button" variant="ghost" size="icon" className="agent-conversation-delete"
           aria-label={`Delete conversation: ${item.title}`} title={running || queued ? 'Wait for this task to finish before deleting' : 'Delete conversation'}
-          disabled={disabled || running || queued} onClick={() => { setFailed(false); setSelected(item); }}><Trash2 size={14} /></Button> : null}
+          disabled={disabled || running || queued} onClick={event => { deleteButton.current = event.currentTarget; setFailed(false); setSelected(item); }}><Trash2 size={14} /></Button> : null}
         </div>;
       })}
     </nav>
@@ -52,6 +54,9 @@ export default function ConversationSidebar({ conversations, currentId, disabled
       <DialogContent className="agent-delete-dialog" onOpenAutoFocus={event => {
         event.preventDefault();
         cancelButton.current?.focus();
+      }} onCloseAutoFocus={event => {
+        event.preventDefault();
+        (deleteButton.current?.isConnected ? deleteButton.current : newChatButton.current)?.focus();
       }}>
         <DialogTitle>Delete conversation?</DialogTitle>
         <DialogDescription>This will delete “{selected?.title}” from your conversation history. This cannot be undone.</DialogDescription>

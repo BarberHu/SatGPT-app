@@ -81,14 +81,16 @@ CATALOG = [
 
 
 class TaskController:
-    def __init__(self, root: Path, agent_factory=HarnessAgent):
+    def __init__(self, root: Path, agent_factory=HarnessAgent, *, state_dir=None, personal=None, owner=None, pool=None):
         self.root = root
+        self.state_dir = Path(state_dir) if state_dir else root / 'state'
+        self.personal, self.owner, self.owns_pool = personal, owner, pool is None
         self.agent_factory = agent_factory
-        self.home = root / "state" / "dsh-home"
-        self.chat_file = root / "state" / "chat-history.json"
-        self.archive_dir = root / "state" / "conversations"
-        self.tool_events_file = root / "state" / "gee-tool-events.jsonl"
-        self.trace_dir = root / "state" / "traces"
+        self.home = self.state_dir / "dsh-home"
+        self.chat_file = self.state_dir / "chat-history.json"
+        self.archive_dir = self.state_dir / "conversations"
+        self.tool_events_file = self.state_dir / "gee-tool-events.jsonl"
+        self.trace_dir = self.state_dir / "traces"
         self._agent = None
         self._closed = False
         self._agent_conversation_id = None
@@ -98,24 +100,32 @@ class TaskController:
         self.lock = threading.RLock()
         self.changed = threading.Condition(self.lock)
         self.conversation_lock = threading.RLock()
-        self.conversation_id = "webgis-main"
+        self.conversation_id = f'webgis-{uuid.uuid4().hex[:16]}' if owner else 'webgis-main'
         self.messages = self._load_messages()
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gee-agent")
+        self.pool = pool or ThreadPoolExecutor(max_workers=1, thread_name_prefix="gee-agent")
         self.trace_secrets = self._trace_secrets()
         self.layer_worker = LayerWorkerRunner(root)
+        self.layer_worker.concurrency_gate = personal.replay_gate if personal else None
         self._layer_reloads = set()
+        self._agent_execution_key = None
+
+    def prepare_payload(self, payload, replay=False, check_assets=True):
+        execution = (payload.get('analysis_context') or {}).get('execution')
+        runtime = {'SATGPT_PREVIEW_DIR': str(self.state_dir / 'previews')}
+        from .local_runtime import local_mode
+        if (self.personal or local_mode()) and (not execution or execution.get('mode') != 'personal'):
+            raise ValueError('This historical system result is read-only. Start a new analysis with your Google account.')
+        if execution and execution.get('mode') == 'personal':
+            if not self.personal or execution.get('owner') != self.owner:
+                raise ValueError('Reconnect the original personal workspace to reload this layer.')
+            self.personal.validate_execution(execution, check_assets=check_assets, replay=replay)
+            runtime.update(self.personal.broker.lease(execution, self.state_dir / 'previews'))
+        payload['_worker_env'] = runtime
+        return runtime
 
     @staticmethod
     def _trace_secrets() -> tuple[str, ...]:
         secrets = [os.getenv("AIHUBMIX_API_KEY", ""), os.getenv("DEEPSEEK_API_KEY", "")]
-        credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        if credentials:
-            try:
-                key = json.loads(Path(credentials).read_text(encoding="utf-8")).get("private_key", "")
-                if isinstance(key, str) and key:
-                    secrets.extend((key, json.dumps(key)[1:-1]))
-            except (OSError, ValueError, TypeError):
-                pass
         return tuple(secret for secret in secrets if len(secret) >= 8)
 
     def _save_trace(self, job_id: str, trace: list[dict]) -> None:
@@ -192,6 +202,7 @@ class TaskController:
             payload = replay_payload(recipe)
             self._layer_reloads.add(key)
         try:
+            self.prepare_payload(payload, replay=True)
             fresh = self.layer_worker.run(payload)
             with self.conversation_lock, self.lock:
                 if self._closed:
@@ -333,7 +344,10 @@ class TaskController:
             messages = self._conversation_messages(cid)
             self._save_conversation(cid, [*messages, message])
 
-    def create(self, prompt: str, bounds, conversation_id=None, analysis_region=None, analysis_aoi=None) -> dict:
+    def create(self, prompt: str, bounds, conversation_id=None, analysis_region=None, analysis_aoi=None, execution=None) -> dict:
+        if self.personal and self.personal.local:
+            model_env = self.personal.local.model_environment()
+            self.trace_secrets = tuple(value for name, value in model_env.items() if name.endswith('API_KEY'))
         if not isinstance(prompt, str) or not (3 <= len(prompt.strip()) <= 2000):
             raise ValueError("The prompt must contain 3–2000 characters")
         analysis_region = validate_analysis_region(analysis_region)
@@ -356,10 +370,13 @@ class TaskController:
                 "output": None, "error": None, "trace": [],
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
+            if execution:
+                job['execution'] = json.loads(json.dumps(execution))
             with self.lock:
                 self.jobs[job_id] = job
                 self.streams[job_id] = TaskStream(job, secrets=self.trace_secrets)
-            self._append_message("user", prompt.strip(), job_id, bounds=bounds, analysis_region=analysis_region, **({"analysis_aoi": analysis_aoi} if analysis_aoi else {}))
+            self._append_message("user", prompt.strip(), job_id, bounds=bounds, analysis_region=analysis_region,
+                                 **({'execution': job['execution']} if execution else {}), **({"analysis_aoi": analysis_aoi} if analysis_aoi else {}))
             self.pool.submit(self._run, job_id)
             return self.get(job_id)
 
@@ -458,7 +475,8 @@ class TaskController:
         # Stop transports before joining the executor so in-flight SDK calls unblock.
         for job_id in active:
             self.cancel(job_id)
-        self.pool.shutdown(wait=True, cancel_futures=True)
+        if self.owns_pool:
+            self.pool.shutdown(wait=True, cancel_futures=True)
         if self._agent is not None:
             self._agent.__exit__(None, None, None)
             self._agent = None
@@ -468,19 +486,31 @@ class TaskController:
         assert job is not None
         if job['status'] == 'cancelled':
             return
-        workspace = self.root / "state" / "agent-workspace"
+        workspace = self.state_dir / "agent-workspace"
         try:
+            execution = job.get('execution')
+            execution_key = json.dumps({k: execution.get(k) for k in ('mode', 'owner', 'connection_id', 'revision', 'project')}, sort_keys=True) if execution else None
+            if execution and execution.get('mode') == 'personal':
+                self.personal.validate_execution(execution, check_assets=True)
+            runtime = self.prepare_payload({'analysis_context': {'execution': execution}}, check_assets=False)
+            execution_key = (execution_key, runtime.get('SATGPT_GEE_LEASE'))
             workspace.mkdir(parents=True, exist_ok=True)
             started_at = datetime.now(timezone.utc).isoformat()
             self._update(job_id, status="running", started_at=started_at)
-            if not model_key_configured():
+            local = self.personal.local if self.personal else None
+            model_env = local.model_environment() if local else None
+            if not local and not model_key_configured():
                 key_name = "AIHUBMIX_API_KEY" if selected_provider() == "aihubmix" else "DEEPSEEK_API_KEY"
                 raise RuntimeError(f"Missing {key_name}. Set the model API key in the project root .env.")
-            if self._agent is not None and self._agent_conversation_id != job['conversation_id']:
+            execution_key = (execution_key, local.revision if local else None)
+            if self._agent is not None and (self._agent_conversation_id != job['conversation_id'] or self._agent_execution_key != execution_key):
                 self._agent.__exit__(None, None, None)
                 self._agent = None
             if self._agent is None:
                 candidate = self.agent_factory(workspace, self.home, job["conversation_id"])
+                if hasattr(candidate, 'runtime_environment'):
+                    candidate.runtime_environment = runtime
+                    candidate.model_environment = model_env
                 with self.conversation_lock, self.lock:
                     if self.jobs[job_id]['status'] == 'cancelled':
                         return
@@ -489,11 +519,12 @@ class TaskController:
                     self._job_agents[job_id] = candidate
                 self._agent = candidate.__enter__()
                 self._agent_conversation_id = job['conversation_id']
+                self._agent_execution_key = execution_key
             with self.lock:
                 if self.jobs[job_id]['status'] == 'cancelled':
                     return
                 self._job_agents[job_id] = self._agent
-            prompt = conversation_prompt(job["prompt"], job["bounds"], CATALOG, job.get('analysis_region'))
+            prompt = conversation_prompt(job["prompt"], job["bounds"], CATALOG, job.get('analysis_region'), execution=execution)
             if hasattr(self._agent, 'set_analysis_context'):
                 self._agent.set_analysis_context(job)
             offset = self.tool_events_file.stat().st_size if self.tool_events_file.is_file() else 0
@@ -513,6 +544,8 @@ class TaskController:
                 layer = {**event['layer'], 'bounds': layer_focus_bounds(event)}
                 context = {'task_id': job_id, 'conversation_id': job['conversation_id'],
                            'bounds': job['bounds'], 'analysis_region': job.get('analysis_region'), 'analysis_aoi': job.get('analysis_aoi')}
+                if execution:
+                    context['execution'] = execution
                 layer['generation'] = generation_recipe(event.get('code'), layer, context)
                 layer['code'] = event.get('code') or ''
                 layer['reloadable'] = layer['generation'] is not None
@@ -522,7 +555,8 @@ class TaskController:
             message = str(answer or "").strip()
             self._finish(job_id, 'completed', message, layers=layers, previews=previews, code="\n\n".join(codes))
         except Exception as exc:
-            error = str(exc)[:2500]
+            from .trace import clean_text
+            error = clean_text(str(exc), self.trace_secrets, 2500)
             self._finish(job_id, 'failed', error)
         finally:
             with self.lock:
