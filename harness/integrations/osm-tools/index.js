@@ -10,9 +10,11 @@ const sharedDir = new URL('.', import.meta.url).pathname.endsWith('/satgpt-osm-t
 const shared = file => new URL(sharedDir + file, import.meta.url).href;
 const { OSM_TOOL_NAMES, readBinding, floodResultFor } = await import(shared('runtime-control.js'));
 const { WorkerPool } = await import(shared('worker-pool.js'));
+const DEFAULT_QUERY_TIMEOUT_MS = 22_000;
 
 const summaryFields = ['status', 'count', 'by_category', 'source', 'source_mode', 'fallback_reason', 'source_version',
-  'osm_data_time', 'attribution', 'license_url', 'skipped_geometry', 'snapshot_skipped_geometry', 'data_ref'];
+  'osm_data_time', 'osm_data_time_range', 'partition_count', 'attribution', 'license_url', 'skipped_geometry',
+  'snapshot_skipped_geometry', 'data_ref'];
 
 const definitions = [
   { name: OSM_TOOL_NAMES[0], kind: 'roads', renderAs: 'line', title: 'OSM roads',
@@ -65,7 +67,7 @@ export function registerTools(ctx, pool, bindingFor = readBinding) {
           ...(binding.geo_context && { geo_context: binding.geo_context, analysis_aoi: binding.analysis_aoi }),
           ...(indexedFlood && { flood_data_ref: indexedFlood }),
           ...(flood && { flood_ref: floodRef, selected_region: analysis_region }) },
-          { signal: exec.signal, timeout: 22_000 });
+          { signal: exec.signal, timeout: kind === 'buildings' ? 90_000 : DEFAULT_QUERY_TIMEOUT_MS });
         if (exec.signal?.aborted) throw new Error('Tool call cancelled');
         if (value.error) return { summary: { status: value.error.code, message: value.error.message } };
         const summary = Object.fromEntries(summaryFields.filter(key => Object.hasOwn(value.summary, key))

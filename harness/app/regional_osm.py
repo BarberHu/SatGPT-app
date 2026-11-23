@@ -2,6 +2,7 @@
 
 from collections import Counter
 from contextlib import closing
+from functools import partial
 import json
 from pathlib import Path
 import sqlite3
@@ -9,6 +10,7 @@ import sqlite3
 from shapely import from_wkb, orient_polygons
 from shapely.geometry import MultiLineString, mapping, shape
 
+from harness.app.osm_building_partitions import check_deadline, query_snapshot_buildings
 from harness.app.osm_queries import ATTRIBUTION, LICENSE_URL, ROAD_FILTERS, _line_parts, _polygonal
 from harness.app.osm_transport import MAX_RESULT_BYTES, MAX_WAYS, RoadNetworkError
 
@@ -17,11 +19,12 @@ SCHEMA_VERSION = 1
 MAX_BUILDINGS = 10_000
 
 
-def query_regional_snapshot(directory, kind, category, area):
+def query_regional_snapshot(directory, kind, category, area, *, building_deadline=None):
     paths = sorted(Path(directory).glob('*.sqlite3'))
     if not paths:
         raise ValueError('No regional snapshots installed')
     for path in paths:
+        check_deadline(building_deadline)
         with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as db:
             if db.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION:
                 raise ValueError('Unsupported regional snapshot version')
@@ -30,12 +33,15 @@ def query_regional_snapshot(directory, kind, category, area):
                 raise ValueError('Missing regional snapshot metadata')
             metadata = json.loads(row[0])
             if shape(metadata['coverage']).covers(area):
+                if kind == 'buildings' and building_deadline is not None:
+                    query_tile = partial(_query_features, db, metadata, kind, category, deadline=building_deadline)
+                    return query_snapshot_buildings(query_tile, area, building_deadline)
                 return _query_features(db, metadata, kind, category, area)
     raise RoadNetworkError(422, 'osm_snapshot_outside_coverage',
                            'No installed OSM snapshot covers the entire selection.')
 
 
-def _query_features(db, metadata, kind, category, area):
+def _query_features(db, metadata, kind, category, area, *, deadline=None):
     west, south, east, north = area.bounds
     parameters = [east, west, north, south, kind]
     query = '''SELECT f.osm_type, f.osm_id, f.category, f.name, f.geometry
@@ -48,6 +54,7 @@ def _query_features(db, metadata, kind, category, area):
     features = []
     limit = MAX_WAYS if kind == 'roads' else MAX_BUILDINGS
     for osm_type, osm_id, label, name, wkb in db.execute(query, parameters):
+        check_deadline(deadline)
         clipped = from_wkb(wkb).intersection(area)
         if kind == 'roads':
             lines = _line_parts(clipped)

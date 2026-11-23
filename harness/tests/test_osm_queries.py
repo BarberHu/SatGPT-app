@@ -4,12 +4,15 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import httpx
+from shapely.geometry import shape
 
+from harness.app.osm_building_partitions import MAX_MERGED_BYTES
 from harness.app.osm_queries import ATTRIBUTION, OverpassQueries
 from harness.app.osm_transport import RoadNetworkError
 from harness.app.controller import TaskController
@@ -40,6 +43,96 @@ def response(*items, count=None):
 
 
 class OSMQueryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_buildings_prepartition_large_area_and_clip_once_at_original_boundary(self):
+        bounds = [10, 20, 10.12, 20.08]
+        hole = box(10.058, 20.02, 10.062, 20.03)
+        exterior = box(10.05, 20.01, 10.07, 20.04)
+        region = {'type': 'Polygon', 'coordinates': [box(*bounds), hole]}
+        way = obj('way', 7, {'building': 'yes'}, geometry=positions(exterior))
+        relation = obj('relation', 8, {'building': 'yes'}, members=[
+            {'type': 'way', 'ref': 7, 'role': 'outer', 'geometry': positions(exterior)}])
+        calls = []
+
+        def respond(req):
+            calls.append(parse_qs(req.content.decode())['data'][0])
+            fixture = response(way) if len(calls) == 1 else response(relation)
+            fixture['osm3s']['timestamp_osm_base'] = f'2026-11-01T00:00:0{len(calls)}Z'
+            return httpx.Response(200, json=fixture)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            service = OverpassQueries(client, 'https://osm.test')
+            with tempfile.TemporaryDirectory() as directory:
+                result = await execute(service, {'kind': 'buildings', 'bounds': bounds, 'analysis_region': region,
+                                                 'artifact_dir': directory})
+                path, = Path(directory).glob('*.geojson')
+                collection = json.loads(path.read_bytes())
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result['bounds'], bounds)
+        self.assertEqual(result['summary']['partition_count'], 2)
+        self.assertEqual(len(result['summary']['osm_data_time_range']), 2)
+        feature, = collection['features']
+        self.assertEqual(feature['properties']['osm_type'], 'relation')
+        self.assertTrue(shape(feature['geometry']).equals(shape({'type': 'Polygon', 'coordinates': [exterior, hole]})))
+
+    async def test_building_candidates_split_on_limit_and_reject_conflicting_objects(self):
+        tags = {'building': 'house'}
+        geometry = positions(box(10.005, 20.004, 10.015, 20.018))
+        original = obj('way', 9, tags, geometry=geometry)
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict), tempfile.TemporaryDirectory() as directory:
+                duplicate = obj('way', 9, {**tags, 'name': 'Changed'}, geometry=geometry) if conflict else original
+                replies = iter([response(count=4_001), response(original), response(duplicate)])
+                transport = httpx.MockTransport(lambda _: httpx.Response(200, json=next(replies)))
+                async with httpx.AsyncClient(transport=transport) as client, \
+                        asyncio.timeout(2):
+                    service = OverpassQueries(client, 'https://osm.test')
+                    with patch.dict('os.environ', {'SATGPT_OSM_SNAPSHOT_DIR': ''}):
+                        payload = {'kind': 'buildings', 'bounds': BOUNDS, 'artifact_dir': directory}
+                        if conflict:
+                            with self.assertRaisesRegex(RoadNetworkError, 'conflicting versions'):
+                                await execute(service, payload)
+                            self.assertFalse(list(Path(directory).iterdir()))
+                        else:
+                            result = await execute(service, payload)
+                            self.assertEqual(result['summary']['partition_count'], 2)
+                            self.assertEqual(result['summary']['count'], 1)
+
+    async def test_building_partition_failure_and_cancellation_publish_nothing(self):
+        building = obj('way', 9, {'building': 'yes'}, geometry=positions(box(10.01, 20.01, 10.02, 20.02)))
+        bounds = [10, 20, 10.12, 20.08]
+        for cancel in (False, True):
+            with self.subTest(cancel=cancel), tempfile.TemporaryDirectory() as directory:
+                started = asyncio.Event()
+                calls = 0
+
+                async def respond(_request):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        return httpx.Response(200, json=response(building))
+                    started.set()
+                    if cancel:
+                        await asyncio.Future()
+                    return httpx.Response(429)
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                    service = OverpassQueries(client, 'https://osm.test')
+                    payload = {'kind': 'buildings', 'bounds': bounds, 'artifact_dir': directory}
+                    with patch.dict('os.environ', {'SATGPT_OSM_SNAPSHOT_DIR': ''}):
+                        if cancel:
+                            task = asyncio.create_task(execute(service, payload))
+                            await asyncio.wait_for(started.wait(), 2)
+                            task.cancel()
+                            with self.assertRaises(asyncio.CancelledError):
+                                await task
+                        else:
+                            with self.assertRaises(RoadNetworkError) as caught:
+                                await execute(service, payload)
+                            self.assertEqual(caught.exception.code, 'osm_rate_limited')
+                    await service.close()
+                self.assertEqual(calls, 2)
+                self.assertFalse(list(Path(directory).iterdir()))
+
     async def test_roads_clip_to_polygon_and_hole_with_one_count_per_way(self):
         calls = []
 
@@ -192,6 +285,9 @@ class OSMArtifactTests(unittest.TestCase):
                 self.assertEqual(result.status_code, 200)
                 self.assertEqual(result.content, body)
                 self.assertEqual(result.headers["content-type"], "application/geo+json")
+                large_body = body.ljust(MAX_MERGED_BYTES)
+                (root / f"{reference}.geojson").write_bytes(large_body)
+                self.assertEqual(client.get(layer["data_url"]).content, large_body)
                 self.assertEqual(client.get(layer["data_url"].replace(cid, another_cid)).status_code, 404)
                 self.assertEqual(client.get(layer["data_url"].replace(reference, orphan_id)).status_code, 404)
                 app.dependency_overrides[owner_for] = lambda: "mallory"

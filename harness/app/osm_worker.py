@@ -7,12 +7,15 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
+import time
 from uuid import uuid4
 
 import httpx
 
 # The worker is launched with Python's isolated mode.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from harness.app.osm_building_partitions import (BUILDING_DEADLINE_SECONDS, MAX_BUILDING_AREA_KM2,
+                                                  ONLINE_DEADLINE_SECONDS, query_online_buildings)
 from harness.app.osm_queries import OverpassQueries, query_scope, validate_category
 from harness.app.osm_transport import RoadNetworkError
 from harness.app.road_snapshot import query_snapshot
@@ -25,13 +28,14 @@ from shapely.geometry import mapping, shape
 ONLINE_FAILURES = {'osm_timeout', 'osm_rate_limited', 'osm_unavailable'}
 
 
-async def query_local(kind, category, area):
+async def query_local(kind, category, area, **snapshot_options):
     regional = os.environ.get('SATGPT_OSM_SNAPSHOT_DIR')
     road = os.environ.get('SATGPT_ROAD_SNAPSHOT') if kind == 'roads' else None
     failure = None
     if regional:
         try:
-            summary, content = await asyncio.to_thread(query_regional_snapshot, regional, kind, category, area)
+            summary, content = await asyncio.to_thread(query_regional_snapshot, regional, kind, category, area,
+                                                       **snapshot_options)
             return {**summary, 'source_mode': 'regional_snapshot'}, content
         except RoadNetworkError as exc:
             failure = exc
@@ -55,8 +59,41 @@ async def query_local(kind, category, area):
     raise RoadNetworkError(503, 'osm_unavailable', 'No local OSM snapshot is configured for this query.')
 
 
+def building_scope(region, bounds):
+    return query_scope(region, bounds, 'buildings', area_budget=MAX_BUILDING_AREA_KM2)
+
+
+async def query_buildings(service, region, bounds):
+    started = time.monotonic()
+    deadline = started + BUILDING_DEADLINE_SECONDS
+    area = building_scope(region, bounds)
+    if service is None:
+        return await query_local('buildings', None, area, building_deadline=deadline)
+
+    try:
+        try:
+            async with asyncio.timeout(ONLINE_DEADLINE_SECONDS):
+                summary, content = await query_online_buildings(service, region, bounds, area,
+                                                                started + ONLINE_DEADLINE_SECONDS)
+        except TimeoutError as exc:
+            raise RoadNetworkError(504, 'osm_timeout', 'The online building query reached its time budget.') from exc
+        return {**summary, 'source_mode': 'overpass', 'source': 'OpenStreetMap via Overpass'}, content
+    except RoadNetworkError as online:
+        if online.code not in ONLINE_FAILURES and online.code != 'feature_limit':
+            raise
+        try:
+            summary, content = await query_local('buildings', None, area, building_deadline=deadline)
+        except RoadNetworkError as local:
+            raise RoadNetworkError(online.status_code, online.code, f'{online} {local}') from online
+        if online.code == 'feature_limit' and not summary['count']:
+            raise
+        return {**summary, 'fallback_reason': online.code}, content
+
+
 async def query_sources(service, kind, category, region, bounds):
     validate_category(kind, category)
+    if kind == 'buildings':
+        return await query_buildings(service, region, bounds)
     if service is None:
         area = query_scope(region, bounds, kind)
         if kind == 'pois':
@@ -67,15 +104,12 @@ async def query_sources(service, kind, category, region, bounds):
         summary, content = await service.query(kind, category, region, bounds)
         return {**summary, 'source_mode': 'overpass', 'source': 'OpenStreetMap via Overpass'}, content
     except RoadNetworkError as online:
-        building_limit = kind == 'buildings' and online.code == 'feature_limit'
-        if kind == 'pois' or not (online.code in ONLINE_FAILURES or building_limit):
+        if kind == 'pois' or online.code not in ONLINE_FAILURES:
             raise
         try:
             summary, content = await query_local(kind, category, query_scope(region, bounds, kind))
         except RoadNetworkError as local:
             raise RoadNetworkError(online.status_code, online.code, f'{online} {local}') from online
-        if building_limit and not summary['count']:
-            raise
         return {**summary, 'fallback_reason': online.code}, content
 
 
@@ -103,7 +137,7 @@ async def execute(service, payload):
         content = json.dumps(collection, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
     result = {"summary": summary}
     if summary["count"]:
-        area = query_scope(region, bounds, kind)
+        area = building_scope(region, bounds) if kind == 'buildings' else query_scope(region, bounds, kind)
         folder = Path(payload["artifact_dir"])
         folder.mkdir(parents=True, exist_ok=True)
         reference = uuid4().hex

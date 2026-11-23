@@ -37,7 +37,7 @@ BUILDING_TYPES = frozenset(("yes", "residential", "house", "apartments", "detach
 LIMITS = {"roads": (40_000, MAX_WAYS), "pois": (250, 2_000), "buildings": (100, 4_000)}
 
 
-def query_scope(region, bounds, kind):
+def query_scope(region, bounds, kind, *, area_budget=None):
     if region is None:
         if (not isinstance(bounds, list) or len(bounds) != 4
                 or any(type(value) not in (int, float) for value in bounds)):
@@ -54,13 +54,16 @@ def query_scope(region, bounds, kind):
             raise ValueError("Invalid geometry")
     except (ValueError, TypeError, GEOSException) as exc:
         raise RoadNetworkError(422, "invalid_area", "Select a valid map area first.") from exc
-    west, south, east, north = area.bounds
-    area_budget, _ = LIMITS[kind]
-    box_area = 6371.0088**2 * math.radians(east - west) * (
-        math.sin(math.radians(north)) - math.sin(math.radians(south)))
-    if east - west > 180 or box_area > area_budget:
+    area_budget = LIMITS[kind][0] if area_budget is None else area_budget
+    if area.bounds[2] - area.bounds[0] > 180 or bounding_box_area(area.bounds) > area_budget:
         raise RoadNetworkError(422, "area_limit", f"Select an area with a bounding box no larger than {area_budget:,} km².")
     return area
+
+
+def bounding_box_area(bounds):
+    west, south, east, north = bounds
+    return 6371.0088**2 * math.radians(east - west) * (
+        math.sin(math.radians(north)) - math.sin(math.radians(south)))
 
 
 def _query(kind, category, bounds, limit):
@@ -185,7 +188,8 @@ def _geometry(kind, element, area):
     return orient_polygons(clipped), outer_ids, _polygon_parts(polygon)
 
 
-def _convert(kind, category, candidates, timestamp, area):
+def _convert(kind, category, candidates, timestamp, area, *, result_budget=MAX_RESULT_BYTES,
+             feature_budget=None, provenance=None):
     features, exterior_ways = {}, {}
     skipped = 0
     for (osm_type, osm_id), element in candidates.items():
@@ -223,6 +227,8 @@ def _convert(kind, category, candidates, timestamp, area):
             if any(shell.equals(polygon) for shell in shells):
                 features.pop(key)
     result = list(features.values())
+    if feature_budget is not None and len(result) > feature_budget:
+        raise RoadNetworkError(422, "feature_limit", f"The merged result exceeds {feature_budget:,} buildings. Select a smaller area.")
     by_category = dict(sorted(Counter(feature["properties"]["category"] for feature in result).items()))
     summary = {"status": "ok" if result else "empty", "count": len(result), "by_category": by_category,
                "skipped_geometry": skipped, "osm_data_time": timestamp, "attribution": ATTRIBUTION,
@@ -231,8 +237,11 @@ def _convert(kind, category, candidates, timestamp, area):
         summary["examples"] = [feature["properties"]["name"] for feature in result if "name" in feature["properties"]][:8]
     collection = {"type": "FeatureCollection", "features": result,
                   "attribution": ATTRIBUTION, "license_url": LICENSE_URL, "osm_data_time": timestamp}
+    if provenance:
+        summary.update(provenance)
+        collection.update(provenance)
     payload = json.dumps(collection, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-    if len(payload) > MAX_RESULT_BYTES:
+    if len(payload) > result_budget:
         raise RoadNetworkError(422, "feature_limit", "The GeoJSON exceeds the result budget. Select a smaller area.")
     return summary, payload
 

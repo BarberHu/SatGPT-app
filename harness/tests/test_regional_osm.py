@@ -82,14 +82,25 @@ class RegionalOSMTests(unittest.IsolatedAsyncioTestCase):
                          [('relation', '30'), ('way', '30')])
         self.assertEqual(len(shape(relation['geometry']).interiors), 1)
 
-    async def test_snapshot_only_keeps_empty_outside_and_feature_limit_distinct(self):
+    async def test_snapshot_only_keeps_empty_outside_and_partition_budget_distinct(self):
         self.assertEqual((await self.query('buildings', [10.020, 20.020, 10.025, 20.025], offline=True))
                          ['summary']['status'], 'empty')
         with self.assertRaises(RoadNetworkError) as outside:
             await self.query('buildings', [10.025, 20.025, 10.035, 20.035], offline=True)
         self.assertEqual(outside.exception.code, 'osm_snapshot_outside_coverage')
-        with patch('harness.app.regional_osm.MAX_BUILDINGS', 1), self.assertRaises(RoadNetworkError) as limit:
-            await self.query('buildings', offline=True)
+        with patch('harness.app.regional_osm.MAX_BUILDINGS', 1):
+            result = await self.query('buildings', offline=True)
+            self.assertEqual(result['summary']['count'], 2)
+            self.assertGreater(result['summary']['partition_count'], 1)
+            relation, way = sorted(self.read_features(result), key=lambda f: f['properties']['osm_type'])
+            expected = shape({'type': 'Polygon', 'coordinates': [
+                [(10.001, 20.001), (10.008, 20.001), (10.008, 20.008), (10.001, 20.008), (10.001, 20.001)],
+                [(10.003, 20.003), (10.005, 20.003), (10.005, 20.005), (10.003, 20.005), (10.003, 20.003)]]})
+            self.assertAlmostEqual(shape(relation['geometry']).symmetric_difference(expected).area, 0)
+            self.assertEqual((relation['properties']['osm_id'], way['properties']['osm_id']), ('30', '30'))
+            with patch('harness.app.osm_building_partitions.MAX_PARTITION_QUERIES', 1), \
+                    self.assertRaises(RoadNetworkError) as limit:
+                await self.query('buildings', offline=True)
         self.assertEqual(limit.exception.code, 'feature_limit')
         self.provider.query.assert_not_called()
 
@@ -121,6 +132,7 @@ class RegionalOSMTests(unittest.IsolatedAsyncioTestCase):
         for code in ('osm_rate_limited', 'osm_unavailable', 'feature_limit'):
             with self.subTest(code=code):
                 self.provider.query.side_effect = RoadNetworkError(422, code, 'Online query failed.')
+                self.provider.get.side_effect = self.provider.query.side_effect
                 self.assertEqual((await self.query('buildings'))['summary']['fallback_reason'], code)
                 with self.assertRaises(RoadNetworkError) as outside:
                     await self.query('buildings', [10.025, 20.025, 10.035, 20.035])

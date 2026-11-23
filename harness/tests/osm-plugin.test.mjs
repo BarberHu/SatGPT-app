@@ -41,7 +41,7 @@ test('OSM tools expose bounded parameters and retain task-owned geometry/artifac
     assert.deepEqual(seen.at(-1).payload.bounds, bound.bounds);
     assert.equal(seen.at(-1).payload.artifact_dir, '/task');
     assert.equal(seen.at(-1).payload.geo_context, bound.geo_context);
-    assert.equal(seen.at(-1).timeout, 22_000);
+    assert.equal(seen.at(-1).timeout, name === 'osm_buildings' ? 90_000 : 22_000);
     assert.equal(seen.at(-1).signal, signal);
   }
 });
