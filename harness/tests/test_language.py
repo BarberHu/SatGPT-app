@@ -100,6 +100,37 @@ class EnglishInterfaceTests(unittest.TestCase):
         skill = (SKILLS / 'flood-extent' / 'SKILL.md').read_text(encoding='utf-8')
         self.assertIn('only when the approved plan includes that fallback', skill)
 
+    def test_flood_prompt_prioritizes_pixel_gated_multiscene_baseline(self):
+        self.assertIn('check a multi-scene same-orbit pre-event baseline first', SYSTEM_PROMPT)
+        self.assertIn('two valid baseline observations', SYSTEM_PROMPT)
+        self.assertIn('classify each observation date separately', SYSTEM_PROMPT)
+        skill = (SKILLS / 'flood-extent' / 'SKILL.md').read_text(encoding='utf-8')
+        self.assertIn("per-pixel `count()`", skill)
+        self.assertIn('per-pixel median of the eligible pre-event observations', skill)
+        self.assertIn('single-scene fallback only if the approved plan permits it', skill)
+        self.assertIn('Mask pixels that fail the sample or event-validity gate as unknown', skill)
+        self.assertIn('use the historical dual-direction method when its support gate passes', skill)
+
+    def test_flood_acquisition_example_passes_restricted_python_validation(self):
+        examples = python_examples('flood-extent')
+        self.assertEqual(len(examples), 1)
+        self.assertEqual(gee_execute({'operation': 'check', 'code': examples[0]}),
+                         {'valid': True, 'errors': [], 'warnings': []})
+
+    def test_gee_eval_scene_metadata_normalizes_utc_and_preserves_generic_results(self):
+        rows = [{'scene_id': 'baseline', 'time_ms': 1729508415870, 'role': 'baseline'},
+                {'scene_id': 'event', 'time_ms': 1730372414630},
+                {'scene_id': 'missing'}]
+        inputs = {'operation': 'eval', 'code': 'result = []', 'project': 'example'}
+        with patch('harness.app.gee_worker.earth_engine', return_value=SimpleNamespace()), \
+                patch('harness.app.gee_worker.run_code', return_value=rows):
+            formatted = gee_execute({**inputs, 'result_format': 'scene_metadata'})['result']
+            self.assertEqual(gee_execute(inputs)['result'], rows)
+        self.assertEqual([item['time_utc'] for item in formatted],
+                         ['2024-10-21T11:00:15.870Z', '2024-10-31T11:00:14.630Z', None])
+        self.assertEqual(formatted[1]['time_ms'], 1730372414630)
+        self.assertEqual(formatted[0]['role'], 'baseline')
+
     def test_gee_preflight_rejects_unsupported_python_with_repairs(self):
         cases = [
             ('import ee\nresult = 1', 'ee is already available'),
