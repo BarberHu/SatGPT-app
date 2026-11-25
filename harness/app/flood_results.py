@@ -7,7 +7,7 @@ import re
 from uuid import uuid4
 
 import numpy as np
-from pyproj import Transformer
+from pyproj import CRS, Transformer
 
 
 MAX_CELLS = 20_000_000
@@ -30,6 +30,13 @@ def grid_for(bounds, crs, scale):
         raise ValueError('Use the local WGS84 UTM CRS, e.g. EPSG:32748 for Jakarta')
     if type(scale) is not int or not 5 <= scale <= 120:
         raise ValueError('Use an integer flood grid scale of 5–120 metres')
+    _, south, _, north = bounds
+    if south < -80 or north > 84:
+        raise ValueError('The AOI extends outside WGS84 UTM latitudes (80°S to 84°N). Choose a suitable projection before analysis.')
+    southern_crs = crs.startswith('EPSG:327')
+    if (south >= 0 and southern_crs) or (north <= 0 and not southern_crs):
+        expected = '326' if south >= 0 else '327'
+        raise ValueError(f'{crs} is in the wrong UTM hemisphere for the AOI. Use EPSG:{expected}{crs[-2:]} if that zone is suitable.')
     left, bottom, right, top = Transformer.from_crs('EPSG:4326', crs, always_xy=True).transform_bounds(*bounds)
     x = (math.floor(left / scale) - 1) * scale
     y = (math.ceil(top / scale) + 1) * scale
@@ -38,6 +45,25 @@ def grid_for(bounds, crs, scale):
     if width * height > MAX_CELLS or max(width, height) > 32768:
         raise ValueError('Flood grid exceeds the pixel budget. Select a smaller analysis area or coarser scale.')
     return {'crs': crs, 'scale': scale, 'x': x, 'y': y, 'width': width, 'height': height}
+
+
+def grid_warnings(bounds, crs):
+    west, south, east, north = bounds
+    zone = CRS.from_user_input(crs).area_of_use
+    warnings = []
+    if south < 0 < north:
+        warnings.append('The AOI crosses the equator. Confirm that the chosen UTM grid is appropriate for the full area.')
+    if west < zone.west or east > zone.east:
+        warnings.append('The AOI extends outside the nominal UTM zone. Confirm that the chosen grid is appropriate for this analysis.')
+    return warnings
+
+
+def publication_grid(payload):
+    context = payload['analysis_context']
+    if not context.get('analysis_region'):
+        raise ValueError('Confirm a polygon on the map before publishing a flood result')
+    settings = payload['flood_settings']
+    return grid_for(context['bounds'], settings['crs'], settings['scale'])
 
 
 def summarize_pixels(pixels, scale, minimum_coverage):
@@ -73,13 +99,12 @@ def read_grid_pixels(ee, image, grid):
     return pixels
 
 
-def classify(ee, image, payload):
+def classify(ee, image, payload, grid=None):
     context = payload['analysis_context']
-    geometry = context.get('analysis_region')
-    if not geometry:
-        raise ValueError('Confirm a polygon on the map before publishing a flood result')
+    if grid is None:
+        grid = publication_grid(payload)
+    geometry = context['analysis_region']
     settings = payload['flood_settings']
-    grid = grid_for(context['bounds'], settings['crs'], settings['scale'])
     minimum = settings.get('minimum_coverage', 0)
     if type(minimum) not in (float, int) or not 0 <= minimum <= 1:
         raise ValueError('Minimum coverage must be a fraction between zero and one')

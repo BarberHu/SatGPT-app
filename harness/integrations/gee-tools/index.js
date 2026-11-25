@@ -158,19 +158,22 @@ export function apply(ctx) {
   ctx.tools.register({
     name: 'gee_eval',
     description: 'Return bounded metadata or statistics from read-only Earth Engine Python. Preserve source masks. Use gee_layer for map layers.',
-    parameters: { type: 'object', properties: { code: CODE_PARAMETER, inputs: INPUTS }, required: ['code'], additionalProperties: false },
+    parameters: { type: 'object', properties: { code: CODE_PARAMETER, inputs: INPUTS,
+      result_format: { type: 'string', enum: ['scene_metadata'],
+        description: 'Convert result rows {scene_id, time_ms, role?} into paired raw milliseconds and canonical UTC time strings.' },
+    }, required: ['code'], additionalProperties: false },
     output: {
       schema: { type: 'object', properties: { result: {} }, required: ['result'], additionalProperties: false },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value.result) }],
     },
     async execute(args, exec) {
-      return runWithContext({ operation: 'eval', code: args.code, inputs: args.inputs }, exec);
+      return runWithContext({ operation: 'eval', code: args.code, inputs: args.inputs, result_format: args.result_format }, exec);
     },
   });
 
   ctx.tools.register({
     name: 'gee_preview',
-    description: 'Render a PNG preview in the conversation from an ee.Image. Use gee_layer for an interactive map.',
+    description: 'Render a PNG preview in the conversation from an ee.Image clipped to the task area. Use gee_layer for an interactive map.',
     parameters: {
       type: 'object',
       properties: {
@@ -178,7 +181,7 @@ export function apply(ctx) {
         bands: { type: 'array', items: { type: 'string' } },
         min: { type: 'number' }, max: { type: 'number' },
         palette: { type: 'array', items: { type: 'string' } },
-        region: { type: 'array', items: { type: 'number' }, description: '[west, south, east, north]' },
+        region: { type: 'array', items: { type: 'number' }, description: 'Optional preview frame [west, south, east, north]. Defaults to the task bounds.' },
         dimensions: { type: 'integer', description: 'Longest side 64-1024 pixels.' },
       },
       required: ['code'], additionalProperties: false,
@@ -199,12 +202,12 @@ export function apply(ctx) {
 
   ctx.tools.register({
     name: 'gee_layer',
-    description: 'Create an interactive layer and thumbnail from an ee.Image. Palette/min/max drive the legend. For consecutive integer classes, use legend.type=categorical with labels in palette order.',
+    description: 'Create an interactive layer and thumbnail from an ee.Image clipped to the task area. Palette/min/max drive the legend. For consecutive integer classes, use legend.type=categorical with labels in palette order.',
     parameters: {
       type: 'object',
       properties: {
         name: { type: 'string' }, code: CODE_PARAMETER, inputs: INPUTS,
-        bounds: { type: 'array', items: { type: 'number' }, description: '[west, south, east, north] of the layer area' },
+        bounds: { type: 'array', items: { type: 'number' }, description: 'Map framing [west, south, east, north]. Use the task bounds or a smaller frame for a focused layer.' },
         bands: { type: 'array', items: { type: 'string' } },
         min: { type: 'number' }, max: { type: 'number' },
         palette: { type: 'array', items: { type: 'string' } },

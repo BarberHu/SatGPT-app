@@ -10,12 +10,35 @@ from shapely.geometry import box, mapping
 
 from harness.app.agent import conversation_prompt
 from harness.app.controller import TaskController
-from harness.app.flood_results import load, read_grid_pixels, save, summarize_pixels
+from harness.app.flood_results import grid_for, grid_warnings, load, read_grid_pixels, save, summarize_pixels
+from harness.app.gee_worker import execute
 from harness.app.road_flood_analysis import road_source, split_line, totals
 from harness.app.road_snapshot import query_snapshot
 
 
 class FloodRoadTests(unittest.TestCase):
+    def test_publication_rejects_wrong_hemisphere_before_earth_engine(self):
+        bounds = [34.70, -19.87, 34.95, -19.60]
+        payload = {'operation': 'flood_publish', 'layer_code': 'result = ee.Image(0)',
+                   'analysis_context': {'bounds': bounds, 'analysis_region': mapping(box(*bounds))},
+                   'flood_settings': {'crs': 'EPSG:32636', 'scale': 20}, 'project': 'example'}
+        with patch('harness.app.gee_worker.earth_engine') as ee:
+            with self.assertRaisesRegex(ValueError, 'wrong UTM hemisphere.*32736'):
+                execute(payload)
+            ee.assert_not_called()
+        self.assertEqual(grid_for(bounds, 'EPSG:32736', 20),
+                         {'crs': 'EPSG:32736', 'scale': 20, 'x': 677960, 'y': 7831920, 'width': 1330, 'height': 1511})
+        with self.assertRaisesRegex(ValueError, 'wrong UTM hemisphere'):
+            grid_for([20, 10, 20.1, 10.1], 'EPSG:32734', 20)
+        with self.assertRaisesRegex(ValueError, 'UTM latitudes'):
+            grid_for([20, 84.1, 20.1, 84.2], 'EPSG:32634', 20)
+
+    def test_cross_zone_and_equator_generate_warnings_for_explicit_grid(self):
+        bounds = [5.99, -.01, 6.01, .01]
+        grid = grid_for(bounds, 'EPSG:32631', 20)
+        self.assertEqual(grid['crs'], 'EPSG:32631')
+        self.assertEqual(len(grid_warnings(bounds, grid['crs'])), 2)
+
     def test_large_flood_grid_reads_aligned_row_blocks(self):
         grid = {'x': 100, 'y': 200, 'scale': 10, 'width': 2, 'height': 5, 'crs': 'EPSG:32642'}
         expected = np.array([[0, 1], [2, 255], [254, 0], [1, 2], [0, 1]], dtype=np.uint8)

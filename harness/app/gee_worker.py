@@ -273,9 +273,10 @@ def code_warnings(code: str) -> list[str]:
     return list(dict.fromkeys(warnings))
 
 
-def run_code(ee, code: str, analysis_context=None, indexed_inputs=None):
+def run_code(ee, code: str, analysis_context=None, indexed_inputs=None, *, clip_result=False):
     available = {name: getattr(ee, name) for name in EE_TYPES if hasattr(ee, name)}
     scope = {"ee": SimpleNamespace(**available), "__builtins__": SAFE_BUILTINS.copy()}
+    region = None
     if analysis_context is not None:
         # A fresh scope on every execution, including analysis_code. Never cache
         # mutable task geometry in this persistent worker's module globals.
@@ -290,13 +291,16 @@ def run_code(ee, code: str, analysis_context=None, indexed_inputs=None):
             w, s, e, n = bounds
             geometry = {'type': 'Polygon', 'coordinates': [[[w,s], [e,s], [e,n], [w,n], [w,s]]]}
         scope['analysis_region_geojson'] = geometry
-        scope['analysis_region'] = ee.Geometry(geometry)
+        region = scope['analysis_region'] = ee.Geometry(geometry)
     scope.update(indexed_inputs or {})
     compiled = measured('validate', checked_code, code)
     measured('script', exec, compiled, scope)
     if "result" not in scope:
         raise ValueError("Code must assign a value to result")
-    return scope["result"]
+    value = scope["result"]
+    if clip_result and region is not None and isinstance(value, ee.Image):
+        return value.clip(region)
+    return value
 
 
 def jsonable(value):
@@ -310,6 +314,36 @@ def jsonable(value):
     if callable(get_info):
         return jsonable(measured('result_get_info', get_info))
     raise TypeError(f"Cannot serialize result type: {type(value).__name__}")
+
+
+def utc_timestamp(milliseconds):
+    if milliseconds is None:
+        return None
+    if type(milliseconds) is not int:
+        raise ValueError('An Earth Engine timestamp must be integer milliseconds or null')
+    try:
+        date = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=milliseconds)
+    except OverflowError as exc:
+        raise ValueError('Earth Engine timestamp is out of range') from exc
+    return date.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def format_scene_metadata(rows):
+    if not isinstance(rows, list) or len(rows) > 16:
+        raise ValueError('Return a list of up to 16 scene metadata rows')
+    result = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get('scene_id'), str) or not 1 <= len(row['scene_id']) <= 240:
+            raise ValueError('Each scene metadata row needs a scene_id')
+        role = row.get('role')
+        if role not in (None, 'baseline', 'event'):
+            raise ValueError('Scene role must be baseline or event')
+        time_ms = row.get('time_ms')
+        item = {'scene_id': row['scene_id'], 'time_ms': time_ms, 'time_utc': utc_timestamp(time_ms)}
+        if role:
+            item['role'] = role
+        result.append(item)
+    return result
 
 
 def resolve_inputs(ee, payload):
@@ -381,6 +415,10 @@ def execute(payload: dict) -> dict:
         except ValueError as exc:
             return {"valid": False, "errors": [str(exc)], "warnings": []}
         return {"valid": True, "errors": [], "warnings": code_warnings(code)}
+    if operation == 'flood_publish':
+        from flood_results import classify, grid_warnings, publication_grid, save
+        publish_grid = measured('flood_grid', publication_grid, payload)
+        publish_warnings = grid_warnings(payload['analysis_context']['bounds'], publish_grid['crs'])
     # Reject local Python errors before credentials, ee.Initialize, or a GEE request.
     if operation in {"eval", "preview", "osm_analysis"}:
         measured('validate', checked_code, payload.get("code"), check_eval_arguments=operation == "eval")
@@ -419,7 +457,10 @@ def execute(payload: dict) -> dict:
                               if isinstance((item := getattr(ee, name, None)), type))
         if isinstance(value, spatial_types):
             raise ValueError('Return scalar statistics or publish an indexed spatial artifact')
-        return {"result": summary(jsonable(value))}
+        result = jsonable(value)
+        if payload.get('result_format') == 'scene_metadata':
+            result = format_scene_metadata(result)
+        return {"result": summary(result)}
     if operation == 'osm_analysis':
         image = run_code(ee, payload['code'], payload['analysis_context'])
         if not isinstance(image, ee.Image):
@@ -428,7 +469,7 @@ def execute(payload: dict) -> dict:
         rows = measured('osm_reduce_features', evaluate_features, ee, image, settings, features, map_requests)
         return format_result(payload, settings, source, features, rows)
     if operation == "preview":
-        image = run_code(ee, payload["code"], payload.get('analysis_context'))
+        image = run_code(ee, payload["code"], payload.get('analysis_context'), clip_result=True)
         if not callable(getattr(image, "getThumbURL", None)):
             raise TypeError("Preview code must assign an ee.Image to result")
         dimensions = max(64, min(1024, int(payload.get("dimensions") or 768)))
@@ -437,7 +478,10 @@ def execute(payload: dict) -> dict:
         for key in ("bands", "min", "max", "palette"):
             if key in options:
                 vis[key] = options[key]
-        region = payload.get("region")
+        context = payload.get('analysis_context')
+        region = payload.get('region')
+        if region is None and context is not None:
+            region = context.get('bounds')
         if region is not None:
             if (not isinstance(region, list) or len(region) != 4
                     or not all(isinstance(value, (int, float)) for value in region)):
@@ -452,33 +496,21 @@ def execute(payload: dict) -> dict:
                             "url": preview_url, "bytes": len(png),
                             "width": int.from_bytes(png[16:20], "big"),
                             "height": int.from_bytes(png[20:24], "big")}}
-    image = run_code(ee, payload["layer_code"], payload.get('analysis_context'), resolve_inputs(ee, payload))
+    image = run_code(ee, payload["layer_code"], payload.get('analysis_context'), resolve_inputs(ee, payload),
+                     clip_result=operation != 'flood_publish')
     if not callable(getattr(image, "getMapId", None)):
         raise TypeError("layer_code must assign an ee.Image to result")
     if operation == 'flood_publish':
-        from flood_results import classify, save
-        image, pixels, recipe = measured('flood_pixels', classify, ee, image, payload)
-    vis = payload.get("visualization") or {}
-    options = {key: vis[key] for key in ("bands", "min", "max", "palette") if key in vis}
-    map_name = measured('map_id', image.getMapId, options)["mapid"]
-    if not isinstance(map_name, str) or not map_name.startswith("projects/"):
-        raise ValueError("Earth Engine did not return a valid map ID")
-    output = {
-        "layer": {
-            "name": str(vis.get("name") or "GEE result layer")[:100],
-            "url": f"https://earthengine.googleapis.com/v1/{map_name}/tiles/{{z}}/{{x}}/{{y}}",
-            "visualization": options,
-        }
-    }
-    # -I workers resolve local helpers explicitly, independent of startup cwd.
-    from layer_details import layer_metadata, legend_labels
-    output['layer']['metadata'] = layer_metadata(payload.get('metadata'))
+        image, pixels, recipe = measured('flood_pixels', classify, ee, image, payload, publish_grid)
+    output = {'layer': create_map_layer(image, payload)}
     if operation == 'flood_publish':
         ref = measured('flood_save', save, payload['artifact_dir'], recipe, pixels)
         grid, scale = recipe['grid'], recipe['grid']['scale']
         output['flood_result'] = {'ref': ref, **recipe['stats'], 'crs': grid['crs'], 'scale': scale,
                                   'event': recipe['provenance']['event'], 'observed_at': recipe['provenance']['observed_at'],
-                                  'source': recipe['provenance']['source']}
+                                  'source': recipe['provenance']['source'], 'grid': grid}
+        if publish_warnings:
+            output['flood_result']['grid_warnings'] = publish_warnings
         if payload.get('geo_context'):
             from geo_index import publish
             output['flood_result']['data_ref'] = publish(payload['geo_context'], 'flood', ref,
@@ -486,9 +518,31 @@ def execute(payload: dict) -> dict:
         output['display_code'] = (payload['layer_code'] + '\nresult = result.select([0]).reproject('
                                   f"crs={grid['crs']!r}, crsTransform={[scale, 0, 0, 0, -scale, 0]}"
                                   ').clip(analysis_region).eq(1).selfMask()')
+    attach_thumbnail(ee, image, payload, output)
+    analysis_code = payload.get("analysis_code")
+    if isinstance(analysis_code, str) and analysis_code.strip():
+        output["analysis"] = jsonable(run_code(ee, analysis_code, payload.get('analysis_context')))
+    return output
+
+
+def create_map_layer(image, payload):
+    vis = payload.get("visualization") or {}
+    options = {key: vis[key] for key in ("bands", "min", "max", "palette") if key in vis}
+    map_name = measured('map_id', image.getMapId, options)["mapid"]
+    if not isinstance(map_name, str) or not map_name.startswith("projects/"):
+        raise ValueError("Earth Engine did not return a valid map ID")
+    # -I workers resolve local helpers explicitly, independent of startup cwd.
+    from layer_details import layer_metadata, legend_labels
     labels = legend_labels(payload.get('legend'), options)
-    if labels:
-        output['layer']['legend'] = labels
+    return {'name': str(vis.get('name') or 'GEE result layer')[:100],
+            'url': f'https://earthengine.googleapis.com/v1/{map_name}/tiles/{{z}}/{{x}}/{{y}}',
+            'visualization': options, 'metadata': layer_metadata(payload.get('metadata')),
+            **({'legend': labels} if labels else {})}
+
+
+def attach_thumbnail(ee, image, payload, output):
+    layer = output['layer']
+    options = layer['visualization']
     bounds = payload.get('bounds')
     if bounds is not None:
         output['layer']['bounds'] = bounds
@@ -506,10 +560,6 @@ def execute(payload: dict) -> dict:
                 output['layer']['thumbnail_status'] = 'unavailable'
     else:
         output['layer']['thumbnail_status'] = 'missing_bounds'
-    analysis_code = payload.get("analysis_code")
-    if isinstance(analysis_code, str) and analysis_code.strip():
-        output["analysis"] = jsonable(run_code(ee, analysis_code, payload.get('analysis_context')))
-    return output
 
 
 def thumbnail_recipe_path(directory, ref):
