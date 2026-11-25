@@ -191,3 +191,11 @@ def osm_result(conversation_id: str, task_id: str, filename: str, request: Reque
         path = request.app.state.controller.artifact(owner, conversation_id, task_id, filename, osm=True)
     return FileResponse(path, media_type='application/geo+json',
                         headers={'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store'})
+
+
+@router.get('/api/harness/conversations/{conversation_id}/tasks/{task_id}/flexth/{filename}')
+def flexth_result(conversation_id: str, task_id: str, filename: str, request: Request, owner: Owner):
+    with api_errors():
+        path = request.app.state.controller.artifact(owner, conversation_id, task_id, filename, flexth=True)
+    return FileResponse(path, filename='flexth-' + filename.split('-', 1)[1], media_type='image/tiff',
+                        headers={'X-Content-Type-Options': 'nosniff'})

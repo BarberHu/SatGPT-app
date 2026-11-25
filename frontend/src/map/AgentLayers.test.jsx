@@ -69,6 +69,32 @@ test('OSM result references restore alongside GEE layers and stay in their own c
   }
 });
 
+test('FLEXTH history restores the protected overlay and its separate GeoTIFF downloads', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const engine = { onStyleReady: () => () => {}, addLayer: vi.fn(), removeLayer: vi.fn(),
+    setVisibility: vi.fn(), setBasicActive: vi.fn(), dispose: vi.fn() };
+  const service = new MapService(engine);
+  service.setMode('agent');
+  holder.shared = { service, ready: true, configured: true };
+  const root = createRoot(document.createElement('div'));
+  const cid = 'webgis-' + 'a'.repeat(32), task = 'b'.repeat(32), ref = 'c'.repeat(32);
+  const url = `/api/previews/${cid}/${task}/${ref}.png`;
+  const result = `/api/harness/conversations/${cid}/tasks/${task}/flexth/${ref}`;
+  const image = { kind: 'image', name: 'Estimated water depth', url, thumbnail: { url },
+    image_bounds: [32.53, 46.57, 32.67, 46.67], bounds: [32.54, 46.58, 32.66, 46.66],
+    depth_url: result + '-depth.tif', extent_url: result + '-extent.tif' };
+  try {
+    await act(async () => root.render(<Probe id={cid} messages={[{ job_id: task, layers: [image] }]} />));
+    expect(engine.addLayer.mock.lastCall[0]).toMatchObject({ kind: 'image', url,
+      imageBounds: image.image_bounds, bounds: image.bounds, depthUrl: image.depth_url, extentUrl: image.extent_url });
+    await act(async () => root.render(<Probe id="other" messages={[]} />));
+    expect(engine.setVisibility.mock.lastCall[1]).toBe(false);
+  } finally {
+    await act(async () => root.unmount()); service.dispose();
+    delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  }
+});
+
 test('history projection looks up existing layers by ID and replaces only changed layers', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const engine = { onStyleReady: () => () => {}, addLayer: vi.fn(), removeLayer: vi.fn(), setVisibility: vi.fn(),

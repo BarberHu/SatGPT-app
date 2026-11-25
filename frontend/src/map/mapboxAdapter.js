@@ -241,6 +241,16 @@ export class MapboxAdapter {
       }
       return;
     }
+    if (layer.kind === 'image') {
+      const [west, south, east, north] = layer.imageBounds;
+      this.map.addSource(sourceId, { type: 'image', url: publicPath(layer.url),
+        coordinates: [[west, north], [east, north], [east, south], [west, south]] });
+      this.map.addLayer({ id: layerId, source: sourceId, type: 'raster',
+        layout: { visibility: layer.visible ? 'visible' : 'none' },
+        paint: { 'raster-opacity': layer.opacity, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } },
+      this.overlayAnchor());
+      return;
+    }
     this.map.addSource(sourceId, { type: 'raster', tiles: [publicPath(layer.url)], tileSize: 256,
       ...(layer.bounds ? { bounds: layer.bounds } : {}) });
     this.map.addLayer({ id: layerId, source: sourceId, type: 'raster',

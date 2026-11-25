@@ -20,7 +20,7 @@ KINDS = ('area', 'flood', *OSM_NAMES)
 ALIASES = {'area': 'AOI boundary 研究区 区域 边界', 'flood': 'flood inundation 洪水 淹没 掩膜',
            'roads': 'OSM road centerlines 道路 路网 交通', 'buildings': 'OSM building footprints 建筑 房屋',
            'pois': 'OSM POI points of interest 兴趣点 设施'}
-USES = {'area': ['gee_eval', 'gee_layer'], 'flood': ['gee_eval', 'gee_layer', 'osm_roads', 'road_flood_exposure'],
+USES = {'area': ['gee_eval', 'gee_layer'], 'flood': ['gee_eval', 'gee_layer', 'osm_roads', 'road_flood_exposure', 'flexth_estimate'],
         'roads': ['road_flood_exposure'], 'buildings': ['gee_osm_analyze'], 'pois': ['gee_osm_analyze']}
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS geo_data (

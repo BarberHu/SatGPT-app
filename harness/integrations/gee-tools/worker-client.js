@@ -22,6 +22,7 @@ export class WorkerClient {
       if (this.roadSnapshot) env.SATGPT_ROAD_SNAPSHOT = this.roadSnapshot;
       if (this.osmSnapshotDir) env.SATGPT_OSM_SNAPSHOT_DIR = this.osmSnapshotDir;
     }
+    if (this.service === 'FLEXTH') delete env.GOOGLE_APPLICATION_CREDENTIALS;
     if (this.service === 'Geocoding') {
       delete env.GOOGLE_APPLICATION_CREDENTIALS;
       env.SATGPT_GEOCODING_URL = this.endpoint;

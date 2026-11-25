@@ -1,6 +1,6 @@
 /** GEE tools for the SDK profile, adapted from cdllI/dsh-gee (MIT). */
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkerPool } from './worker-pool.js';
@@ -21,6 +21,14 @@ const pool = new WorkerPool(workerOptions, Number(process.env.SATGPT_GEE_WORKERS
 const catalogReaders = new WorkerPool(workerOptions, 1);
 const catalogRefreshers = new WorkerPool(workerOptions, 1);
 const thumbnailWorkers = new WorkerPool(workerOptions, 1, 16);
+const flexthPython = process.env.SATGPT_FLEXTH_PYTHON?.trim();
+const flexthScript = process.env.SATGPT_FLEXTH_SCRIPT?.trim();
+const flexthDtm = process.env.SATGPT_FLEXTH_DTM?.trim();
+const flexthDtmSource = process.env.SATGPT_FLEXTH_DTM_SOURCE?.trim();
+const flexthWorkers = new WorkerPool({
+  ...workerOptions, python: flexthPython, service: 'FLEXTH',
+  worker: path.join(root, 'app', 'flexth_worker.py'),
+}, 1, 8);
 const catalogDir = process.env.SATGPT_CATALOG_CACHE;
 const catalog = new CatalogCoordinator(
   (owner, payload, signal, observe) => catalogReaders.run(owner, { ...payload, operation: 'catalog_read', catalog_dir: catalogDir },
@@ -35,7 +43,7 @@ const OSM_ANALYSIS_TOOL = 'gee_osm_analyze';
 const ROAD_FLOOD_TOOL = 'road_flood_exposure';
 const osmEnabled = process.env.SATGPT_OSM_TOOLS === '1';
 const TOOL_NAMES = ['gee_check', 'gee_status', 'gee_catalog', 'gee_eval', 'gee_preview', 'gee_layer', 'gee_publish_flood', 'flood_population_exposure',
-  'geo_data_search', 'geo_data_info',
+  'geo_data_search', 'geo_data_info', 'flexth_estimate',
   ...(osmEnabled ? [...OSM_TOOL_NAMES, OSM_ANALYSIS_TOOL, ROAD_FLOOD_TOOL] : []),
   ...(process.env.SATGPT_GEOCODING_URL?.trim() ? [GEOCODE_TOOL_NAME] : [])];
 const SKILL_NAMES = new Set(['flood-extent', 'flood-exposure', 'sentinel2-latest', 'rainfall-analysis']);
@@ -265,7 +273,8 @@ export function apply(ctx) {
   }) : null;
   ctx.on('dispose', () => {
     if (thumbnailWarmup) clearImmediate(thumbnailWarmup);
-    return Promise.all([pool.close(), catalogReaders.close(), catalogRefreshers.close(), thumbnailWorkers.close()]);
+    return Promise.all([pool.close(), catalogReaders.close(), catalogRefreshers.close(), thumbnailWorkers.close(),
+      flexthWorkers.close()]);
   });
 }
 
@@ -303,6 +312,8 @@ function registerFloodTools(ctx) {
         crs: { type: 'string', pattern: '^EPSG:32[67][0-9]{2}$' },
         scale: { type: 'integer', minimum: 5, maximum: 120 },
         minimum_coverage: { type: 'number', minimum: 0, maximum: 1 },
+        exclusion_role: { const: 'sensor_blindness', type: 'string',
+          description: 'Set only if class 2 consists entirely of documented within-scene sensor blind spots eligible for terrain-based propagation.' },
       },
       required: ['name', 'code', 'event', 'observed_at', 'source', 'dataset_id', 'method', 'scene_ids', 'crs', 'scale'],
     },
@@ -320,6 +331,38 @@ function registerFloodTools(ctx) {
           description: settings.method },
         legend: { type: 'categorical', labels: ['Newly inundated'] },
       }, exec);
+    },
+  });
+  ctx.tools.register({
+    name: 'flexth_estimate',
+    description: 'After explicit plan approval, estimate terrain-based water depth from a saved flood result in this conversation. Optionally infer inundation in documented sensor blind spots. Uses the saved flood grid and a configured DTM.',
+    parameters: { type: 'object', additionalProperties: false, properties: {
+      flood_data_ref: DATA_REF, expand_excluded: { type: 'boolean',
+        description: 'Enable propagation only when approved and class 2 is documented as sensor blindness.' },
+    }, required: ['flood_data_ref'] },
+    output: {
+      schema: { type: 'object', properties: { summary: { type: 'object', additionalProperties: true } },
+        required: ['summary'], additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value.summary) }],
+      presentationMeta: (_args, value) => value.layer ? {
+        ...value.reference, layer: value.layer, depth_result: value.summary,
+      } : {},
+    },
+    async execute({ flood_data_ref, expand_excluded }, exec) {
+      const id = exec.agent?.session?.id;
+      const binding = id && readBinding(String(id));
+      if (!binding) throw new Error('No active SatGPT run is registered for this session');
+      if (!flexthDtmSource || ![flexthPython, flexthScript, flexthDtm].every(file => file && path.isAbsolute(file) && existsSync(file))) {
+        return { summary: { status: 'unavailable',
+          reason: 'Configure the local FLEXTH interpreter, pinned script, DTM GeoTIFF and DTM source in the SatGPT backend.' } };
+      }
+      const { owner_id, task_id, run_id, geo_context, artifact_dir } = binding;
+      const result = await flexthWorkers.run(owner_id, {
+        flood_data_ref, expand_excluded, geo_context, artifact_dir,
+        script: flexthScript, dtm: flexthDtm, dtm_source: flexthDtmSource,
+      }, { signal: exec.signal, timeout: 110_000 });
+      if (exec.signal?.aborted) throw new Error('Tool call cancelled');
+      return { ...result, reference: { task_id, run_id } };
     },
   });
   ctx.tools.register({

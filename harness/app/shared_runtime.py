@@ -75,6 +75,8 @@ class SharedRuntime:
                      'SATGPT_OSM_SNAPSHOT_DIR': os.environ.get('SATGPT_OSM_SNAPSHOT_DIR', ''),
                      'SATGPT_GEOCODING_URL': os.environ.get('SATGPT_GEOCODING_URL', '').strip(),
                      'SATGPT_GEOCODING_LOCK_FILE': str(self.root / 'state' / 'nominatim-rate.sqlite3'),
+                     **{name: os.environ.get(name, '') for name in (
+                         'SATGPT_FLEXTH_PYTHON', 'SATGPT_FLEXTH_SCRIPT', 'SATGPT_FLEXTH_DTM', 'SATGPT_FLEXTH_DTM_SOURCE')},
                      'SATGPT_HARNESS_TIMING_LOG': os.environ.get('SATGPT_HARNESS_TIMING_LOG', ''),
                      'SATGPT_CATALOG_CACHE': str(self.home.parent / 'catalog'),
                      'SATGPT_CONTROL_TOKEN': self.token, 'SATGPT_CONTROL_PORT_FILE': str(port_file),

@@ -30,6 +30,7 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
   const detailsId = useId();
   const metadata = layer.metadata || {};
   const osm = Boolean(layer.dataUrl);
+  const storedRaster = layer.kind === 'image';
   const dataTime = metadata.observedAt || (osm ? 'OSM data time unavailable' : 'Observation date not provided');
   const bands = Array.isArray(layer.visualization?.bands) ? layer.visualization.bands.join(' / ') : '';
   const created = Date.parse(metadata.createdAt);
@@ -61,7 +62,7 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
     {osm && unavailable ? <p className="agent-layer-reload-error" role="alert">Unable to load the OpenStreetMap layer.</p> : null}
     {!osm && urgentReload ? <div className="agent-layer-reload-bar">
       <span role="status">{reload.reloading ? 'Reloading from Earth Engine…' : unavailable ? 'Layer unavailable or expired' : layer.reloadedAt ? 'Layer reloaded' : ''}</span>
-      {reloadAction}
+      {!storedRaster ? reloadAction : null}
     </div> : null}
     {reload.error ? <p className="agent-layer-reload-error" role="alert">{reload.error}</p> : null}
     {expanded ? <div className="agent-layer-details" id={detailsId}>
@@ -76,11 +77,13 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
       {layer.reloadedAt ? <p>Last reloaded: {new Date(layer.reloadedAt).toLocaleString('en-US', { hour12: false })}</p> : null}
       {layer.code ? <details className="agent-layer-code"><summary><Code2 size={14} />View generation code</summary>
         <CodeBlock code={layer.code} language="python" label="GEE Python" />
-      </details> : osm ? null : <p>Generation code is unavailable for this legacy layer.</p>}
-      {!osm && !layer.reloadable ? <p>{layer.reloadUnavailableReason || 'Original generation parameters are unavailable. Run the original analysis again.'}</p> : null}
+      </details> : osm || storedRaster ? null : <p>Generation code is unavailable for this legacy layer.</p>}
+      {!osm && !storedRaster && !layer.reloadable ? <p>{layer.reloadUnavailableReason || 'Original generation parameters are unavailable. Run the original analysis again.'}</p> : null}
       <div className="agent-layer-actions">
-        {!osm && !urgentReload ? reloadAction : null}
+        {!osm && !storedRaster && !urgentReload ? reloadAction : null}
         {osm ? <Button asChild variant="ghost" size="sm"><a href={publicPath(layer.dataUrl)} download>Download GeoJSON</a></Button> : null}
+        {layer.depthUrl ? <Button asChild variant="ghost" size="sm"><a href={publicPath(layer.depthUrl)} download>Download depth GeoTIFF</a></Button> : null}
+        {layer.extentUrl ? <Button asChild variant="ghost" size="sm"><a href={publicPath(layer.extentUrl)} download>Download extent GeoTIFF</a></Button> : null}
         <Button type="button" variant="ghost" size="sm" className="agent-layer-remove" aria-label={`Remove ${layer.name}`} onClick={() => onRemove(layer.id)}><Trash2 size={14} />Remove layer</Button>
       </div>
     </div> : null}

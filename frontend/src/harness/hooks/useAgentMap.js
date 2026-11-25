@@ -60,7 +60,7 @@ export function useAgentMap(conversationId, messages) {
           const needsReplacement = existing && ((layer.reload_version || 0) > existing.reloadVersion || (!existing.code && layer.code));
           if (existing && !needsReplacement) return;
           const spec = { ...messageLayerPresentation(layer, message),
-            id, kind: layer.kind === 'geojson' ? 'geojson' : 'gee',
+            id, kind: ['geojson', 'image'].includes(layer.kind) ? layer.kind : 'gee',
             bounds: messageLayerBounds(message, layer), visible: choices.current.visibility[id] ?? layer.visible };
           if (!existing) map.addLayer(spec);
           else map.replaceLayer(id, spec);

@@ -250,8 +250,9 @@ class TaskController:
                     return results
         return results
 
-    def artifact(self, owner, cid, task_id, filename, *, osm=False):
-        if not re.fullmatch(r'[0-9a-f]{32}\.' + ('geojson' if osm else 'png'), filename):
+    def artifact(self, owner, cid, task_id, filename, *, osm=False, flexth=False):
+        suffix = r'-(?:depth|extent)\.tif' if flexth else (r'\.geojson' if osm else r'\.png')
+        if not re.fullmatch(r'[0-9a-f]{32}' + suffix, filename):
             raise FileNotFoundError('Preview not found')
         with self.store.connect() as db:
             self.store.owned(db, owner, cid)
@@ -263,8 +264,13 @@ class TaskController:
                 for layer in (task.get('output') or {}).get('layers', [])
             ):
                 raise FileNotFoundError('OSM result not found')
+            if flexth and not any(
+                layer.get('kind') == 'image' and layer.get('artifact_ref') == filename.split('-', 1)[0]
+                for layer in (task.get('output') or {}).get('layers', [])
+            ):
+                raise FileNotFoundError('FLEXTH result not found')
         path = Path(self._artifact_fields(owner, cid, task_id)['artifact_dir']) / filename
-        if not path.is_file():
+        if not path.is_file() or (flexth and path.is_symlink()):
             raise FileNotFoundError('Preview not found')
         return path
 
@@ -550,6 +556,17 @@ class TaskController:
             code = value.get('code') or ''
             if 'layer' in value:
                 layer = {**value['layer'], 'bounds': layer_focus_bounds(value)}
+                if layer.get('kind') == 'image':
+                    ref = layer.get('artifact_ref')
+                    if not valid_ref(ref):
+                        continue
+                    cid, job_id = task.receipt['conversation_id'], task.receipt['id']
+                    image = f'/api/previews/{cid}/{job_id}/{ref}.png'
+                    download = f'/api/harness/conversations/{cid}/tasks/{job_id}/flexth/{ref}'
+                    layers.append({**layer, 'url': image, 'thumbnail': {'url': image},
+                                   'depth_url': f'{download}-depth.tif', 'extent_url': f'{download}-extent.tif',
+                                   'depth_result': value.get('depth_result')})
+                    continue
                 if layer.get('kind') == 'geojson':
                     ref = layer.get('artifact_ref')
                     render_as = layer.get('renderAs')
