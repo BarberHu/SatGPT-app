@@ -57,12 +57,21 @@ test('card has real static preview, metadata, legend, visibility/details/locate/
     expect(document.querySelector('[role=dialog] img').getAttribute('src')).toBe('/api/previews/test.png');
     await act(async () => document.querySelector('[role=dialog] button:last-child').click());
     await act(async () => node.querySelector('input').click());expect(onToggle).toHaveBeenCalledWith('terrain', false);
-    await act(async () => node.querySelector('[aria-label="Layer details 地形高程"]').click());
+    const locate = node.querySelector('[aria-label="Zoom to 地形高程"]');
+    const details = node.querySelector('[aria-label="Layer details 地形高程"]');
+    expect(locate.nextElementSibling).toBe(node.querySelector('.agent-layer-eye'));
+    expect(details.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => locate.click());
+    expect(onFocus).toHaveBeenCalledWith(layer);
+    expect(details.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => details.click());
     expect(node.textContent).toContain('USGS/SRTMGL1_003');
-    await act(async () => node.querySelector('[aria-label="Zoom to 地形高程"]').click());expect(onFocus).toHaveBeenCalledWith(layer);
+    expect(node.querySelectorAll('[aria-label="Zoom to 地形高程"]')).toHaveLength(1);
     await act(async () => node.querySelector('[aria-label="Remove 地形高程"]').click());expect(onRemove).toHaveBeenCalledWith('terrain');
     await act(async () => node.querySelector('.agent-layer-thumbnail img').dispatchEvent(new Event('error')));
     expect(node.querySelector('[aria-label="Static preview unavailable"]').textContent).toContain('Preview unavailable');
+    await act(async () => root.render(<MapLayerCard layer={{ ...layer, bounds: null }} onToggle={onToggle} onFocus={onFocus} onRemove={onRemove} />));
+    expect(node.querySelector('[aria-label="Zoom to 地形高程"]')).toBeNull();
   } finally { await act(async () => root.unmount());node.remove();delete globalThis.IS_REACT_ACT_ENVIRONMENT; }
 });
 

@@ -47,12 +47,16 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
           <span aria-hidden="true">·</span><span title={metadata.source}>{metadata.source || 'Google Earth Engine'}</span></div>
       </div>
       {osm ? null : <LayerLegend legend={layer.legend} unit={metadata.unit} />}
-      <label className="agent-layer-eye" title={`${layer.visible ? 'Hide' : 'Show'} ${layer.name}`}>
-        <input type="checkbox" aria-label={layer.name} checked={layer.visible} onChange={event => onToggle(layer.id, event.target.checked)} />
-        {layer.visible ? <Eye size={20} /> : <EyeOff size={20} />}
-      </label>
-      <Button type="button" variant="ghost" size="icon" className="agent-layer-more" aria-label={`Layer details ${layer.name}`}
-        aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}><MoreVertical size={19} /></Button>
+      <div className="agent-layer-controls">
+        {layer.bounds ? <Button type="button" variant="ghost" size="icon" className="agent-layer-locate"
+          aria-label={`Zoom to ${layer.name}`} title={`Zoom to ${layer.name}`} onClick={() => onFocus(layer)}><LocateFixed size={16} aria-hidden="true" /></Button> : null}
+        <label className="agent-layer-eye" title={`${layer.visible ? 'Hide' : 'Show'} ${layer.name}`}>
+          <input type="checkbox" aria-label={layer.name} checked={layer.visible} onChange={event => onToggle(layer.id, event.target.checked)} />
+          {layer.visible ? <Eye size={20} /> : <EyeOff size={20} />}
+        </label>
+        <Button type="button" variant="ghost" size="icon" className="agent-layer-more" aria-label={`Layer details ${layer.name}`}
+          aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}><MoreVertical size={19} /></Button>
+      </div>
     </div>
     {osm && unavailable ? <p className="agent-layer-reload-error" role="alert">Unable to load the OpenStreetMap layer.</p> : null}
     {!osm && urgentReload ? <div className="agent-layer-reload-bar">
@@ -77,7 +81,6 @@ export default function MapLayerCard({ layer, onToggle, onFocus, onRemove, onRel
       <div className="agent-layer-actions">
         {!osm && !urgentReload ? reloadAction : null}
         {osm ? <Button asChild variant="ghost" size="sm"><a href={publicPath(layer.dataUrl)} download>Download GeoJSON</a></Button> : null}
-        {layer.bounds ? <Button type="button" variant="ghost" size="sm" aria-label={`Zoom to ${layer.name}`} onClick={() => onFocus(layer)}><LocateFixed size={14} />Zoom to layer</Button> : null}
         <Button type="button" variant="ghost" size="sm" className="agent-layer-remove" aria-label={`Remove ${layer.name}`} onClick={() => onRemove(layer.id)}><Trash2 size={14} />Remove layer</Button>
       </div>
     </div> : null}

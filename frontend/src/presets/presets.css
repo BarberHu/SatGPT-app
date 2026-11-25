@@ -37,7 +37,8 @@
 .preset-empty { font-size: 12px; color: var(--satgpt-ui-muted); margin: 2px 0 8px; }
 .preset-layer-card { border-top: 1px solid var(--satgpt-ui-border); padding: 9px 0; }
 .preset-layer-card.is-hidden .preset-layer-row { opacity: .6; }
-.preset-layer-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 64px; align-items: start; gap: 7px 8px; }
+.preset-layer-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) var(--preset-layer-controls-width, 64px); align-items: start; gap: 7px 8px; }
+.preset-layer-row-with-locate { --preset-layer-controls-width: max-content; }
 .preset-road-entry { padding: 10px 7px 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 7px; }
 .preset-road-label { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .preset-road-label small { display: block; }
@@ -96,7 +97,7 @@
   .preset-library { bottom: auto; max-height: calc(100% - 40dvh); min-height: 140px; width: min(330px, calc(100vw - 64px)); border-radius: 0 0 12px 0; box-shadow: 4px 6px 24px #142b4525; }
   .preset-library header { padding: 10px 16px; }
   .preset-library h2 { font-size: 16px; }
-  .preset-layer-row { grid-template-columns: 42px minmax(0, 1fr) 56px; gap: 8px; }
+  .preset-layer-row { grid-template-columns: 42px minmax(0, 1fr) var(--preset-layer-controls-width, 56px); gap: 8px; }
   .preset-legend-cell { grid-column: 2; grid-row: 2; }
   .preset-layer-controls { grid-column: 3; grid-row: 1; }
   .basic-preset-workspace .agent-layer-thumbnail { width: 42px; height: 42px; }

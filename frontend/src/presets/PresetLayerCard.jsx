@@ -11,7 +11,7 @@ export default function PresetLayerCard({ row, store, stale, onEdit, onFocus, fi
   const metadata = layer?.metadata || {};
   const iconButton = (label, action, Icon, disabled = false) => <button type="button" title={label} aria-label={label} onClick={action} disabled={disabled}><Icon size={16} /></button>;
   return <article className={`preset-layer-card${row.visible ? '' : ' is-hidden'}`} aria-label={`Layer ${preset.title}`}>
-    <div className="preset-layer-row">
+    <div className="preset-layer-row preset-layer-row-with-locate">
       <Thumbnail basic layer={layer || { name: preset.title }} />
       <div className="preset-layer-name"><strong title={preset.title}>{preset.title}</strong>{preset.model ? <span className="preset-badge">Model-based index</span> : null}
         <small>{metadata.observedAt || (row.params.year_start ? `${row.params.year_start}–${row.params.year_end}` : row.params.time_start ? `${row.params.time_start} to ${row.params.time_end}` : 'Fixed dataset')}</small>
@@ -20,6 +20,7 @@ export default function PresetLayerCard({ row, store, stale, onEdit, onFocus, fi
       </div>
       <div className="preset-legend-cell">{layer ? <LayerLegend legend={layer.legend} unit={metadata.unit} /> : <span className="preset-status" role="status">{row.status === 'loading' ? 'Generating layer…' : row.status === 'queued' ? 'Queued…' : row.status === 'empty' ? 'No rendered data' : 'Generation failed'}</span>}</div>
       <div className="preset-layer-controls">
+        {iconButton('Locate layer', () => onFocus(row), LocateFixed)}
         {iconButton(`${row.visible ? 'Hide' : 'Show'} ${preset.title}`, () => store.patch(row.id, { visible: !row.visible }), row.visible ? Eye : EyeOff)}
         <button type="button" title={`Details for ${preset.title}`} aria-label={`Details for ${preset.title}`} aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}><MoreVertical size={16} /></button>
       </div>
@@ -31,7 +32,7 @@ export default function PresetLayerCard({ row, store, stale, onEdit, onFocus, fi
     <div id={detailsId} className="preset-layer-details" hidden={!expanded}>
         <div className="preset-menu-content">
           {iconButton('Move up', () => store.move(row.id, -1), ArrowUp, first)}{iconButton('Move down', () => store.move(row.id, 1), ArrowDown, last)}
-          {iconButton('Locate layer', () => onFocus(row), LocateFixed)}{iconButton('Remove layer', () => store.remove(row.id), Trash2)}
+          {iconButton('Remove layer', () => store.remove(row.id), Trash2)}
           <button type="button" onClick={() => onEdit(row)}>Edit layer</button>
           <button type="button" onClick={() => store.retry(row.id)}>Regenerate / retry</button>
         </div>
