@@ -162,13 +162,15 @@ def reduce_features(ee, image, settings, source_features):
     return reduced.map(lambda feature: feature.setGeometry(None))
 
 
-def evaluate_features(ee, image, settings, source_features):
+def evaluate_features(ee, image, settings, source_features, map_requests=map):
     items = list(source_features.items())
-    rows = []
-    for start in range(0, len(items), MAX_FEATURES):
+
+    def evaluate_batch(start):
         batch = dict(items[start:start + MAX_FEATURES])
-        rows.extend(reduce_features(ee, image, settings, batch).getInfo()['features'])
-    return {'features': rows}
+        return reduce_features(ee, image, settings, batch).getInfo()['features']
+
+    batches = map_requests(evaluate_batch, range(0, len(items), MAX_FEATURES))
+    return {'features': [row for batch in batches for row in batch]}
 
 
 def join_results(rows, features):

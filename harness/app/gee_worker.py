@@ -9,13 +9,16 @@ from __future__ import annotations
 import ast
 import builtins
 from collections import Counter
-from contextvars import ContextVar
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar, copy_context
+from datetime import datetime, timedelta, timezone
 import json
 import math
 import re
 import sys
 import uuid
 from pathlib import Path
+from threading import local
 from time import perf_counter_ns
 from types import SimpleNamespace
 from urllib.request import urlopen
@@ -68,7 +71,7 @@ def measured(stage, function, *args, **kwargs):
 def count_http_request():
     counter = _HTTP_REQUESTS.get()
     if counter is not None:
-        counter[0] += 1
+        counter.append(1)
 
 
 def install_http_counter():
@@ -88,6 +91,33 @@ def install_http_counter():
     _HTTP_COUNTER_INSTALLED = True
 
 
+class ThreadLocalGeeTransport:
+    def __init__(self):
+        self.local = local()
+
+    def request(self, *args, **kwargs):
+        transport = getattr(self.local, 'transport', None)
+        if transport is None:
+            # Use the pinned EE client's normal Requests adapter with a
+            # separate connection session per request thread.
+            from ee._cloud_api_utils import _Http
+            from requests import Session
+
+            transport = self.local.transport = _Http(Session())
+        return transport.request(*args, **kwargs)
+
+
+def map_two_gee_requests(function, items):
+    if len(items) < 2:
+        yield from map(function, items)
+        return
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        for start in range(0, len(items), 2):
+            pending = [executor.submit(copy_context().run, function, item) for item in items[start:start + 2]]
+            yield from (request.result() for request in pending)
+
+
 def earth_engine(project: str):
     """Keep one authenticated Earth Engine client for the worker lifetime."""
     global _SESSION, _PROJECT
@@ -102,7 +132,7 @@ def earth_engine(project: str):
     credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/earthengine"])
     if isinstance(credentials, UserCredentials) or not isinstance(credentials, ServiceCredentials):
         raise ValueError("GEE worker requires a service account credential")
-    ee.Initialize(credentials=credentials, project=project)
+    ee.Initialize(credentials=credentials, project=project, http_transport=ThreadLocalGeeTransport())
     _SESSION, _PROJECT = ee, project
     return ee
 
@@ -394,7 +424,8 @@ def execute(payload: dict) -> dict:
         image = run_code(ee, payload['code'], payload['analysis_context'])
         if not isinstance(image, ee.Image):
             raise TypeError('OSM analysis code must assign an ee.Image to result')
-        rows = measured('osm_reduce_features', evaluate_features, ee, image, settings, features)
+        map_requests = map_two_gee_requests if settings['mode'] == 'building_flood' else map
+        rows = measured('osm_reduce_features', evaluate_features, ee, image, settings, features, map_requests)
         return format_result(payload, settings, source, features, rows)
     if operation == "preview":
         image = run_code(ee, payload["code"], payload.get('analysis_context'))
@@ -556,7 +587,7 @@ def main() -> None:
             timings = [] if request.get('timing') is True else None
             operation = request['payload'].get('operation')
             if timings is not None and operation not in {'catalog', 'catalog_read', 'catalog_refresh'}:
-                requests = [0]
+                requests = []
             token = _TIMINGS.set(timings)
             http_token = _HTTP_REQUESTS.set(requests)
             try:
@@ -571,7 +602,7 @@ def main() -> None:
         if timings is not None:
             result['timings'] = timings
         if requests is not None:
-            result['http_requests'] = requests[0]
+            result['http_requests'] = len(requests)
         try:
             line = json.dumps(result, ensure_ascii=False, allow_nan=False)
         except (ValueError, TypeError):
@@ -579,7 +610,7 @@ def main() -> None:
             if timings is not None:
                 fallback['timings'] = timings
             if requests is not None:
-                fallback['http_requests'] = requests[0]
+                fallback['http_requests'] = len(requests)
             line = json.dumps(fallback)
         sys.stdout.write(line + "\n")
         sys.stdout.flush()
