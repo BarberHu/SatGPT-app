@@ -415,6 +415,9 @@ def execute(payload: dict) -> dict:
         except ValueError as exc:
             return {"valid": False, "errors": [str(exc)], "warnings": []}
         return {"valid": True, "errors": [], "warnings": code_warnings(code)}
+    if operation == 'flood_population':
+        from flood_population import estimate, prepare as prepare_flood_population
+        population_bounds = measured('validate', prepare_flood_population, payload)
     if operation == 'flood_publish':
         from flood_results import classify, grid_warnings, publication_grid, save
         publish_grid = measured('flood_grid', publication_grid, payload)
@@ -422,7 +425,7 @@ def execute(payload: dict) -> dict:
     # Reject local Python errors before credentials, ee.Initialize, or a GEE request.
     if operation in {"eval", "preview", "osm_analysis"}:
         measured('validate', checked_code, payload.get("code"), check_eval_arguments=operation == "eval")
-    elif operation not in {"status", "layer_thumbnail", "layer_thumbnail_warmup"}:
+    elif operation not in {"status", "layer_thumbnail", "layer_thumbnail_warmup", "flood_population"}:
         measured('validate', checked_code, payload.get("layer_code"))
         analysis_code = payload.get("analysis_code")
         if isinstance(analysis_code, str) and analysis_code.strip():
@@ -435,6 +438,14 @@ def execute(payload: dict) -> dict:
     if not project:
         raise ValueError("Missing GEE_PROJECT_ID. Set it in the project root .env.")
     ee = measured('ee_reuse' if _SESSION is not None and _PROJECT == project else 'ee_initialize', earth_engine, project)
+    if operation == 'flood_population':
+        output = measured('flood_population', estimate, ee, payload, population_bounds)
+        for key in ('event_start', 'event_end'):
+            if f'{key}_ms' in output:
+                output[f'{key}_utc'] = utc_timestamp(output[f'{key}_ms'])
+        if payload.get('show_on_map'):
+            add_population_layer(ee, payload, output)
+        return output
     if operation == 'layer_thumbnail_warmup':
         return {'initialized': True}
     if operation == "status":
@@ -560,6 +571,41 @@ def attach_thumbnail(ee, image, payload, output):
                 output['layer']['thumbnail_status'] = 'unavailable'
     else:
         output['layer']['thumbnail_status'] = 'missing_bounds'
+
+
+def add_population_layer(ee, payload, output):
+    from flood_population import display_code, GFD, WORLDPOP
+
+    if output['status'] != 'ok':
+        output['map_status'] = 'no_valid_exposure'
+        return
+    if output['joint_valid_flood_area_km2'] <= 0:
+        output['map_status'] = 'no_joint_flood'
+        return
+
+    code = display_code(payload)
+    context = payload['analysis_context']
+    start, end = (output.get(f'event_{key}_utc') for key in ('start', 'end'))
+    layer_payload = {
+        **payload, 'bounds': context['bounds'], 'defer_thumbnail': True,
+        'visualization': {'name': 'Population density in observed flooded areas',
+                          'bands': ['population_density'], 'min': 0, 'max': 10000,
+                          'palette': ['fff7bc', 'fec44f', 'fe9929', 'd95f0e', '993404']},
+        'metadata': {'source': 'Global Flood Database and WorldPop', 'dataset_id': f'{GFD}; {WORLDPOP}',
+                     'observed_at': ' to '.join(date for date in (start, end) if date), 'unit': 'people/km²',
+                     'description': (f"WorldPop {output['population_year']} native-cell density within the jointly "
+                                     f"observed flooded footprint of GFD event {output['event_id']}. "
+                                     'Areas without valid flood or population data are transparent.')},
+    }
+    try:
+        image = run_code(ee, code, context, clip_result=True)
+        display = {'layer': create_map_layer(image, layer_payload)}
+        attach_thumbnail(ee, image, layer_payload, display)
+    except Exception:
+        # A rendering error must not discard the verified exposure estimate.
+        output['map_status'] = 'failed'
+        return
+    output.update(display, display_code=code, map_status='published')
 
 
 def thumbnail_recipe_path(directory, ref):

@@ -34,7 +34,7 @@ let timingWriteFailed = false;
 const OSM_ANALYSIS_TOOL = 'gee_osm_analyze';
 const ROAD_FLOOD_TOOL = 'road_flood_exposure';
 const osmEnabled = process.env.SATGPT_OSM_TOOLS === '1';
-const TOOL_NAMES = ['gee_check', 'gee_status', 'gee_catalog', 'gee_eval', 'gee_preview', 'gee_layer', 'gee_publish_flood',
+const TOOL_NAMES = ['gee_check', 'gee_status', 'gee_catalog', 'gee_eval', 'gee_preview', 'gee_layer', 'gee_publish_flood', 'flood_population_exposure',
   'geo_data_search', 'geo_data_info',
   ...(osmEnabled ? [...OSM_TOOL_NAMES, OSM_ANALYSIS_TOOL, ROAD_FLOOD_TOOL] : []),
   ...(process.env.SATGPT_GEOCODING_URL?.trim() ? [GEOCODE_TOOL_NAME] : [])];
@@ -320,6 +320,30 @@ function registerFloodTools(ctx) {
           description: settings.method },
         legend: { type: 'categorical', labels: ['Newly inundated'] },
       }, exec);
+    },
+  });
+  ctx.tools.register({
+    name: 'flood_population_exposure',
+    description: 'After explicit plan approval, estimate population exposed to an approved numeric GFD event using legacy WorldPop counts and exact native-cell overlap. Set show_on_map when the approved plan includes an exposure map. Requires the confirmed rectangular AOI. Verifies local flood-product coverage before querying population.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        event_id: { type: 'integer', minimum: 1, maximum: 2147483647 },
+        country: { type: 'string', pattern: '^[A-Z]{3}$', description: 'WorldPop three-letter country code.' },
+        year: { type: 'integer', minimum: 2000, maximum: 2020 },
+        exclude_permanent_water: { type: 'boolean' },
+        show_on_map: { type: 'boolean', description: 'Publish the density layer in jointly valid flooded areas.' },
+      },
+      required: ['event_id', 'country', 'year', 'exclude_permanent_water'],
+    },
+    output: { schema: { type: 'object', additionalProperties: true },
+      render: (_args, { layer, reference, display_code, thumbnail_ref, ...summary }) =>
+        [{ type: 'text', text: JSON.stringify(summary) }],
+      presentationMeta: (_args, value) => value.layer ? { ...value.reference, layer: value.layer,
+        code: value.display_code, ...(value.thumbnail_ref && { thumbnail_ref: value.thumbnail_ref }) } : {},
+    },
+    async execute(args, exec) {
+      return runWithContext({ ...args, operation: 'flood_population' }, exec);
     },
   });
   if (!osmEnabled) return;
