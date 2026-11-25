@@ -147,6 +147,7 @@ class OSMQueryTests(unittest.IsolatedAsyncioTestCase):
             summary, content = await service.query("roads", "major", region, BOUNDS)
             self.assertEqual(await service.query("roads", "major", region, BOUNDS), (summary, content))
         self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].startswith("[out:json][timeout:25];"))
         self.assertIn("primary_link", calls[0])
         self.assertEqual(summary["by_category"], {"primary": 1})
         self.assertEqual(summary["osm_data_time"], "2026-11-01T00:00:00+00:00")

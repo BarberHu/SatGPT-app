@@ -10,7 +10,7 @@ const sharedDir = new URL('.', import.meta.url).pathname.endsWith('/satgpt-osm-t
 const shared = file => new URL(sharedDir + file, import.meta.url).href;
 const { OSM_TOOL_NAMES, readBinding, floodResultFor } = await import(shared('runtime-control.js'));
 const { WorkerPool } = await import(shared('worker-pool.js'));
-const DEFAULT_QUERY_TIMEOUT_MS = 22_000;
+const DEFAULT_QUERY_TIMEOUT_MS = 90_000;
 
 const summaryFields = ['status', 'count', 'by_category', 'source', 'source_mode', 'fallback_reason', 'source_version',
   'osm_data_time', 'osm_data_time_range', 'partition_count', 'attribution', 'license_url', 'skipped_geometry',

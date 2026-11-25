@@ -26,6 +26,7 @@ class OSMTransportTests(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             roads = OverpassQueries(client, "https://osm.test/interpreter")
+            self.assertEqual(roads.request_timeout, 35)
             first = asyncio.create_task(roads.query("roads", "major", None, BOUNDS))
             await asyncio.wait_for(started.wait(), 1)
             second = asyncio.create_task(roads.query("roads", "major", None, BOUNDS))

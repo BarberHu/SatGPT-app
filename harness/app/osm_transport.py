@@ -14,6 +14,7 @@ ROAD_CLASSES = (
 MAX_WAYS = 5_000
 MAX_OVERPASS_BYTES = 8_000_000
 MAX_RESULT_BYTES = 4_000_000
+OVERPASS_REQUEST_TIMEOUT_SECONDS = 35
 
 
 class RoadNetworkError(Exception):
@@ -53,7 +54,8 @@ def geometry_positions(coords):
 class OverpassClient:
     """Bounded transport and cache for OpenStreetMap queries."""
 
-    def __init__(self, client, endpoint, *, queue_timeout=4, request_timeout=10, cache_ttl=300):
+    def __init__(self, client, endpoint, *, queue_timeout=4,
+                 request_timeout=OVERPASS_REQUEST_TIMEOUT_SECONDS, cache_ttl=300):
         self.client = client
         self.endpoint = endpoint
         self.queue_timeout = queue_timeout

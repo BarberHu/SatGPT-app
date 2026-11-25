@@ -76,7 +76,7 @@ def _query(kind, category, bounds, limit):
         selection = f'(node["{key}"="{value}"]{bbox};way["{key}"="{value}"]{bbox};rel["{key}"="{value}"]["type"="multipolygon"]{bbox};);'
     else:
         selection = f'(way["building"]["building"!="no"]{bbox};rel["building"]["building"!="no"]["type"="multipolygon"]{bbox};);'
-    return f"[out:json][timeout:8];{selection}out geom {limit + 1};out count;"
+    return f"[out:json][timeout:25];{selection}out geom {limit + 1};out count;"
 
 
 def _read_candidates(body, limit):

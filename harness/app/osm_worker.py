@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness.app.osm_building_partitions import (BUILDING_DEADLINE_SECONDS, MAX_BUILDING_AREA_KM2,
                                                   ONLINE_DEADLINE_SECONDS, query_online_buildings)
 from harness.app.osm_queries import OverpassQueries, query_scope, validate_category
-from harness.app.osm_transport import RoadNetworkError
+from harness.app.osm_transport import OVERPASS_REQUEST_TIMEOUT_SECONDS, RoadNetworkError
 from harness.app.road_snapshot import query_snapshot
 from harness.app.regional_osm import query_regional_snapshot
 from harness.app.geo_index import get as indexed_data, publish as index_publication
@@ -169,7 +169,7 @@ async def main():
         hosts = os.environ[key].split(",")
         os.environ[key] = ",".join(re.sub(r"^\s*\[([\da-fA-F:.]*:[\da-fA-F:.]*)\]\s*$", r"\1", host) for host in hosts)
     async with httpx.AsyncClient(headers={"User-Agent": "SatGPT/OSM (OpenStreetMap data query)"},
-                                 timeout=httpx.Timeout(10, connect=5)) as client:
+                                 timeout=httpx.Timeout(OVERPASS_REQUEST_TIMEOUT_SECONDS, connect=5)) as client:
         endpoint = os.environ.get('SATGPT_OVERPASS_URL')
         service = OverpassQueries(client, endpoint) if endpoint else None
         try:
