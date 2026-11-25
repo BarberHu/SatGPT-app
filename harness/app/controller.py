@@ -331,8 +331,8 @@ class TaskController:
     def create(self, owner, prompt, bounds, cid, request_id, analysis_region=None, analysis_aoi=None,
                *, reasoning_effort=None):
         prompt = prompt.strip()
-        if not 3 <= len(prompt) <= 2000:
-            raise ValueError('The prompt must contain 3–2000 characters')
+        if not 1 <= len(prompt) <= 2000:
+            raise ValueError('The prompt must contain 1–2000 characters after trimming whitespace')
         analysis_region = validate_analysis_region(analysis_region)
         analysis_aoi = validate_analysis_aoi(analysis_aoi, analysis_region)
         bounds = region_bounds(analysis_region) if analysis_region else validate_bounds(bounds)
