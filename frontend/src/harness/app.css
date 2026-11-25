@@ -157,6 +157,10 @@
 .harness-app .agent-result-card > div { flex: 1; min-width: 0; }.harness-app .agent-result-card strong { display: block; color: var(--satgpt-ui-muted); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .harness-app .agent-result-card small { display: block; color: var(--satgpt-ui-subtle); font-size: 10px; margin-top: 3px; }.harness-app .agent-result-card button { font-size: 10px; padding: 0 7px; }
 .harness-app .agent-composer-wrap { padding: 12px 28px 16px; background: var(--satgpt-ui-canvas); flex: none; }
+.harness-app .agent-task-progress { display: flex; align-items: center; flex: none; gap: 7px; min-width: 0; padding: 6px 28px 0; color: var(--satgpt-ui-muted); font-size: 12px; line-height: 1.35; }
+.harness-app .agent-task-progress > svg { flex: none; color: var(--satgpt-ui-accent); }
+.harness-app .agent-task-progress-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-app .agent-task-progress-time { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .harness-app .agent-composer { max-width: 668px; margin: auto; padding: 13px 13px 10px; border: 1px solid var(--satgpt-ui-border); background: var(--satgpt-ui-soft); border-radius: 17px; box-shadow: var(--satgpt-ui-shadow); }
 .harness-app .agent-composer:focus-within { border-color: var(--satgpt-ui-accent); box-shadow: var(--satgpt-ui-focus); }
 .harness-app .agent-composer textarea { display: block; width: 100%; min-height: 40px; max-height: 160px; resize: none; border: 0; outline: 0; background: transparent; padding: 0 4px; font-size: 13px; line-height: 1.7; box-shadow: none; }
@@ -256,6 +260,7 @@
 }
 @media (max-width: 420px) {
   .harness-app .agent-message-content { padding: 24px 20px 30px; }.harness-app .agent-composer-wrap { padding-left: 14px; padding-right: 14px; }
+  .harness-app .agent-task-progress { padding-inline: 14px; }
   .harness-app .agent-markdown, .harness-app .agent-user-bubble { font-size: 13px; }
   .harness-app .agent-run-timeline > summary,
   .harness-app .agent-run-timeline > summary > .agent-assistant-label,

@@ -202,6 +202,7 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     id, type, task_id: 'job', conversation_id: 'webgis-test', ...data,
   }) }));
   const workDetails = () => node.querySelector('[aria-label="Run timeline"]');
+  const progress = () => node.querySelector('.agent-task-progress');
   const toggleDetails = () => act(async () => workDetails().querySelector(':scope > summary').click());
   const replyText = () => [...node.querySelectorAll('[aria-label="Assistant response"] .agent-markdown')]
     .map(part => part.textContent);
@@ -220,11 +221,21 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     expect(workDetails().textContent).toContain('gee_status');
     expect(workDetails().open).toBe(false);
     expect(replyText()).toEqual([firstNotice.text]);
+    expect(progress().textContent).toBe('Checking Earth Engine connection');
+    expect(progress().nextElementSibling).toBe(node.querySelector('.agent-composer-wrap'));
+    const progressBar = progress();
+    await act(async () => node.querySelector('.agent-message-scroller')
+      .dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })));
+    expect(node.querySelector('.agent-jump').textContent).toContain('Jump to latest');
     await toggleDetails();
     expect(workDetails().open).toBe(true);
     const doneTool = { ...runningTool, status: 'done', result: 'GEE 已连接' };
     await emit(source, 1, 'task', { patch: {}, timeline_ops: [{ op: 'put', row: doneTool }, { op: 'put', row: secondNotice }] });
     expect(node.querySelector('.agent-run-timeline code').textContent).toBe('GEE 已连接');
+    expect(progress().textContent).toBe('Analyzing');
+    expect(progress()).toBe(progressBar);
+    expect(node.querySelector('.agent-jump')).not.toBeNull();
+    await act(async () => node.querySelector('.agent-jump').click());
     await emit(source, 2, 'answer.start', { answer: { attempt_id: 'a', text: '', status: 'streaming' } });
     await emit(source, 3, 'answer.delta', { attempt_id: 'a', text: 'doomed draft', timeline_ops: [{ op: 'put', row: {
       id: 'text-a', seq: 2, kind: 'text', text: 'doomed draft', attempt_id: 'a', committed: false, turn: 1, step: 1,
@@ -236,6 +247,7 @@ test('real Agent surface streams, reconnects, settles once and restores after re
       } },
     ] });
     expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'doomed draft']);
+    expect(progress().textContent).toBe('Running an Earth Engine query');
     expect(workDetails().open).toBe(true);
     expect(workDetails().textContent).not.toContain(firstNotice.text);
     expect(node.querySelector('[data-kind="reasoning"]').textContent).toContain('first thought');
@@ -245,7 +257,9 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     await act(async () => source.onerror());
     expect(source.closed).toBe(false);
     expect(node.textContent).toContain('Reconnecting');
+    expect(progress().textContent).toBe('Reconnecting…');
     await act(async () => source.onopen());
+    expect(progress().textContent).toBe('Running an Earth Engine query');
     await emit(source, 3, 'answer.delta', { attempt_id: 'a', text: 'doomed draft' });
     await emit(source, 4, 'reasoning.delta', { attempt_id: 'a', text: 'first thought' });
     expect(node.textContent.match(/doomed draft/g)).toHaveLength(1);
@@ -297,6 +311,7 @@ test('real Agent surface streams, reconnects, settles once and restores after re
     active = null;
     await emit(restored, 11, 'task', { patch: { status: 'completed', timeline: savedTimeline, output: { message: 'final answer' } } });
     await flush();
+    expect(progress()).toBeNull();
     expect(node.textContent.match(/final answer/g)).toHaveLength(1);
     expect(replyText()).toEqual([firstNotice.text, secondNotice.text, 'final answer']);
     expect(workDetails()).toBe(openedDetails);

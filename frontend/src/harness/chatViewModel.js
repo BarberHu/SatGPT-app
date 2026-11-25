@@ -42,11 +42,19 @@ export function chatViewModel(messages, task, answer) {
   }));
   const busy = Boolean(task && isActiveTask(task.status));
   const settled = messages.some(item => item.role === 'assistant' && item.job_id === task?.id);
+  let activity = null;
   if (task && !settled && (busy || isTerminalTask(task.status))) {
     const finalText = task.status === 'failed' ? task.error : task.output?.message;
+    const reply = presentRun(task, busy, finalText, answer);
     items.push({ id: `task-${task.id}`, role: 'assistant', jobId: task.id,
-      ...presentRun(task, busy, finalText, answer), pending: busy,
+      ...reply, pending: busy,
       failed: task.status === 'failed', attachments: [], layers: [], code: '' });
+    if (busy) {
+      const tool = reply.timeline.findLast(row => row.kind === 'tool' && row.status === 'running');
+      const notice = reply.replyParts.at(-1);
+      activity = { id: task.id, status: task.status, createdAt: task.created_at ?? task.started_at,
+        tool: tool?.name, noticeId: notice?.attemptId ?? notice?.id };
+    }
   }
-  return { items, busy };
+  return { items, busy, activity };
 }

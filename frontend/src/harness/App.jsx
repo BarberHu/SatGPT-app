@@ -10,6 +10,7 @@ import { regionKey, selectionKey } from './map/regionSelection';
 import ConversationSidebar from './components/ConversationSidebar';
 import MessageList from './components/MessageList';
 import Composer from './components/Composer';
+import TaskProgress from './components/TaskProgress';
 import MapWorkspace from './components/MapWorkspace';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
@@ -160,6 +161,8 @@ export default function HarnessApp({ active = true }) {
             <MessageList key={conversationKey} items={chat.items} loading={chat.loading}
               reconnecting={chat.reconnecting} onSuggest={setPrompt} onFocusLayer={focusLayer} />
             {chat.error ? <div className="agent-chat-error" role="alert"><span>{chat.error}</span><Button type="button" variant="ghost" size="icon" aria-label="Dismiss error" onClick={chat.clearError}><X /></Button></div> : null}
+            {chat.activity ? <TaskProgress key={chat.activity.id} activity={chat.activity}
+              reconnecting={chat.reconnecting} stopping={chat.stopping} /> : null}
             <Composer value={prompt} onChange={setPrompt} onSend={send} onStop={chat.stop}
               region={region} onEditRegion={editRegion}
               reasoning={reasoning} reasoningEffort={reasoningEffort} onReasoningChange={chooseReasoning}
