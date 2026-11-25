@@ -22,6 +22,7 @@ from satgpt_config import integer
 from .agent import conversation_prompt, describe_run_failure
 from .identity import BrowserIdentity
 from .session_store import ACTIVE, SessionStore, encode, message, timestamp
+from .turn_usage import summarize_turn_usage
 from .shared_runtime import RuntimeUnavailable, SharedRuntime
 from .trace import add_harness_event, clean_text, remove_final_answer
 from .task_stream import TaskStream
@@ -128,6 +129,7 @@ class TaskController:
         self.timeout = integer('SATGPT_AGENT_DEADLINE_SECONDS')
         self.gee_workers = integer('SATGPT_GEE_WORKERS')
         self.timing_log = os.getenv('SATGPT_HARNESS_TIMING_LOG')
+        self.dev_turn_usage = os.getenv('SATGPT_DEV_TURN_USAGE') == '1'
         self.trace_secrets = tuple(key for name in ('AIHUBMIX_API_KEY', 'DEEPSEEK_API_KEY')
                                    if len(key := os.getenv(name, '')) >= 8)
         self.runtime = runtime_factory(self.root, self.state / 'dsh-home', self.gee_workers,
@@ -170,10 +172,16 @@ class TaskController:
         if self.rotating:
             raise AdmissionError('runtime_rotating', 'Harness is rotating idle sessions. Try again shortly.')
 
+    def _filter_dev_usage(self, record):
+        if not self.dev_turn_usage:
+            record.pop('dev_turn_usage', None)
+        return record
+
     def _view(self, db, owner, cid):
         row = self.store.owned(db, owner, cid)
         latest = self.store.latest(db, owner, cid)
-        return {'conversation_id': cid, 'messages': json.loads(row['messages']),
+        messages = [self._filter_dev_usage(item) for item in json.loads(row['messages'])]
+        return {'conversation_id': cid, 'messages': messages,
                 'active_task': latest['id'] if latest and latest['status'] in ACTIVE else None}
 
     def conversation(self, owner, cid):
@@ -351,7 +359,7 @@ class TaskController:
                     receipt = json.loads(previous['receipt'])
                     if row is None:
                         self.store.owned(db, owner, receipt['conversation_id'])
-                    return receipt
+                    return self._filter_dev_usage(receipt)
                 if reasoning_effort is not None:
                     reasoning = self.runtime.reasoning
                     if reasoning is None:
@@ -385,7 +393,7 @@ class TaskController:
             if task and task.owner == owner:
                 return copy.deepcopy(task.receipt)
         with self.store.connect() as db:
-            return self.store.read_task(db, owner, task_id)
+            return self._filter_dev_usage(self.store.read_task(db, owner, task_id))
 
     def stream(self, owner, task_id):
         with self.lock:
@@ -393,7 +401,7 @@ class TaskController:
             if task is not None and task.owner == owner:
                 return task.stream
             with self.store.connect() as db:
-                receipt = self.store.read_task(db, owner, task_id)
+                receipt = self._filter_dev_usage(self.store.read_task(db, owner, task_id))
             if receipt['status'] == 'queued':
                 stream = self.queued_streams.get(task_id)
                 if stream is None:
@@ -422,7 +430,7 @@ class TaskController:
                 self.wakeup.set()
                 return copy.deepcopy(task.receipt)
             with self.store.connect() as db:
-                receipt = self.store.read_task(db, owner, task_id)
+                receipt = self._filter_dev_usage(self.store.read_task(db, owner, task_id))
             if receipt['status'] != 'queued':
                 return receipt
             stream = self.queued_streams.get(task_id) or TaskStream(receipt, secrets=self.trace_secrets)
@@ -575,12 +583,13 @@ class TaskController:
                 codes.append(code)
         return {'layers': layers, 'previews': previews, 'code': '\n\n'.join(codes)}
 
-    def _settle(self, owner, job, stream, status, text, trace, output):
+    def _settle(self, owner, job, stream, status, text, trace, output, *, usage=None):
         trace = copy.deepcopy(trace)
         timeline = stream.finish_timeline(text if status == 'completed' else '')
+        diagnostics = {'dev_turn_usage': usage} if self.dev_turn_usage and usage is not None else {}
         receipt = {**job, 'status': status, 'revision': job['revision'] + 1,
                    'event_cursor': stream.sequence + 1,
-                   'trace': trace, 'timeline': timeline, 'finished_at': timestamp(),
+                   'trace': trace, 'timeline': timeline, 'finished_at': timestamp(), **diagnostics,
                    'error': text if status == 'failed' else None,
                    'output': {'message': text, **output} if status != 'failed' else None}
         if status == 'cancelled':
@@ -590,15 +599,15 @@ class TaskController:
             messages = json.loads(row['messages'])
             self.store.save_messages(db, row['id'], [*messages, message('assistant', text, job['id'],
                 status=status, trace=trace, timeline=timeline, started_at=job.get('started_at'),
-                finished_at=receipt['finished_at'], **output)])
+                finished_at=receipt['finished_at'], **output, **diagnostics)])
             self.store.save_task(db, receipt)
         self._task_timing('finished', job['id'], outcome=status)
         stream.update(**receipt)
         return receipt
 
-    def _finish(self, task, status, text, trace, output):
+    def _finish(self, task, status, text, trace, output, *, usage=None):
         with self.lock:
-            task.receipt = self._settle(task.owner, task.receipt, task.stream, status, text, trace, output)
+            task.receipt = self._settle(task.owner, task.receipt, task.stream, status, text, trace, output, usage=usage)
             del self.active[task.receipt['id']]
             self.wakeup.set()
             self.thumbnails.schedule(task.owner, task.receipt)
@@ -612,6 +621,7 @@ class TaskController:
         bridge = self.runtime.bridge
         bound = entered_run = quiescent = False
         status, text, trace, output = 'failed', 'Analysis failed.', [], {}
+        usage = {'status': 'unavailable'} if self.dev_turn_usage else None
         scope = {key: job[key] for key in ('bounds', 'analysis_region', 'analysis_aoi')}
         snapshot = {'task_id': job_id, 'conversation_id': cid, **scope}
         try:
@@ -649,6 +659,9 @@ class TaskController:
             entered_run = True
             result = native.run(prompt, on_notification=lambda notice: self._notify(task, notice, trace))
             quiescent = True
+            if self.dev_turn_usage:
+                usage = summarize_turn_usage(result.events, provider=self.runtime.provider,
+                                             model=getattr(self.runtime, 'model', None))
             binding.drained.wait(2)
             task.stream.reconcile(result.events)
             if result.finish_reason == 'aborted' and task.stop_requested is not None:
@@ -675,7 +688,7 @@ class TaskController:
                 raise RuntimeUnavailable('Unable to verify native task quiescence')
             if bound:
                 bridge.unbind(session_id, task.run_id)
-            self._finish(task, status, text, trace, output)
+            self._finish(task, status, text, trace, output, usage=usage)
         except Exception:
             with self.lock:
                 try:

@@ -5,6 +5,20 @@ import Markdown from './Markdown';
 import RunTimeline from './RunTimeline';
 import ResultCards from './ResultCards';
 
+function TurnUsage({ usage }) {
+  const { status, input_tokens, output_tokens, total_tokens, estimated_cost: cost } = usage;
+  const format = new Intl.NumberFormat('en-US');
+  const estimatedCost = cost?.currency === 'USD' && Number.isFinite(Number(cost.amount)) && Number(cost.amount) > 0
+    ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumSignificantDigits: 4 }).format(cost.amount)
+    : null;
+  return <div className="agent-turn-usage" aria-label="Turn usage">
+    <span>{status === 'unavailable' || !total_tokens ? 'Token usage unavailable' :
+      `${format.format(total_tokens)} tokens (${format.format(input_tokens)} input, ${format.format(output_tokens)} output)`}</span>
+    {status === 'partial' ? <span>Partial usage</span> : null}
+    <span>{estimatedCost ? `Estimated cost ${estimatedCost} (${cost.reference_route} list rates)` : 'Estimated cost unavailable'}</span>
+  </div>;
+}
+
 export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
   const user = message.role === 'user';
   return <article className={`agent-message harness-message harness-message--${message.role}`} aria-label={user ? 'Your message' : 'Assistant response'}>
@@ -22,6 +36,7 @@ export default function ChatMessage({ message, reconnecting, onFocusLayer }) {
       </div>)}
       {message.text ? <Markdown text={message.text} streaming={message.streaming} /> : null}
       <ResultCards message={message} onFocusLayer={onFocusLayer} />
+      {import.meta.env.DEV && !message.pending && message.usage ? <TurnUsage usage={message.usage} /> : null}
     </>}
   </article>;
 }

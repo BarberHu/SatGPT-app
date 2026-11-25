@@ -20,7 +20,8 @@ function presentRun(source, busy, finalText, answer) {
     && !replyParts.some(part => part.attemptId === answer.attempt_id)) {
     replyParts.push({ id: `settled-${answer.attempt_id}`, text: answer.text, streaming: false });
   }
-  return { text: finalText || '', timeline, replyParts, run: { status: busy ? (source.status || 'running') : source.status || 'completed',
+  return { text: finalText || '', timeline, replyParts, usage: busy ? undefined : source.dev_turn_usage,
+    run: { status: busy ? (source.status || 'running') : source.status || 'completed',
     startedAt: source.started_at, finishedAt: source.finished_at } };
 }
 

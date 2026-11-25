@@ -284,3 +284,5 @@
 .harness-app .agent-region-tools p { margin: 0 0 8px; font-size: 12px; line-height: 1.5; }
 .harness-app .agent-region-tools > div { display: flex; gap: 8px; }
 .harness-app .agent-message-scope { display: block; margin-top: 6px; font-size: 10px; opacity: .7; }
+
+.harness-app .agent-turn-usage { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: 12px; opacity: .74; font-variant-numeric: tabular-nums; }
