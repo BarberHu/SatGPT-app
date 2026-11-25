@@ -2,6 +2,15 @@
   config:
     personaPrefix: You are SatGPT's geospatial analysis assistant.
 
+- id: web
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: deepseek-fetch-api
+
+- id: web-deepseek-api
+  config:
+    sendOriginalQuestion: false
+
 - insert:
     - id: webgis-gee-tools
       name: '@local/webgis-gee-tools'

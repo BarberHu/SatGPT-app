@@ -43,7 +43,7 @@ const OSM_ANALYSIS_TOOL = 'gee_osm_analyze';
 const ROAD_FLOOD_TOOL = 'road_flood_exposure';
 const osmEnabled = process.env.SATGPT_OSM_TOOLS === '1';
 const TOOL_NAMES = ['gee_check', 'gee_status', 'gee_catalog', 'gee_eval', 'gee_preview', 'gee_layer', 'gee_publish_flood', 'flood_population_exposure',
-  'geo_data_search', 'geo_data_info', 'flexth_estimate',
+  'geo_data_search', 'geo_data_info', 'flexth_estimate', 'web_search', 'web_fetch',
   ...(osmEnabled ? [...OSM_TOOL_NAMES, OSM_ANALYSIS_TOOL, ROAD_FLOOD_TOOL] : []),
   ...(process.env.SATGPT_GEOCODING_URL?.trim() ? [GEOCODE_TOOL_NAME] : [])];
 const SKILL_NAMES = new Set(['flood-extent', 'flood-exposure', 'sentinel2-latest', 'rainfall-analysis']);

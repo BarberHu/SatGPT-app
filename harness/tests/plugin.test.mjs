@@ -12,6 +12,7 @@ test('GEE plugin requires a native bound session and delegates checks to the Pyt
   const control = path.join(folder, 'control');
   Object.assign(process.env, { WEBGIS_ROOT: root, SATGPT_RUN_BINDINGS: folder,
     SATGPT_HARNESS_PYTHON: process.env.PYTHON || 'python',
+    SATGPT_FLEXTH_PYTHON: '',
     SATGPT_CONTROL_TOKEN: 'test-token', SATGPT_CONTROL_PORT_FILE: control });
   await fs.writeFile(path.join(folder, id + '.json'), JSON.stringify({
     session_id: id, run_id: 'test', owner_id: 'b'.repeat(32), bounds: [100, 10, 101, 11],
@@ -36,12 +37,36 @@ test('GEE plugin requires a native bound session and delegates checks to the Pyt
     const check = registered.find(tool => tool.name === 'gee_check');
     const evaluate = registered.find(tool => tool.name === 'gee_eval');
     const layer = registered.find(tool => tool.name === 'gee_layer');
+    const population = registered.find(tool => tool.name === 'flood_population_exposure');
+    const flexth = registered.find(tool => tool.name === 'flexth_estimate');
     const exec = { agent: { session: { id } } };
     assert.ok(layer.parameters.properties.bounds);
+    assert.deepEqual(evaluate.parameters.properties.result_format.enum, ['scene_metadata']);
+    assert.deepEqual(population.parameters.required, ['event_id', 'country', 'year', 'exclude_permanent_water']);
+    assert.equal(population.parameters.properties.show_on_map.type, 'boolean');
+    const populationLayer = { name: 'Population density', url: 'test-tile-url' };
+    const populationResult = { exposed_people: 12, map_status: 'published', layer: populationLayer,
+      reference: { task_id: 'task', run_id: 'run' }, display_code: 'result = image', thumbnail_ref: 'thumb' };
+    assert.deepEqual(JSON.parse(population.output.render({}, populationResult)[0].text),
+      { exposed_people: 12, map_status: 'published' });
+    assert.deepEqual(population.output.presentationMeta({}, populationResult),
+      { task_id: 'task', run_id: 'run', layer: populationLayer, code: 'result = image', thumbnail_ref: 'thumb' });
+    assert.deepEqual(population.output.presentationMeta({}, { exposed_people: 0 }), {});
+    await assert.rejects(population.execute({ event_id: 4020, country: 'IDN', year: 2013,
+      exclude_permanent_water: true }, {}), /No active SatGPT run/);
+    const floodArgs = { flood_data_ref: 'g_' + 'a'.repeat(32) };
+    await assert.rejects(flexth.execute(floodArgs, {}), /No active SatGPT run/);
+    assert.equal((await flexth.execute(floodArgs, exec)).summary.status, 'unavailable');
     await assert.rejects(check.execute({ code: 'result=1' }, {}), /No active SatGPT run/);
     let visible;
     onAgentCreated({ agent: { ctx: { tools: { restrict: rule => { visible = rule.allow; } } } } });
-    assert.deepEqual(visible, [...registered.map(tool => tool.name), 'skill']);
+    const webTools = ['web_search', 'web_fetch'];
+    assert.deepEqual(new Set(visible), new Set([...registered.map(tool => tool.name), ...webTools, 'skill']));
+    for (const name of webTools) {
+      assert.equal(guard({ ...exec, name }), undefined);
+      assert.match(guard({ name }), /unavailable/);
+      assert.match(guard({ name, agent: { session: { id: 'unbound' } } }), /unavailable/);
+    }
     const loadSkill = name => ({ ...exec, name: 'skill', arguments: { name } });
     assert.equal(guard(loadSkill('flood-extent')), undefined);
     assert.equal(guard(loadSkill('flood-exposure')), undefined);

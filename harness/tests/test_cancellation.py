@@ -89,6 +89,7 @@ class NativeCancellationTests(unittest.TestCase):
             'DSH_PROVIDER':'deepseek-official', 'DSH_MODEL':'smoke-model',
             'DSH_REASONING_EFFORT':'default', 'DEEPSEEK_API_KEY':'local-fixture-key',
             'DEEPSEEK_BASE_URL':f'http://127.0.0.1:{model.server_port}',
+            'SATGPT_OSM_TOOLS': '0', 'SATGPT_GEOCODING_URL': '',
         }), patch.object(SharedRuntime, '_load_reasoning', load_after_transient_failures):
             root = Path(__file__).resolve().parents[1]
             controller = TaskController(root, state=Path(directory))
@@ -110,7 +111,8 @@ class NativeCancellationTests(unittest.TestCase):
                 self.assertEqual(len(offered_tools), 2)
                 expected_tools = {'gee_check', 'gee_eval', 'gee_layer', 'gee_preview',
                                   'gee_status', 'gee_catalog', 'skill',
-                                  'gee_publish_flood', 'geo_data_search', 'geo_data_info'}
+                                  'gee_publish_flood', 'flood_population_exposure', 'flexth_estimate',
+                                  'geo_data_search', 'geo_data_info', 'web_search', 'web_fetch'}
                 self.assertEqual(offered_tools, [expected_tools, expected_tools])
                 self.assertEqual(b.post(f'/api/harness/tasks/{ta}/cancel').status_code, 404)
                 a.post(f'/api/harness/tasks/{ta}/cancel').raise_for_status()
